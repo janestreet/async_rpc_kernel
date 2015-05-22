@@ -1,0 +1,400 @@
+open Core_kernel.Std
+open Async_kernel.Std
+
+module Time_ns = Async_kernel.Time_ns
+
+module P = Protocol
+module Reader = Transport.Reader
+module Writer = Transport.Writer
+
+module Header : sig
+  type t with bin_type_class
+  val v1 : t
+  val negotiate_version : t -> t -> int option
+end = struct
+  include P.Header
+
+  let v1 = [ 1 ]
+
+  let negotiate_version t1 t2 =
+    Set.max_elt (Set.inter (Int.Set.of_list t1) (Int.Set.of_list t2))
+end
+
+module Handshake_error = struct
+  module T = struct
+    type t =
+      | Eof
+      | Transport_closed
+      | Timeout
+      | Negotiation_failed
+      | Negotiated_unexpected_version of int
+    with sexp
+  end
+  include T
+  include Sexpable.To_stringable (T)
+
+  exception Handshake_error of t with sexp
+
+  let to_exn t = Handshake_error t
+end
+
+module Heartbeat_config = struct
+  type t =
+    { timeout    : Time_ns.Span.t
+    ; send_every : Time_ns.Span.t
+    } with sexp, bin_io
+
+  let default =
+    { timeout    = Time_ns.Span.of_sec 30.
+    ; send_every = Time_ns.Span.of_sec 10.
+    }
+end
+
+type response_handler
+  =  Nat0.t P.Response.t
+  -> read_buffer : Bigstring.t
+  -> read_buffer_pos_ref : int ref
+  -> [ `keep
+     | `wait of unit Deferred.t
+     | `remove of unit Rpc_result.t
+     | `remove_and_wait of unit Deferred.t
+     ]
+
+type t =
+  { description              : Info.t
+  ; heartbeat_config         : Heartbeat_config.t
+  ; reader                   : Reader.t
+  ; writer                   : Writer.t
+  ; open_queries             : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
+  ; close_started            : unit Ivar.t
+  ; close_finished           : Info.t Ivar.t
+  (* There's a circular dependency between connections and their implementation instances
+     (the latter depends on the connection state, which is given access to the connection
+     when it is created). *)
+  ; implementations_instance : Implementations.Instance.t Set_once.t
+  }
+with sexp_of
+
+let is_closed t = Ivar.is_full t.close_started
+
+let writer t = if is_closed t then Error `Closed else Ok t.writer
+
+let bytes_to_write t = Writer.bytes_to_write t.writer
+
+let dispatch t ~response_handler ~bin_writer_query ~query =
+  match writer t with
+  | Error `Closed -> Error `Closed
+  | Ok writer ->
+    Writer.send_bin_prot writer
+      (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
+      (Query query);
+    Option.iter response_handler ~f:(fun response_handler ->
+      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
+    Ok ()
+;;
+
+let make_dispatch_bigstring do_send t ~tag ~version buf ~pos ~len ~response_handler =
+  match writer t with
+  | Error `Closed -> Error `Closed
+  | Ok writer ->
+    let id = P.Query_id.create () in
+    let header : Nat0.t P.Message.t =
+      Query { tag; version; id; data = Nat0.of_int_exn len }
+    in
+    let result = do_send writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len in
+    Option.iter response_handler ~f:(fun response_handler ->
+      Hashtbl.set t.open_queries ~key:id ~data:response_handler);
+    Ok result
+;;
+
+let dispatch_bigstring =
+  make_dispatch_bigstring Writer.send_bin_prot_and_bigstring
+;;
+
+let schedule_dispatch_bigstring =
+  make_dispatch_bigstring Writer.send_bin_prot_and_bigstring_non_copying
+;;
+
+let handle_response t (response : _ P.Response.t) ~read_buffer ~read_buffer_pos_ref
+  : _ Transport.Handler_result.t =
+  match Hashtbl.find t.open_queries response.id with
+  | None -> Stop (Error (Rpc_error.Unknown_query_id response.id))
+  | Some response_handler ->
+    match response_handler response ~read_buffer ~read_buffer_pos_ref with
+    | `keep -> Continue
+    | `wait wait -> Wait wait
+    | `remove_and_wait wait ->
+      Hashtbl.remove t.open_queries response.id;
+      Wait wait
+    | `remove removal_circumstances ->
+      Hashtbl.remove t.open_queries response.id;
+      begin match removal_circumstances with
+      | Ok () -> Continue
+      | Error e ->
+        match e with
+        | Unimplemented_rpc _ -> Continue
+        | Bin_io_exn _
+        | Connection_closed
+        | Write_error _
+        | Uncaught_exn _
+        | Unknown_query_id _ -> Stop (Error e)
+      end
+;;
+
+let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
+  : _ Transport.Handler_result.t =
+  match msg with
+  | Heartbeat -> Continue
+  | Response response ->
+    handle_response t response ~read_buffer ~read_buffer_pos_ref
+  | Query query ->
+    let instance = Set_once.get_exn t.implementations_instance in
+    Implementations.Instance.handle_query instance
+      ~query ~aborted:(Ivar.read t.close_started)
+      ~read_buffer ~read_buffer_pos_ref
+;;
+
+let close_reason t = Ivar.read t.close_finished
+
+let close_finished t = Ivar.read t.close_finished >>| fun (_ : Info.t) -> ()
+
+let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
+  if not (is_closed t) then begin
+    Ivar.fill t.close_started ();
+    let reader_closed = Reader.close t.reader in
+    let implementations_instance_flushed =
+      match Set_once.get t.implementations_instance with
+      | None          -> Deferred.unit
+      | Some instance ->
+        let flushed = Implementations.Instance.flush instance in
+        if Deferred.is_determined flushed then begin
+          Implementations.Instance.stop instance;
+          flushed
+        end else begin
+          Deferred.any_unit
+            [ flushed
+            ; Clock_ns.after streaming_responses_flush_timeout
+            ; Writer.stopped t.writer
+            ]
+          >>| fun () ->
+          Implementations.Instance.stop instance
+        end
+    in
+    let writer_closed =
+      implementations_instance_flushed
+      >>= fun () ->
+      Writer.close t.writer
+    in
+    Deferred.all_unit [ reader_closed; writer_closed ]
+    >>> fun () ->
+    Ivar.fill t.close_finished reason;
+  end;
+  close_finished t;
+;;
+
+let on_message t =
+  let f buf ~pos ~len:_ : _ Transport.Handler_result.t =
+    let pos_ref = ref pos in
+    let nat0_msg = P.Message.bin_read_nat0_t buf ~pos_ref in
+    match
+      handle_msg t nat0_msg ~read_buffer:buf ~read_buffer_pos_ref:pos_ref
+    with
+    | Continue -> Continue
+    | Wait _ as res -> res
+    | Stop result ->
+      let reason =
+        let msg = "Rpc message handling loop stopped" in
+        match result with
+        | Ok () -> Info.of_string msg
+        | Error e -> Info.create msg e Rpc_error.sexp_of_t
+      in
+      don't_wait_for (close t ~reason);
+      Stop ()
+  in
+  Staged.stage f
+;;
+
+let heartbeat t ~last_heartbeat =
+  if not (is_closed t) then begin
+    let since_last_heartbeat = Time_ns.diff (Time_ns.now ()) last_heartbeat in
+    if Time_ns.Span.(>) since_last_heartbeat t.heartbeat_config.timeout then begin
+      let reason () =
+        sprintf !"No heartbeats received for %{sexp:Time_ns.Span.t}."
+           t.heartbeat_config.timeout
+      in
+      don't_wait_for (close t ~reason:(Info.of_thunk reason));
+    end else Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+  end
+
+let default_handshake_timeout = Time_ns.Span.of_sec 30.
+
+let cleanup t ~reason exn =
+  don't_wait_for (close ~reason t);
+  let error = match exn with
+    | Rpc_error.Rpc (error, (_ : Info.t)) -> error
+    | exn -> Uncaught_exn (Exn.sexp_of_t exn)
+  in
+  (* clean up open streaming responses *)
+  (* an unfortunate hack; ok because the response handler will have nothing
+     to read following a response where [data] is an error *)
+  let dummy_buffer = Bigstring.create 1 in
+  let dummy_ref = ref 0 in
+  Hashtbl.iter t.open_queries
+    ~f:(fun ~key:query_id ~data:response_handler ->
+      ignore (
+        response_handler
+          ~read_buffer:dummy_buffer
+          ~read_buffer_pos_ref:dummy_ref
+          { id   = query_id
+          ; data = Error error
+          }
+      ));
+  Bigstring.unsafe_destroy dummy_buffer
+;;
+
+let run_after_handshake t ~implementations ~connection_state =
+  let instance =
+    Implementations.instantiate implementations ~writer:t.writer
+      ~connection_description:t.description
+      ~connection_state:(connection_state t)
+  in
+  Set_once.set_exn t.implementations_instance instance;
+  let monitor = Monitor.create ~name:"RPC connection loop" () in
+  let reason name exn =
+    (exn, Info.tag (Info.of_exn exn) ("exn raised in RPC connection " ^ name))
+  in
+  Stream.iter
+    (Stream.interleave (Stream.of_list (
+       [ Stream.map ~f:(reason "loop" )
+           (Monitor.detach_and_get_error_stream monitor)
+       ; Stream.map ~f:(reason "Writer.t")
+           (Monitor.detach_and_get_error_stream (Writer.monitor t.writer))
+       ])))
+    ~f:(fun (exn, reason) -> cleanup t exn ~reason);
+  within ~monitor (fun () ->
+    let last_heartbeat = ref (Time_ns.now ()) in
+    every ~stop:(Ivar.read t.close_started) t.heartbeat_config.send_every
+      (fun () -> heartbeat t ~last_heartbeat:!last_heartbeat);
+    Reader.read_forever t.reader
+      ~on_message:(Staged.unstage (on_message t))
+      ~on_end_of_batch:(fun () -> last_heartbeat := Time_ns.now ())
+    >>> function
+    | Ok () -> ()
+    (* The protocol is such that right now, the only outcome of the other side closing the
+       connection normally is that we get an eof. *)
+    | Error (`Eof | `Closed) ->
+      cleanup t ~reason:(Info.of_string "EOF or connection closed")
+        (Rpc_error.Rpc (Connection_closed, t.description))
+  )
+;;
+
+let do_handshake t ~handshake_timeout =
+  if Writer.is_closed t.writer then
+    return (Error Handshake_error.Transport_closed)
+  else begin
+    Writer.send_bin_prot t.writer Header.bin_t.writer Header.v1;
+    (* If we use [max_connections] in the server, then this read may just hang until the
+       server starts accepting new connections (which could be never).  That is why a
+       timeout is used *)
+    Clock_ns.with_timeout handshake_timeout
+      (Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
+    >>| function
+    | `Timeout ->
+      (* There's a pending read, the reader is basically useless now, so we clean it
+         up. *)
+      don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
+      Error Handshake_error.Timeout
+    | `Result (Error `Eof   ) -> Error Eof
+    | `Result (Error `Closed) -> Error Transport_closed
+    | `Result (Ok header) ->
+      match Header.negotiate_version header Header.v1 with
+      | None -> Error Negotiation_failed
+      | Some 1 -> Ok ()
+      | Some i -> Error (Negotiated_unexpected_version i)
+  end
+;;
+
+let create
+      ?implementations
+      ~connection_state
+      ?(handshake_timeout = default_handshake_timeout)
+      ?(heartbeat_config = Heartbeat_config.default)
+      ?(description = Info.of_string "<created-directly>")
+      ({ reader; writer } : Transport.t)
+  =
+  let implementations =
+    match implementations with None -> Implementations.null () | Some s -> s
+  in
+  let t =
+    { description
+    ; heartbeat_config
+    ; reader
+    ; writer
+    ; open_queries   = Hashtbl.Poly.create ~size:10 ()
+    ; close_started  = Ivar.create ()
+    ; close_finished = Ivar.create ()
+    ; implementations_instance = Set_once.create ()
+    }
+  in
+  upon (Writer.stopped writer) (fun () ->
+    don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
+  do_handshake t ~handshake_timeout
+  >>| function
+  | Ok () ->
+    run_after_handshake t ~implementations ~connection_state;
+    Ok t
+  | Error error ->
+    Error (Handshake_error.to_exn error)
+;;
+
+let with_close
+      ?implementations
+      ?handshake_timeout
+      ?heartbeat_config
+      ~connection_state
+      transport
+      ~dispatch_queries
+      ~on_handshake_error =
+  let handle_handshake_error =
+    match on_handshake_error with
+    | `Call f -> f
+    | `Raise -> raise
+  in
+  create ?implementations ?handshake_timeout ?heartbeat_config
+    ~connection_state transport
+  >>= fun t ->
+  match t with
+  | Error e -> handle_handshake_error e
+  | Ok t ->
+    Monitor.protect
+      ~finally:(fun () ->
+        close t ~reason:(Info.of_string "Rpc.Connection.with_close finished")
+      ) (fun () ->
+        dispatch_queries t
+        >>= fun result ->
+        (match implementations with
+         | None -> Deferred.unit
+         | Some _ -> close_finished t)
+        >>| fun () ->
+        result
+      )
+;;
+
+let server_with_close ?handshake_timeout ?heartbeat_config transport ~implementations
+      ~connection_state ~on_handshake_error =
+  let on_handshake_error =
+    match on_handshake_error with
+    | `Call f -> `Call f
+    | `Raise -> `Raise
+    | `Ignore -> `Call (fun _ -> Deferred.unit)
+  in
+  with_close ?handshake_timeout ?heartbeat_config
+    transport ~implementations ~connection_state
+    ~on_handshake_error ~dispatch_queries:(fun _ -> Deferred.unit)
+;;
+
+let close
+      ?streaming_responses_flush_timeout
+      ?(reason = Info.of_string "Rpc.Connection.close")
+      t
+  = close ?streaming_responses_flush_timeout ~reason t
