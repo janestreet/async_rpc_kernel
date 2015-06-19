@@ -1,0 +1,13 @@
+# OASIS_START
+# DO NOT EDIT (digest: 0beb5b63b8f9be67a4050b023fcdbf8f)
+version = "112.35.00"
+description = "Platform-independent core of Async RPC library"
+requires =
+"async_kernel bin_prot comparelib core_kernel fieldslib pa_ounit sexplib"
+archive(byte) = "async_rpc_kernel.cma"
+archive(byte, plugin) = "async_rpc_kernel.cma"
+archive(native) = "async_rpc_kernel.cmxa"
+archive(native, plugin) = "async_rpc_kernel.cmxs"
+exists_if = "async_rpc_kernel.cma"
+# OASIS_STOP
+
