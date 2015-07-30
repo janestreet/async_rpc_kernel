@@ -91,6 +91,9 @@ module Menu : sig
   (** create a menu directly -- generally you should use [request] instead *)
   val create : Description.t list -> t
 
+  (** the internal name of this RPC -- for example to be used in [Rpc.Expert] to
+      distinguish it from other queries. *)
+  val rpc_name : string
 end
 
 module Connection_with_menu : sig

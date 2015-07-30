@@ -161,8 +161,7 @@ let close_finished t = Ivar.read t.close_finished >>| fun (_ : Info.t) -> ()
 let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
   if not (is_closed t) then begin
     Ivar.fill t.close_started ();
-    let reader_closed = Reader.close t.reader in
-    let implementations_instance_flushed =
+    begin
       match Set_once.get t.implementations_instance with
       | None          -> Deferred.unit
       | Some instance ->
@@ -179,13 +178,11 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
           >>| fun () ->
           Implementations.Instance.stop instance
         end
-    in
-    let writer_closed =
-      implementations_instance_flushed
-      >>= fun () ->
-      Writer.close t.writer
-    in
-    Deferred.all_unit [ reader_closed; writer_closed ]
+    end
+    >>> fun () ->
+    Writer.close t.writer
+    >>> fun () ->
+    Reader.close t.reader
     >>> fun () ->
     Ivar.fill t.close_finished reason;
   end;
@@ -223,33 +220,38 @@ let heartbeat t ~last_heartbeat =
            t.heartbeat_config.timeout
       in
       don't_wait_for (close t ~reason:(Info.of_thunk reason));
-    end else Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+    end else
+      Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
   end
 
 let default_handshake_timeout = Time_ns.Span.of_sec 30.
 
 let cleanup t ~reason exn =
   don't_wait_for (close ~reason t);
-  let error = match exn with
-    | Rpc_error.Rpc (error, (_ : Info.t)) -> error
-    | exn -> Uncaught_exn (Exn.sexp_of_t exn)
-  in
-  (* clean up open streaming responses *)
-  (* an unfortunate hack; ok because the response handler will have nothing
-     to read following a response where [data] is an error *)
-  let dummy_buffer = Bigstring.create 1 in
-  let dummy_ref = ref 0 in
-  Hashtbl.iter t.open_queries
-    ~f:(fun ~key:query_id ~data:response_handler ->
-      ignore (
-        response_handler
-          ~read_buffer:dummy_buffer
-          ~read_buffer_pos_ref:dummy_ref
-          { id   = query_id
-          ; data = Error error
-          }
-      ));
-  Bigstring.unsafe_destroy dummy_buffer
+  if not (Hashtbl.is_empty t.open_queries)
+  then begin
+    let error = match exn with
+      | Rpc_error.Rpc (error, (_ : Info.t)) -> error
+      | exn -> Uncaught_exn (Exn.sexp_of_t exn)
+    in
+    (* clean up open streaming responses *)
+    (* an unfortunate hack; ok because the response handler will have nothing
+       to read following a response where [data] is an error *)
+    let dummy_buffer = Bigstring.create 1 in
+    let dummy_ref = ref 0 in
+    Hashtbl.iter t.open_queries
+      ~f:(fun ~key:query_id ~data:response_handler ->
+        ignore (
+          response_handler
+            ~read_buffer:dummy_buffer
+            ~read_buffer_pos_ref:dummy_ref
+            { id   = query_id
+            ; data = Error error
+            }
+        ));
+    Hashtbl.clear t.open_queries;
+    Bigstring.unsafe_destroy dummy_buffer;
+  end
 ;;
 
 let run_after_handshake t ~implementations ~connection_state =

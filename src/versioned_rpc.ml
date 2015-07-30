@@ -397,6 +397,8 @@ module Menu = struct
 
   include Callee_converts.Rpc.Make (Model)
 
+  let rpc_name = Model.name
+
   module V1 = struct
     module T = struct
       let version = 1
@@ -492,8 +494,8 @@ module Caller_converts = struct
             ~name ~versions ~registry =
         let callee_versions = Menu.supported_versions menu ~rpc_name:name in
         let caller_versions = versions () in
-        return (most_recent_common_version ~rpc_name:name ~caller_versions ~callee_versions)
-        >>= function
+        match
+          most_recent_common_version ~rpc_name:name ~caller_versions ~callee_versions with
         | Error e -> return (Error e)
         | Ok version -> with_specific_version ~version ~connection ~name ~query ~registry
     end

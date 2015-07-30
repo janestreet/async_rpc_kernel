@@ -251,7 +251,7 @@ module Rpc : sig
       -> len : int
       -> handle_response : (Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
       -> handle_error : (Error.t -> unit)
-      -> unit
+      -> [ `Ok | `Connection_closed ]
 
   end
 end
@@ -323,6 +323,21 @@ module Pipe_rpc : sig
       updates. *)
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
+  (** [close_reason id] will be determined sometime after the pipe associated with [id] is
+      closed. Its value will indicate what caused the pipe to be closed. *)
+  val close_reason
+    :  Id.t
+    -> [
+      (** The RPC implementer closed the pipe. *)
+      | `Closed_remotely
+      (** You closed the pipe. *)
+      | `Closed_locally
+      (** An error occurred, e.g. a message could not be deserialized.  If the connection
+          closes before either side explicitly closes the pipe, it will also go into this
+          case. *)
+      | `Error of Error.t
+    ] Deferred.t
+
   val name    : (_, _, _) t -> string
   val version : (_, _, _) t -> int
 
@@ -374,6 +389,9 @@ module State_rpc : sig
        ) Result.t Or_error.t Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
+
+  val close_reason
+    : Id.t -> [ `Closed_remotely | `Closed_locally | `Error of Error.t ] Deferred.t
 
   val name    : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int

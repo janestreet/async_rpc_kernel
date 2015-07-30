@@ -135,8 +135,8 @@ module Rpc = struct
         make_dispatch Connection.dispatch_bigstring
           conn ~rpc_tag ~version buf ~pos ~len ~handle_response ~handle_error
       with
-      | Ok ()
-      | Error `Closed -> ()
+      | Ok () -> `Ok
+      | Error `Closed -> `Connection_closed
 
     let schedule_dispatch conn ~rpc_tag ~version buf ~pos ~len ~handle_response
           ~handle_error
@@ -263,12 +263,10 @@ module Streaming_rpc = struct
         t.bin_error_response.writer
     in
     { Implementation.
-      tag      = t.tag
-    ; version  = t.version
-    ; f        = Pipe_rpc (t.bin_query.reader,
-                           bin_init_writer,
-                           t.bin_update_response.writer,
-                           f);
+      tag     = t.tag
+    ; version = t.version
+    ; f =
+        Pipe_rpc (t.bin_query.reader, bin_init_writer, t.bin_update_response.writer, f);
     }
 
   let abort t conn id =
@@ -277,7 +275,7 @@ module Streaming_rpc = struct
         tag     = t.tag
       ; version = t.version
       ; id
-      ; data    = `Abort
+      ; data = `Abort
       }
     in
     ignore (
@@ -292,8 +290,22 @@ module Streaming_rpc = struct
         | Writing_updates_to_pipe      of 'a Pipe.Writer.t
     end
 
-    type 'a t =
-      { mutable state : 'a State.t }
+    type 'a t = { mutable state : 'a State.t }
+  end
+
+  module Pipe_metadata = struct
+    type t = {
+      query_id : P.Query_id.t;
+      close_reason :
+        [ `Closed_locally
+        | `Closed_remotely
+        | `Error of Error.t
+        ] Deferred.t;
+    }
+
+    let abort rpc conn t = abort rpc conn t.query_id
+
+    let close_reason t = t.close_reason
   end
 
   let dispatch t conn query =
@@ -302,10 +314,20 @@ module Streaming_rpc = struct
     in
     let query = `Query query in
     let query_id = P.Query_id.create () in
-    let server_closed_pipe = ref false in
     let open Response_state in
     let state =
       { state = Waiting_for_initial_response }
+    in
+    let close_reason = Ivar.create () in
+    let read_error pipe_w err =
+      Pipe.close pipe_w;
+      Ivar.fill_if_empty close_reason (`Error (Error.t_of_sexp (Rpc_error.sexp_of_t err)));
+      `remove (Error err)
+    in
+    let eof pipe_w =
+      Pipe.close pipe_w;
+      Ivar.fill_if_empty close_reason `Closed_remotely;
+      `remove (Ok ())
     in
     let response_handler ivar : Connection.response_handler =
       fun response ~read_buffer ~read_buffer_pos_ref ->
@@ -313,8 +335,7 @@ module Streaming_rpc = struct
         | Writing_updates_to_pipe pipe_w ->
           begin match response.data with
           | Error err ->
-            Pipe.close pipe_w;
-            `remove (Error err)
+            read_error pipe_w err
           | Ok len ->
             let data =
               bin_read_from_bigstring
@@ -325,13 +346,9 @@ module Streaming_rpc = struct
             in
             match data with
             | Error err ->
-              server_closed_pipe := true;
-              Pipe.close pipe_w;
-              `remove (Error err)
+              read_error pipe_w err
             | Ok `Eof ->
-              server_closed_pipe := true;
-              Pipe.close pipe_w;
-              `remove (Ok ())
+              eof pipe_w
             | Ok (`Ok len) ->
               let data =
                 bin_read_from_bigstring
@@ -341,19 +358,26 @@ module Streaming_rpc = struct
               in
               match data with
               | Error err ->
-                Pipe.close pipe_w;
-                `remove (Error err)
+                read_error pipe_w err
               | Ok data ->
                 if not (Pipe.is_closed pipe_w) then begin
                   Pipe.write_without_pushback pipe_w data;
-                  if t.client_pushes_back
-                  && (Pipe.length pipe_w) = (Pipe.size_budget pipe_w)
-                  then `wait (Pipe.downstream_flushed pipe_w
-                              >>| function
-                              | `Ok
-                              | `Reader_closed -> ())
-                  else `keep
+                  if
+                    t.client_pushes_back
+                    && (Pipe.length pipe_w) = (Pipe.size_budget pipe_w)
+                  then
+                    `wait
+                      (Pipe.downstream_flushed pipe_w
+                       >>| function
+                       | `Ok
+                       | `Reader_closed -> ())
+                  else
+                    `keep
                 end else
+                  (* There is an [upon] set up to send an abort message when the pipe is
+                     closed, so [`keep] is reasonable. We *don't* want [`remove (Ok ())],
+                     as that would cause an error when the server's acknowledgement of the
+                     abort comes in since the response handler would be removed. *)
                   `keep
           end
         | Waiting_for_initial_response ->
@@ -387,11 +411,18 @@ module Streaming_rpc = struct
                 let pipe_r, pipe_w = Pipe.create () in
                 (* Set a small buffer to reduce the number of pushback events *)
                 Pipe.set_size_budget pipe_w 100;
-                Ivar.fill ivar (Ok (Ok (query_id, initial, pipe_r)));
-                (Pipe.closed pipe_r >>> fun () ->
-                 if not !server_closed_pipe then abort t conn query_id);
-                Connection.close_finished conn >>> (fun () ->
-                  server_closed_pipe := true;
+                let metadata : Pipe_metadata.t =
+                  { query_id;
+                    close_reason = Ivar.read close_reason;
+                  }
+                in
+                Ivar.fill ivar (Ok (Ok (metadata, initial, pipe_r)));
+                upon (Pipe.closed pipe_r) (fun () ->
+                  if not (Ivar.is_full close_reason) then begin
+                    abort t conn query_id;
+                    Ivar.fill close_reason `Closed_locally;
+                  end);
+                upon (Connection.close_finished conn) (fun () ->
                   Pipe.close pipe_w);
                 state.state <- Writing_updates_to_pipe pipe_w;
                 `keep
@@ -409,7 +440,7 @@ module Pipe_rpc = struct
   type ('query, 'response, 'error) t = ('query, unit, 'response, 'error) Streaming_rpc.t
 
   module Id = struct
-    type t = P.Query_id.t
+    type t = Streaming_rpc.Pipe_metadata.t
   end
 
   let create ?client_pushes_back ~name ~version ~bin_query ~bin_response ~bin_error () =
@@ -447,7 +478,8 @@ module Pipe_rpc = struct
     | Ok (Error _) -> raise Pipe_rpc_failed
     | Ok (Ok pipe_and_id) -> pipe_and_id
 
-  let abort = Streaming_rpc.abort
+  let abort = Streaming_rpc.Pipe_metadata.abort
+  let close_reason = Streaming_rpc.Pipe_metadata.close_reason
 
   let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
@@ -464,7 +496,7 @@ module State_rpc = struct
     ('query, 'initial, 'response, 'error) Streaming_rpc.t
 
   module Id = struct
-    type t = P.Query_id.t
+    type t = Streaming_rpc.Pipe_metadata.t
   end
 
   let create ?client_pushes_back ~name ~version ~bin_query ~bin_state ~bin_update
@@ -506,7 +538,8 @@ module State_rpc = struct
     folding_map update_r ~init:state ~f:(fun b a -> update b a, a),
     id
 
-  let abort = Streaming_rpc.abort
+  let abort = Streaming_rpc.Pipe_metadata.abort
+  let close_reason = Streaming_rpc.Pipe_metadata.close_reason
 
   let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version

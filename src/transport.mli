@@ -25,7 +25,7 @@ module Reader : sig
   module type S = Transport_intf.Reader
   include S
 
-  val create : (module S with type t = 'a) -> 'a -> t
+  val pack : (module S with type t = 'a) -> 'a -> t
 
   (** Convenience function to wait for the first message and un-bin_prot it.
 
@@ -41,7 +41,7 @@ module Writer : sig
   module type S = Transport_intf.Writer
   include S
 
-  val create : (module S with type t = 'a) -> 'a -> t
+  val pack : (module S with type t = 'a) -> 'a -> t
 
   (** [can_send t = not (is_closed t || Deferred.is_determined (stopped t))] *)
   val can_send : t -> bool

@@ -1,3 +1,53 @@
+## 113.00.00
+
+- Fixed race in `Rpc` that caused double connection cleanup.
+
+    Two errors, `Connection_closed` and a Writer error,
+    `(Uncaught_exn(monitor.ml.Error_((exn(\"writer error\"....))))))`,
+    occurring at the same time will cleanup the connection twice and call
+    response_handler of open_queries twice with two different errors.
+
+    (((pid 31291) (thread_id 0))
+     ((human_readable 2015-05-25T10:47:18+0100)
+      (int63_ns_since_epoch 1432547238929886105))
+     "unhandled exception in Async scheduler"
+     ("unhandled exception"
+      ((monitor.ml.Error_
+        ((exn
+          ("Ivar.fill of full ivar" (Full _)
+           lib/async_kernel/src/ivar0.ml:329:14))
+         (backtrace
+          ("Raised at file \"error.ml\", line 7, characters 21-29"
+           "Called from file \"rpc.ml\", line 101, characters 8-31"
+           "Called from file \"connection.ml\", line 251, characters 8-172"
+           "Called from file \"core_hashtbl.ml\", line 244, characters 36-48"
+           "Called from file \"connection.ml\", line 248, characters 2-278"
+           "Called from file \"async_stream.ml\", line 49, characters 53-56"
+           "Called from file \"async_stream.ml\", line 21, characters 34-39"
+           "Called from file \"job_queue.ml\", line 124, characters 4-7" ""))
+         (monitor
+          (((name main) (here ()) (id 1) (has_seen_error true)
+            (is_detached false) (kill_index 0))))))
+       ((pid 31291) (thread_id 0)))))
+
+- Fixed bugs in `Rpc` in which a TCP connection's reader was closed before its
+  writer.
+
+- In `Versioned_rpc`, eliminated an unnecessary Async cycle when placing RPC
+  messages.
+
+- Added `Rpc.Pipe_rpc.close_reason` and `Rpc.State_rpc.close_reason`, which
+  give the reason why a pipe returned by an RPC was closed.
+
+    These functions take the IDs that are returned along with the pipes by
+    the dispatch functions, so the interface of `dispatch` did not need to
+    change.
+
+- Made `Rpc.Expert.dispatch` expose that the connection was closed, just like
+  `One_way.Expert.dispatch`.
+
+- Expose the name of the `Versioned_rpc.Menu` RPC.
+
 ## 112.35.00
 
 - Moved `Async_extra.Rpc` to its own library, `Async_kernel_rpc`, and

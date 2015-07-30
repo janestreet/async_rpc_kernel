@@ -20,7 +20,7 @@ module Reader = struct
 
   type t = T : (module S with type t = 'a) * 'a -> t
 
-  let create m t = T (m, t)
+  let pack m t = T (m, t)
 
   let sexp_of_t      (T ((module M), t)) = M.sexp_of_t      t
   let close          (T ((module M), t)) = M.close          t
@@ -55,7 +55,7 @@ module Writer = struct
 
   type t = T : 'a writer -> t
 
-  let create (type a) (module M : S with type t = a) t =
+  let pack (type a) (module M : S with type t = a) t =
     T { impl = (module M)
       ; t
       ; stopped = M.stopped t
@@ -120,6 +120,7 @@ type t =
 with sexp_of
 
 let close t =
-  let w = Writer.close t.writer in
-  let r = Reader.close t.reader in
-  w >>= fun () -> r
+  Writer.close t.writer
+  >>= fun () ->
+  Reader.close t.reader
+;;

@@ -2,7 +2,7 @@ OASISFormat:      0.3
 OCamlVersion:     >= 4.02.1
 FindlibVersion:   >= 1.3.2
 Name:             async_rpc_kernel
-Version:          112.35.00
+Version:          113.00.00
 Synopsis:         Platform-independent core of Async RPC library
 Authors:          Jane Street Group, LLC <opensource@janestreet.com>
 Copyrights:       (C) 2015 Jane Street Group LLC <opensource@janestreet.com>
