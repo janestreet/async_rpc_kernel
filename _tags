@@ -1,3 +1,51 @@
 # OASIS_START
+# DO NOT EDIT (digest: fb92da0af712d0b8d86bc65a2f7bbf90)
+# Ignore VCS directories, you can use the same kind of rule outside
+# OASIS_START/STOP if you want to exclude directories that contains
+# useless stuff for the build process
+true: annot, bin_annot
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Library async_rpc_kernel
+"src/async_rpc_kernel.cmxs": use_async_rpc_kernel
+"src/connection_intf.cmx": for-pack(Async_rpc_kernel)
+"src/connection.cmx": for-pack(Async_rpc_kernel)
+"src/description.cmx": for-pack(Async_rpc_kernel)
+"src/implementation.cmx": for-pack(Async_rpc_kernel)
+"src/implementations.cmx": for-pack(Async_rpc_kernel)
+"src/nat0.cmx": for-pack(Async_rpc_kernel)
+"src/protocol.cmx": for-pack(Async_rpc_kernel)
+"src/rpc_error.cmx": for-pack(Async_rpc_kernel)
+"src/rpc.cmx": for-pack(Async_rpc_kernel)
+"src/rpc_result.cmx": for-pack(Async_rpc_kernel)
+"src/std.cmx": for-pack(Async_rpc_kernel)
+"src/transport_intf.cmx": for-pack(Async_rpc_kernel)
+"src/transport.cmx": for-pack(Async_rpc_kernel)
+"src/util.cmx": for-pack(Async_rpc_kernel)
+"src/versioned_rpc.cmx": for-pack(Async_rpc_kernel)
+"src/writer_with_length.cmx": for-pack(Async_rpc_kernel)
+<src/*.ml{,i,y}>: package(async_kernel)
+<src/*.ml{,i,y}>: package(bin_prot)
+<src/*.ml{,i,y}>: package(bin_prot.syntax)
+<src/*.ml{,i,y}>: package(comparelib)
+<src/*.ml{,i,y}>: package(comparelib.syntax)
+<src/*.ml{,i,y}>: package(core_kernel)
+<src/*.ml{,i,y}>: package(custom_printf)
+<src/*.ml{,i,y}>: package(custom_printf.syntax)
+<src/*.ml{,i,y}>: package(fieldslib)
+<src/*.ml{,i,y}>: package(fieldslib.syntax)
+<src/*.ml{,i,y}>: package(pa_ounit)
+<src/*.ml{,i,y}>: package(pa_ounit.syntax)
+<src/*.ml{,i,y}>: package(sexplib)
+<src/*.ml{,i,y}>: package(sexplib.syntax)
+<src/*.ml{,i,y}>: package(threads)
 # OASIS_STOP
 <src/*.ml{,i}>: syntax_camlp4o
