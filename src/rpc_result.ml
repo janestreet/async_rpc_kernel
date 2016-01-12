@@ -1,13 +1,13 @@
 open Core_kernel.Std
 open Async_kernel.Std
 
-type 'a t = ('a, Rpc_error.t) Result.t with bin_io
+type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
 
 type located_error =
   { location : string
   ; exn : Exn.t
   }
-with sexp_of
+[@@deriving sexp_of]
 
 let uncaught_exn ~location exn =
   Error (Rpc_error.Uncaught_exn (sexp_of_located_error { location; exn }))
@@ -28,7 +28,14 @@ let try_with ?run ~location f =
   | Some x -> return (join x)
 ;;
 
-let or_error = function
+let or_error ~rpc_tag ~rpc_version ~connection_description = function
   | Ok x -> Ok x
-  | Error e -> Or_error.error "rpc" e Rpc_error.sexp_of_t
+  | Error rpc_error ->
+    Or_error.error_s
+      [%sexp
+        { rpc_error = (rpc_error : Rpc_error.t)
+        ; connection_description = (connection_description : Info.t)
+        ; rpc_tag = (rpc_tag : Protocol.Rpc_tag.t)
+        ; rpc_version = (rpc_version : int)
+        }]
 ;;

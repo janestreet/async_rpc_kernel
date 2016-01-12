@@ -1,3 +1,72 @@
+## 113.24.00
+
+- When `Transfer.Writer.send*` raises, send an error to the client.
+
+- Added `Pipe_rpc` in `Versioned_rpc.Both_convert`.
+
+- Switched to ppx.
+
+- Expose the lower-level registration hook in `Versioned_rpc`.
+
+- Allow custom handling of missed async\_rpc heartbeats.
+
+- Client-side State\_rpc `dispatch` function does not behave well when the reader side
+  of the pipe is closed.
+
+  It should gracefully abort the rpc instead of raising exceptions, or whatever it currently does.
+
+- Add `Rpc.Expert.implement` and `Rpc.Expert.implement'` with a similar
+  interface as `One_way.Expert.implement` but for 2-way rpcs.
+
+  Exceptions raised by an expert implementations are handled as follow:
+  - if the query has already been answered, stop the server (as for one-way expert)
+  - if not, send a `Rpc_error.Uncaught_exn` (as for 2-way rpc)
+
+- Adds `Rpc.Pipe_rpc.dispatch_iter`, plus a bunch of additional types to support
+  it. The main reason for this is to reduce space usage: `Pipe_rpc.dispatch`
+  followed by `Pipe.iter_without_pushback` consumes ~105 words in the steady state
+  (i.e., when no messages are coming in) while `dispatch_iter` consumes ~15. I'm
+  sure `dispatch` can be improved a lot, but a pipe by itself is 46 words, so it
+  can't possibly become as small as `dispatch_iter`.
+
+  Both cases can be made smaller by making `Connection.response_handler` a GADT
+  instead of a closure. I plan to do this later.
+
+  One annoying property of the interface is that the only way to cancel
+  a subscription is to use `Pipe_rpc.abort`, which has a terrible interface.
+  The logical way to improve the interface is to return a record of
+  a `Pipe_rpc.t`, a `Connection.t`, and a `Query_id.t`, which allocates an
+  additional few words. I'd kind of like to do this but it seems counter to the
+  goal of reducing space usage.
+
+- Adds `Rpc.Pipe_rpc.implement_direct`, which uses a "direct stream writer" to
+  write results to the other side, rather than using a `Pipe.Writer.t`. This
+  consumes much less memory, ~15 words per open query as opposed to ~225 for
+  a regular `Pipe_rpc` implementation.
+
+  A large part of the diff in this feature is the addition of a module
+  `Implementation_types`, which just contains copies of type definitions from
+  `Implementation` and `Implementations`. This is necessary to handle some cyclic
+  type definitions (both of these modules now depend on types defined in the other
+  module).
+
+  This is the implementation-side dual of `Pipe_rpc.dispatch_iter`.
+
+- Change `Command_rpc.Command` to use `Versioned_rpc.Callee_converts` instead of
+  `Versioned_rpc.Both_convert` so that commands can be constructed without client-side
+  conversions.  Clients remain free to use conversions or not, as appropriate.
+
+  Removed `val rpcs` from `Callee_converts` interfaces because nothing appears to use it,
+  and `Both_convert` does not provide it.  Now `Both_convert.S` can be supplied to satisfy
+  `Callee_converts.S`.
+
+- Annotate errors returned by the async-rpc library with the name of the RPC for
+  which the error was returned (if it's an rpc-level error) and a description of
+  the remote side of the connection (the ip:host if connected via a network
+  socket).
+
+- Bring back `val rpcs` in versioned\_rpc modules.
+
 ## 113.00.00
 
 - Fixed race in `Rpc` that caused double connection cleanup.

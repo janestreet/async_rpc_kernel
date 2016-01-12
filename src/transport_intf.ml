@@ -15,7 +15,7 @@ end
 
 
 module type Reader = sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   val close     : t -> unit Deferred.t
   val is_closed : t -> bool
@@ -32,8 +32,22 @@ module type Reader = sig
     -> ('a, [ `Eof | `Closed ]) Result.t Deferred.t
 end
 
+module Send_result = struct
+  type message_too_big =
+    { size             : int
+    ; max_message_size : int
+    }
+  [@@deriving sexp_of]
+
+  type 'a t =
+    | Sent of 'a
+    | Closed
+    | Message_too_big of message_too_big
+  [@@deriving sexp_of]
+end
+
 module type Writer = sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   val close     : t -> unit Deferred.t
   val is_closed : t -> bool
@@ -68,7 +82,7 @@ module type Writer = sig
     :  t
     -> 'a Bin_prot.Type_class.writer
     -> 'a
-    -> unit
+    -> unit Send_result.t
 
   val send_bin_prot_and_bigstring
     :  t
@@ -77,7 +91,7 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> unit
+    -> unit Send_result.t
 
   (** Same as [send_bin_prot_and_bigstring] but the bigstring can't be modified until the
       returned deferred becomes determined.  This can be used to avoid copying the
@@ -89,5 +103,5 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> unit Deferred.t
+    -> unit Deferred.t Send_result.t
 end

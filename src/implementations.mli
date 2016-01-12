@@ -26,8 +26,18 @@ val null : unit -> 'a t
 
 val lift : 'a t -> f:('b -> 'a) -> 'b t
 
+module Direct_stream_writer : sig
+  type 'a t = 'a Implementation_types.Direct_stream_writer.t
+
+  val close : _ t -> unit
+  val closed : _ t -> unit Deferred.t
+  val is_closed : _ t -> bool
+  val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
+  val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+end
+
 module Instance : sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   val handle_query
     :  t
@@ -79,9 +89,7 @@ val add_exn
 val descriptions : _ t -> Description.t list
 
 module Expert : sig
-  module Responder : sig
-    type t
-  end
+  module Responder = Implementation.Expert.Responder
 
   module Rpc_responder : sig
     type t = Responder.t

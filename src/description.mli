@@ -6,13 +6,13 @@ type t =
   { name    : string
   ; version : int
   }
-with compare, sexp_of, bin_io
+[@@deriving compare, sexp_of, bin_io]
 
 include Comparable.S with type t := t
 include Hashable  .S with type t := t
 
 module Stable : sig
   module V1 : sig
-    type nonrec t = t with compare, sexp, bin_io
+    type nonrec t = t [@@deriving compare, sexp, bin_io]
   end
 end

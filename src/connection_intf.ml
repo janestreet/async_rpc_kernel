@@ -4,13 +4,19 @@ open Async_kernel.Std
 (* The reason for defining this module type explicitly is so that we can internally keep
    track of what is and isn't exposed. *)
 module type S = sig
-  type t with sexp_of
+  type t [@@deriving sexp_of]
 
   module Heartbeat_config : sig
-    type t =
-      { timeout    : Time_ns.Span.t
-      ; send_every : Time_ns.Span.t
-      }
+    type t [@@deriving sexp, bin_io]
+
+    (** We try to send a heartbeat every [send_every]. If we don't get a heartbeat
+        for [timeout], kill the connection. [timeout] is checked every time a heartbeat
+        is sent.
+    *)
+    val create
+      :  timeout : Time_ns.Span.t
+      -> send_every : Time_ns.Span.t
+      -> t
   end
 
   (** Initiate an Rpc connection on the given transport.  [implementations] should be the
@@ -30,13 +36,19 @@ module type S = sig
       connections in your program, this can be useful for distinguishing them.
   *)
   val create
-    :  ?implementations   : 's Implementations.t
-    -> connection_state   : (t -> 's)
-    -> ?handshake_timeout : Time_ns.Span.t
-    -> ?heartbeat_config  : Heartbeat_config.t
-    -> ?description       : Info.t
+    :  ?implementations    : 's Implementations.t
+    -> connection_state    : (t -> 's)
+    -> ?handshake_timeout  : Time_ns.Span.t
+    -> ?heartbeat_config   : Heartbeat_config.t
+    -> ?description        : Info.t
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
+
+  val description : t -> Info.t
+
+  (** After [add_heartbeat_callback t f], [f ()] will be called on every subsequent
+      heartbeat to [t]. *)
+  val add_heartbeat_callback : t -> (unit -> unit) -> unit
 
   (** [close] starts closing the connection's transport, and returns a deferred that
       becomes determined when its close completes.  It is ok to call [close] multiple
@@ -68,7 +80,10 @@ module type S = sig
       internally upon errors or timeouts. *)
   val is_closed : t -> bool
 
+  (** [bytes_to_write] and [flushed] just call the similarly named functions on the
+      [Transport.Writer.t] within a connection. *)
   val bytes_to_write : t -> int
+  val flushed : t -> unit Deferred.t
 
   (** [with_close] tries to create a [t] using the given transport.  If a handshake error
       is the result, it calls [on_handshake_error], for which the default behavior is to
@@ -89,24 +104,24 @@ module type S = sig
       and not determine its result until you are done with the pipe, or use a different
       function like [create]. *)
   val with_close
-    :  ?implementations   : 's Implementations.t
-    -> ?handshake_timeout : Time_ns.Span.t
-    -> ?heartbeat_config  : Heartbeat_config.t
-    -> connection_state   : (t -> 's)
+    :  ?implementations    : 's Implementations.t
+    -> ?handshake_timeout  : Time_ns.Span.t
+    -> ?heartbeat_config   : Heartbeat_config.t
+    -> connection_state    : (t -> 's)
     -> Transport.t
-    -> dispatch_queries   : (t -> 'a Deferred.t)
-    -> on_handshake_error : [ `Raise | `Call of (Exn.t -> 'a Deferred.t) ]
+    -> dispatch_queries    : (t -> 'a Deferred.t)
+    -> on_handshake_error  : [ `Raise | `Call of (Exn.t -> 'a Deferred.t) ]
     -> 'a Deferred.t
 
   (** Runs [with_close] but dispatches no queries. The implementations are required
       because this function doesn't let you dispatch any queries (i.e., act as a client),
       it would be pointless to call it if you didn't want to act as a server.*)
   val server_with_close
-    :  ?handshake_timeout : Time_ns.Span.t
-    -> ?heartbeat_config  : Heartbeat_config.t
+    :  ?handshake_timeout  : Time_ns.Span.t
+    -> ?heartbeat_config   : Heartbeat_config.t
     -> Transport.t
-    -> implementations    : 's Implementations.t
-    -> connection_state   : (t -> 's)
-    -> on_handshake_error : [ `Raise | `Ignore | `Call of (Exn.t -> unit Deferred.t) ]
+    -> implementations     : 's Implementations.t
+    -> connection_state    : (t -> 's)
+    -> on_handshake_error  : [ `Raise | `Ignore | `Call of (Exn.t -> unit Deferred.t) ]
     -> unit Deferred.t
 end

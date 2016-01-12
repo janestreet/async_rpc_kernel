@@ -1,0 +1,7 @@
+version = "$(pkg_version)"
+description = "Platform-independent core of Async RPC library"
+requires = "async_kernel bin_prot core_kernel fieldslib ppx_assert.runtime-lib ppx_bench.runtime-lib ppx_expect.collector ppx_inline_test.runtime-lib sexplib typerep variantslib"
+archive(byte          ) = "async_rpc_kernel.cma"
+archive(native        ) = "async_rpc_kernel.cmxa"
+archive(native, plugin) = "async_rpc_kernel.cmxs"
+exists_if = "async_rpc_kernel.cma"

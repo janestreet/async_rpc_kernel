@@ -42,6 +42,8 @@ module Reader = struct
   ;;
 end
 
+module Send_result = Transport_intf.Send_result
+
 module Writer = struct
   module type S = Transport_intf.Writer
 
@@ -117,7 +119,7 @@ type t =
   { reader : Reader.t
   ; writer : Writer.t
   }
-with sexp_of
+[@@deriving sexp_of]
 
 let close t =
   Writer.close t.writer

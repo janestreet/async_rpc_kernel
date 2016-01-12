@@ -8,7 +8,7 @@ module Reader = Transport.Reader
 module Writer = Transport.Writer
 
 module Header : sig
-  type t with bin_type_class
+  type t [@@deriving bin_type_class]
   val v1 : t
   val negotiate_version : t -> t -> int option
 end = struct
@@ -28,24 +28,28 @@ module Handshake_error = struct
       | Timeout
       | Negotiation_failed
       | Negotiated_unexpected_version of int
-    with sexp
+    [@@deriving sexp]
   end
   include T
   include Sexpable.To_stringable (T)
 
-  exception Handshake_error of t with sexp
+  exception Handshake_error of (t * Info.t) [@@deriving sexp]
 
-  let to_exn t = Handshake_error t
+  let to_exn ~connection_description t = Handshake_error (t, connection_description)
 end
 
 module Heartbeat_config = struct
   type t =
-    { timeout    : Time_ns.Span.t
+    { timeout : Time_ns.Span.t
     ; send_every : Time_ns.Span.t
-    } with sexp, bin_io
+    }
+  [@@deriving sexp, bin_io]
+
+  let create ~timeout ~send_every =
+    { timeout ; send_every }
 
   let default =
-    { timeout    = Time_ns.Span.of_sec 30.
+    { timeout = Time_ns.Span.of_sec 30.
     ; send_every = Time_ns.Span.of_sec 10.
     }
 end
@@ -61,19 +65,22 @@ type response_handler
      ]
 
 type t =
-  { description              : Info.t
-  ; heartbeat_config         : Heartbeat_config.t
-  ; reader                   : Reader.t
-  ; writer                   : Writer.t
-  ; open_queries             : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
-  ; close_started            : unit Ivar.t
-  ; close_finished           : Info.t Ivar.t
+  { description         : Info.t
+  ; heartbeat_config    : Heartbeat_config.t
+  ; heartbeat_callbacks : (unit -> unit) list ref
+  ; reader              : Reader.t
+  ; writer              : Writer.t
+  ; open_queries        : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
+  ; close_started       : unit Ivar.t
+  ; close_finished      : Info.t Ivar.t
   (* There's a circular dependency between connections and their implementation instances
      (the latter depends on the connection state, which is given access to the connection
      when it is created). *)
-  ; implementations_instance : Implementations.Instance.t Set_once.t
+  ; implementations_instance     : Implementations.Instance.t Set_once.t
   }
-with sexp_of
+[@@deriving sexp_of]
+
+let description t = t.description
 
 let is_closed t = Ivar.is_full t.close_started
 
@@ -81,13 +88,32 @@ let writer t = if is_closed t then Error `Closed else Ok t.writer
 
 let bytes_to_write t = Writer.bytes_to_write t.writer
 
+let flushed t = Writer.flushed t.writer
+
+let handle_send_result : t -> 'a Transport.Send_result.t -> 'a = fun t r ->
+  match r with
+  | Sent x -> x
+  | Closed ->
+    (* All of the places we call [handle_send_result] check whether [t] is closed (usually
+       via the [writer] function above). This checks whether [t.writer] is closed, which
+       should not happen unless [t] is closed. *)
+    failwiths "RPC connection got closed writer" t sexp_of_t
+  | Message_too_big _ ->
+    raise_s [%sexp
+      "Message cannot be sent",
+      { reason     = (r : _ Transport.Send_result.t)
+      ; connection = (t : t)
+      }
+    ]
+
 let dispatch t ~response_handler ~bin_writer_query ~query =
   match writer t with
-  | Error `Closed -> Error `Closed
+  | Error `Closed as r -> r
   | Ok writer ->
     Writer.send_bin_prot writer
       (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
-      (Query query);
+      (Query query)
+    |> handle_send_result t;
     Option.iter response_handler ~f:(fun response_handler ->
       Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
     Ok ()
@@ -101,7 +127,10 @@ let make_dispatch_bigstring do_send t ~tag ~version buf ~pos ~len ~response_hand
     let header : Nat0.t P.Message.t =
       Query { tag; version; id; data = Nat0.of_int_exn len }
     in
-    let result = do_send writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len in
+    let result =
+      do_send writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len
+      |> handle_send_result t
+    in
     Option.iter response_handler ~f:(fun response_handler ->
       Hashtbl.set t.open_queries ~key:id ~data:response_handler);
     Ok result
@@ -157,6 +186,10 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
 let close_reason t = Ivar.read t.close_finished
 
 let close_finished t = Ivar.read t.close_finished >>| fun (_ : Info.t) -> ()
+
+let add_heartbeat_callback t f =
+  t.heartbeat_callbacks := f :: !(t.heartbeat_callbacks)
+;;
 
 let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
   if not (is_closed t) then begin
@@ -217,11 +250,13 @@ let heartbeat t ~last_heartbeat =
     if Time_ns.Span.(>) since_last_heartbeat t.heartbeat_config.timeout then begin
       let reason () =
         sprintf !"No heartbeats received for %{sexp:Time_ns.Span.t}."
-           t.heartbeat_config.timeout
+          t.heartbeat_config.timeout
       in
       don't_wait_for (close t ~reason:(Info.of_thunk reason));
-    end else
+    end else begin
       Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+      |> handle_send_result t
+    end
   end
 
 let default_handshake_timeout = Time_ns.Span.of_sec 30.
@@ -239,7 +274,7 @@ let cleanup t ~reason exn =
        to read following a response where [data] is an error *)
     let dummy_buffer = Bigstring.create 1 in
     let dummy_ref = ref 0 in
-    Hashtbl.iter t.open_queries
+    Hashtbl.iteri t.open_queries
       ~f:(fun ~key:query_id ~data:response_handler ->
         ignore (
           response_handler
@@ -279,7 +314,10 @@ let run_after_handshake t ~implementations ~connection_state =
       (fun () -> heartbeat t ~last_heartbeat:!last_heartbeat);
     Reader.read_forever t.reader
       ~on_message:(Staged.unstage (on_message t))
-      ~on_end_of_batch:(fun () -> last_heartbeat := Time_ns.now ())
+      ~on_end_of_batch:(fun () ->
+        last_heartbeat := Time_ns.now ();
+        List.iter !(t.heartbeat_callbacks) ~f:(fun f -> f ())
+      )
     >>> function
     | Ok () -> ()
     (* The protocol is such that right now, the only outcome of the other side closing the
@@ -294,7 +332,7 @@ let do_handshake t ~handshake_timeout =
   if Writer.is_closed t.writer then
     return (Error Handshake_error.Transport_closed)
   else begin
-    Writer.send_bin_prot t.writer Header.bin_t.writer Header.v1;
+    Writer.send_bin_prot t.writer Header.bin_t.writer Header.v1 |> handle_send_result t;
     (* If we use [max_connections] in the server, then this read may just hang until the
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
@@ -330,6 +368,7 @@ let create
   let t =
     { description
     ; heartbeat_config
+    ; heartbeat_callbacks = ref []
     ; reader
     ; writer
     ; open_queries   = Hashtbl.Poly.create ~size:10 ()
@@ -346,7 +385,7 @@ let create
     run_after_handshake t ~implementations ~connection_state;
     Ok t
   | Error error ->
-    Error (Handshake_error.to_exn error)
+    Error (Handshake_error.to_exn ~connection_description:description error)
 ;;
 
 let with_close
@@ -382,8 +421,8 @@ let with_close
       )
 ;;
 
-let server_with_close ?handshake_timeout ?heartbeat_config transport ~implementations
-      ~connection_state ~on_handshake_error =
+let server_with_close ?handshake_timeout ?heartbeat_config
+      transport ~implementations ~connection_state ~on_handshake_error =
   let on_handshake_error =
     match on_handshake_error with
     | `Call f -> `Call f

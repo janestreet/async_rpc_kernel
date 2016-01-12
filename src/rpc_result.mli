@@ -15,4 +15,9 @@ val try_with
   -> (unit -> 'a t Deferred.t)
   -> 'a t Deferred.t
 
-val or_error : 'a t -> 'a Or_error.t
+val or_error
+  : rpc_tag:Protocol.Rpc_tag.t
+  -> rpc_version:int
+  -> connection_description:Info.t
+  -> 'a t
+  -> 'a Or_error.t

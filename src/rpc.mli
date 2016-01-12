@@ -25,11 +25,11 @@ module Description : sig
     { name    : string
     ; version : int
     }
-  with compare, sexp_of
+  [@@deriving compare, sexp_of]
 
   module Stable : sig
     module V1 : sig
-      type nonrec t = t with compare, sexp, bin_io
+      type nonrec t = t [@@deriving compare, sexp, bin_io]
     end
   end
 end
@@ -253,13 +253,70 @@ module Rpc : sig
       -> handle_error : (Error.t -> unit)
       -> [ `Ok | `Connection_closed ]
 
+    (** Result of callbacks passed to [implement] and [implement']:
+
+        - [Replied] means that the response has already been sent using one of the
+          functions of [Responder]
+        - [Delayed_response d] means that the implementation is done using the input
+          bigstring, but hasn't send the response yet. When [d] becomes determined
+          it is expected that the response has been sent.
+
+        Note: it is not OK for an implementation to return:
+
+        {[
+          Delayed_response (Responder.schedule responder buf ~pos:... ~len:...)
+        ]}
+
+        where [buf] is the same bigstring as the one containing the query. This is because
+        it would indicate that [buf] can be overwritten even though it is still being used
+        by [Responder.schedule]. *)
+    type implementation_result =
+      | Replied
+      | Delayed_response of unit Deferred.t
+
+    val implement
+      :  (_, _) t
+      -> ('connection_state
+          -> Responder.t
+          -> Bigstring.t
+          -> pos : int
+          -> len : int
+          -> implementation_result Deferred.t)
+      -> 'connection_state Implementation.t
+
+    val implement'
+      :  (_, _) t
+      -> ('connection_state
+          -> Responder.t
+          -> Bigstring.t
+          -> pos : int
+          -> len : int
+          -> implementation_result)
+      -> 'connection_state Implementation.t
   end
+end
+
+module Pipe_close_reason : sig
+  type t =
+    (** You closed the pipe. *)
+    | Closed_locally
+    (** The RPC implementer closed the pipe. *)
+    | Closed_remotely
+    (** An error occurred, e.g. a message could not be deserialized.  If the connection
+        closes before either side explicitly closes the pipe, it will also go into this
+        case. *)
+    | Error of Error.t
 end
 
 module Pipe_rpc : sig
   type ('query, 'response, 'error) t
 
   module Id : sig type t end
+
+  module Metadata : sig
+    type t
+    val id : t -> Id.t
+  end
 
   val create
     (** If [client_pushes_back] is set, the client side of the connection will stop
@@ -299,6 +356,39 @@ module Pipe_rpc : sig
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
+  (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] query. *)
+  module Direct_stream_writer : sig
+    type 'a t
+
+    (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
+        the open case, [d] is determined when the message has been flushed from the
+        underlying [Transport.Writer.t]. *)
+    val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
+    val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+    val close : _ t -> unit
+    val closed : _ t -> unit Deferred.t
+    val is_closed : _ t -> bool
+  end
+
+  (** Similar to [implement], but you are given the writer instead of providing a writer
+      and the writer is a [Direct_stream_writer.t] instead of a [Pipe.Writer.t].
+
+      The main advantage of this interface is that it consumes far less memory per open
+      query.
+
+      Though the implementation function is given a writer immediately, the result of the
+      client's call to [dispatch] will not be determined until after the implementation
+      function returns. Elements written before the function returns will be queued up to
+      be written after the function returns.
+  *)
+  val implement_direct
+    :  ('query, 'response, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> 'response Direct_stream_writer.t
+        -> (unit, 'error) Result.t Deferred.t)
+    -> 'connection_state Implementation.t
+
   (** This has [(..., 'error) Result.t] as its return type to represent the possibility of
       the call itself being somehow erroneous (but understood - the outer [Or_error.t]
       encompasses failures of that nature).  Note that this cannot be done simply by
@@ -310,33 +400,64 @@ module Pipe_rpc : sig
     :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
-    -> ('response Pipe.Reader.t * Id.t, 'error) Result.t Or_error.t Deferred.t
+    -> ('response Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t Deferred.t
 
   val dispatch_exn
     :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
-    -> ('response Pipe.Reader.t * Id.t) Deferred.t
+    -> ('response Pipe.Reader.t * Metadata.t) Deferred.t
+
+  (** The input type of the [f] passed to [dispatch_iter]. *)
+  module Pipe_message : sig
+    type 'a t =
+      | Update of 'a
+      | Closed of [`By_remote_side | `Error of Error.t]
+  end
+
+  (** The output type of the [f] passed to [dispatch_iter]. This is analagous to a simple
+      [unit Deferred.t], with [Continue] being like [Deferred.unit], but it is made
+      explicit when no waiting should occur. *)
+  module Pipe_response : sig
+    type t =
+      | Continue
+      | Wait of unit Deferred.t
+  end
+
+  (** Calling [dispatch_iter t conn query ~f] is similar to calling [dispatch t conn
+      query] and then iterating over the result pipe with [f]. The main advantage it
+      offers is that its memory usage is much lower, making it more suitable for
+      situations where many queries are open at once.
+
+      [f] may be fed any number of [Update _] messages, followed by a single [Closed _]
+      message.
+
+      [f] can cause the connection to stop reading messages off of its underlying
+      [Reader.t] by returning [Wait _]. This is the same as what happens when a client
+      stops reading from the pipe returned by [dispatch] when the [Pipe_rpc.t] has
+      [client_pushes_back] set.
+
+      When successful, [dispatch_iter] returns an [Id.t] after the subscription is
+      started. This may be fed to [abort] with the same [Pipe_rpc.t] and [Connection.t] as
+      the call to [dispatch_iter] to cancel the subscription, which will fill in the
+      implementation's [aborted] [Deferred.t]. Calling it with a different [Pipe_rpc.t] or
+      [Connection.t] has undefined behavior.
+  *)
+  val dispatch_iter
+    :  ('query, 'response, 'error) t
+    -> Connection.t
+    -> 'query
+    -> f:('response Pipe_message.t -> Pipe_response.t)
+    -> (Id.t, 'error) Result.t Or_error.t Deferred.t
 
   (** [abort rpc connection id] given an RPC and the id returned as part of a call to
       dispatch, abort requests that the other side of the connection stop sending
       updates. *)
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
-  (** [close_reason id] will be determined sometime after the pipe associated with [id] is
-      closed. Its value will indicate what caused the pipe to be closed. *)
-  val close_reason
-    :  Id.t
-    -> [
-      (** The RPC implementer closed the pipe. *)
-      | `Closed_remotely
-      (** You closed the pipe. *)
-      | `Closed_locally
-      (** An error occurred, e.g. a message could not be deserialized.  If the connection
-          closes before either side explicitly closes the pipe, it will also go into this
-          case. *)
-      | `Error of Error.t
-    ] Deferred.t
+  (** [close_reason metadata] will be determined sometime after the pipe associated with
+      [metadata] is closed. Its value will indicate what caused the pipe to be closed. *)
+  val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
 
   val name    : (_, _, _) t -> string
   val version : (_, _, _) t -> int
@@ -354,6 +475,11 @@ module State_rpc : sig
   type ('query, 'state, 'update, 'error) t
 
   module Id : sig type t end
+
+  module Metadata : sig
+    type t
+    val id : t -> Id.t
+  end
 
   val create
     :  ?client_pushes_back : unit
@@ -384,14 +510,13 @@ module State_rpc : sig
     -> Connection.t
     -> 'query
     -> update : ('state -> 'update -> 'state)
-    -> ( 'state * ('state * 'update) Pipe.Reader.t * Id.t
+    -> ( 'state * ('state * 'update) Pipe.Reader.t * Metadata.t
        , 'error
        ) Result.t Or_error.t Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
 
-  val close_reason
-    : Id.t -> [ `Closed_remotely | `Closed_locally | `Error of Error.t ] Deferred.t
+  val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
 
   val name    : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int

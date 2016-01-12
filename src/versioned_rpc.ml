@@ -5,20 +5,20 @@ open Rpc
 
 let failed_conversion x =
   Error.create "type conversion failure" x
-    <:sexp_of<
+    [%sexp_of:
       [ `Msg | `Query | `Response | `Error | `State | `Update ]
       * [ `Rpc of string ]
       * [ `Version of int ]
       * exn
-    >>
+    ]
 
 let multiple_registrations x =
   Error.create "multiple rpc registrations" x
-    <:sexp_of< [ `Rpc of string ] * [ `Version of int ] >>
+    [%sexp_of: [ `Rpc of string ] * [ `Version of int ]]
 
 let unknown_version x =
   Error.create "unknown rpc version" x
-    <:sexp_of< string * int >>
+    [%sexp_of: string * int]
 
 module Callee_converts = struct
 
@@ -32,7 +32,7 @@ module Callee_converts = struct
       type ('query, 'response) t =
         { name     : string
         ; adapters : ('query, 'response) adapter Int.Map.t
-        } with fields
+        } [@@deriving fields]
 
       let create ~name = { name; adapters = Int.Map.empty }
 
@@ -46,13 +46,13 @@ module Callee_converts = struct
       let add { name; adapters } rpc adapter =
         if String.(<>) name (Rpc.name rpc)
         then Or_error.error "Rpc names don't agree" (name, Rpc.name rpc)
-               <:sexp_of< string * string >>
+               [%sexp_of: string * string]
         else
           let version = Rpc.version rpc in
           match Map.find adapters version with
           | Some _ ->
             Or_error.error
-              "Version already exists" (name, version) <:sexp_of< string * int >>
+              "Version already exists" (name, version) [%sexp_of: string * int]
           | None ->
             let adapters = Map.add adapters ~key:version ~data:adapter in
             Ok { name; adapters }
@@ -136,8 +136,8 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-          type query with bin_io
-          type response with bin_io
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
           val version : int
           val model_of_query : query -> Model.query
           val response_of_model : Model.response -> response
@@ -194,11 +194,11 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
-        type query
-        type response
-        type error
-      end) = struct
+      val name : string
+      type query
+      type response
+      type error
+    end) = struct
 
       let name = Model.name
 
@@ -223,76 +223,71 @@ module Callee_converts = struct
         in
         List.map (Hashtbl.data registry) ~f:(fun (i, _) -> i.implement ~log_version f)
 
-      let rpcs () = List.map ~f:(fun (_, rpcs) -> rpcs) (Int.Table.data registry)
+      let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
+
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       module type Version_shared = sig
-        type query with bin_io
-        type response with bin_io
-        type error with bin_io
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
+        type error [@@deriving bin_io]
         val version : int
         val model_of_query : query -> Model.query
         val error_of_model : Model.error -> error
         val client_pushes_back : bool
       end
 
-      module Register' (Version_i : sig
-          include Version_shared
-          val response_of_model : Model.response Queue.t -> response Queue.t Deferred.t
-        end) = struct
-
+      module Register_raw (Version_i : sig
+        include Version_shared
+        val response_of_model : Model.response Pipe.Reader.t -> response Pipe.Reader.t
+      end) = struct
         open Version_i
 
-        let rpc = Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
-                    ?client_pushes_back:(Option.some_if client_pushes_back ())
-                    ()
+        let rpc =
+          Pipe_rpc.create ~name ~version ~bin_query ~bin_response ~bin_error
+            ?client_pushes_back:(Option.some_if client_pushes_back ())
+            ()
 
         let () =
           let implement ~log_version f =
             Pipe_rpc.implement rpc (fun s q ~aborted ->
               log_version version;
-              match Result.try_with (fun () -> Version_i.model_of_query q) with
-              | Error exn ->
+              match Version_i.model_of_query q with
+              | exception exn ->
                 Error.raise
                   (failed_conversion (`Response, `Rpc name, `Version version, exn))
-              | Ok q ->
+              | q ->
                 f s ~version q ~aborted
-                >>| function
+                >>= function
                 | Ok pipe ->
-                  Ok (Pipe.map' pipe ~f:(fun r ->
-                    try_with (fun () -> Version_i.response_of_model r)
-                    >>| function
-                    | Ok r -> r
-                    | Error exn ->
-                      Error.raise
-                        (failed_conversion (`Response, `Rpc name, `Version version, exn))))
+                  Monitor.handle_errors
+                    (fun () -> return (Ok (Version_i.response_of_model pipe)))
+                    (fun exn -> Error.raise (
+                       failed_conversion (`Response, `Rpc name, `Version version, exn)))
                 | Error error ->
-                  match Result.try_with (fun () -> Version_i.error_of_model error) with
-                  | Ok error -> Error error
-                  | Error exn ->
-                    Error.raise
-                      (failed_conversion (`Error, `Rpc name, `Version version, exn))
+                  return (match Version_i.error_of_model error with
+                    | error -> Error error
+                    | exception exn ->
+                      Error.raise
+                        (failed_conversion (`Error, `Rpc name, `Version version, exn)))
             )
           in
           match Hashtbl.find registry version with
           | None ->
             Hashtbl.set registry ~key:version ~data:({ implement }, Any.Pipe rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
-
       end
 
       module Register (Version_i : sig
-          include Version_shared
-          val response_of_model : Model.response -> response
-        end) = struct
-        include Register' (struct
-            include Version_i
-            let response_of_model q = return (Queue.map q ~f:response_of_model)
-          end)
+        include Version_shared
+        val response_of_model : Model.response -> response
+      end) = struct
+        include Register_raw (struct
+          include Version_i
+          let response_of_model pipe = Pipe.map ~f:response_of_model pipe
+        end)
       end
-
     end
-
   end
 
   module One_way = struct
@@ -337,7 +332,7 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-          type msg with bin_io
+          type msg [@@deriving bin_io]
           val version : int
           val model_of_msg : msg -> Model.msg
         end) = struct
@@ -402,8 +397,8 @@ module Menu = struct
   module V1 = struct
     module T = struct
       let version = 1
-      type query = unit with bin_io
-      type response = (string * int) list with bin_io
+      type query = unit [@@deriving bin_io]
+      type response = (string * int) list [@@deriving bin_io]
       let model_of_query q = q
       let response_of_model r = r
     end
@@ -456,7 +451,7 @@ module Connection_with_menu = struct
     { connection : Connection.t
     ; menu       : Menu.t
     }
-  with fields
+  [@@deriving fields]
 
   let create connection =
     let open Deferred.Or_error.Monad_infix in
@@ -478,9 +473,9 @@ module Caller_converts = struct
         ( `Rpc rpc_name
         , `Caller_versions caller_versions
         , `Callee_versions callee_versions )
-        <:sexp_of< [ `Rpc of string ]
+        [%sexp_of: [ `Rpc of string ]
                     * [ `Caller_versions of Int.Set.t ]
-                    * [ `Callee_versions of Int.Set.t ] >>
+                    * [ `Callee_versions of Int.Set.t ]]
 
   module Dispatch = struct
     module Make (M : Monad) = struct
@@ -488,7 +483,7 @@ module Caller_converts = struct
       let with_specific_version ~version ~connection ~name ~query ~registry =
         match Hashtbl.find registry version with
         | None -> return (Error (unknown_version (name, version)))
-        | Some dispatch -> dispatch connection query
+        | Some (dispatch, _rpc) -> dispatch connection query
 
       let with_version_menu { Connection_with_menu. connection; menu } query
             ~name ~versions ~registry =
@@ -513,6 +508,7 @@ module Caller_converts = struct
 
       val dispatch_multi
         : Connection_with_menu.t -> query -> response Or_error.t Deferred.t
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
@@ -526,6 +522,8 @@ module Caller_converts = struct
 
       let registry = Int.Table.create ~size:1 ()
 
+      let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
+
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       let dispatch_multi conn_with_menu query =
@@ -535,8 +533,8 @@ module Caller_converts = struct
         Dispatch.Async.with_specific_version ~version ~connection ~query ~name ~registry
 
       module Register (Version_i : sig
-          type query with bin_io
-          type response with bin_io
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
           val version : int
           val query_of_model : Model.query -> query
           val model_of_response : response -> Model.response
@@ -562,7 +560,7 @@ module Caller_converts = struct
                   Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.set registry ~key:version ~data:dispatch
+          | None -> Hashtbl.set registry ~key:version ~data:(dispatch, Any.Rpc rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
@@ -581,29 +579,32 @@ module Caller_converts = struct
         :  version:int
         -> Connection.t
         -> query
-        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
            , error
            ) Result.t Or_error.t Deferred.t
 
       val dispatch_multi
         :  Connection_with_menu.t
         -> query
-        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Id.t
+        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
            , error
            ) Result.t Or_error.t Deferred.t
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
     module Make (Model : sig
-        val name : string
-        type query
-        type response
-        type error
-      end) = struct
+      val name : string
+      type query
+      type response
+      type error
+    end) = struct
 
       let name = Model.name
 
       let registry = Int.Table.create ~size:1 ()
+
+      let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
 
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
@@ -614,19 +615,21 @@ module Caller_converts = struct
         Dispatch.Async.with_specific_version ~version ~connection ~query ~name ~registry
 
       module type Version_shared = sig
-        type query with bin_io
-        type response with bin_io
-        type error with bin_io
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
+        type error [@@deriving bin_io]
         val version : int
         val query_of_model : Model.query -> query
         val model_of_error : error -> Model.error
         val client_pushes_back : bool
       end
 
-      module Register' (Version_i : sig
-          include Version_shared
-          val model_of_response : response Queue.t -> Model.response Queue.t Deferred.t
-        end) = struct
+      module Register_raw (Version_i : sig
+        include Version_shared
+        val model_of_response
+          :  response Pipe.Reader.t
+          -> Model.response Or_error.t Pipe.Reader.t
+      end) = struct
 
         open Version_i
 
@@ -637,48 +640,43 @@ module Caller_converts = struct
 
         let () =
           let dispatch conn q =
-            match Result.try_with (fun () -> Version_i.query_of_model q) with
-            | Error exn ->
+            match Version_i.query_of_model q with
+            | exception exn ->
               return
                 (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
-            | Ok q ->
+            | q ->
               Pipe_rpc.dispatch rpc conn q
               >>| fun result ->
               match result with
               | Error exn -> Error exn
               | Ok (Error e) ->
-                (match Result.try_with (fun () -> Version_i.model_of_error e) with
-                 | Ok e' -> Ok (Error e')
-                 | Error exn ->
+                (match Version_i.model_of_error e with
+                 | e' -> Ok (Error e')
+                 | exception exn ->
                    Error (failed_conversion (`Error, `Rpc name, `Version version, exn)))
               | Ok (Ok (pipe, id)) ->
-                let pipe =
-                  Pipe.map' pipe ~f:(fun r ->
-                    try_with (fun () -> Version_i.model_of_response r)
-                    >>| function
-                    | Ok r -> Queue.map r ~f:Result.return
-                    | Error exn ->
-                      let error =
-                        failed_conversion (`Response, `Rpc name, `Version version, exn)
-                      in
-                      Queue.of_list [Error error])
-                in
-                Ok (Ok (pipe, id))
+                Ok (Ok (Version_i.model_of_response pipe, id))
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.set registry ~key:version ~data:dispatch
+          | None -> Hashtbl.set registry ~key:version ~data:(dispatch, Any.Pipe rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
 
       module Register (Version_i : sig
-          include Version_shared
-          val model_of_response : response -> Model.response
-        end) = struct
-        include Register' (struct
-            include Version_i
-            let model_of_response q = return (Queue.map q ~f:model_of_response)
-          end)
+        include Version_shared
+        val model_of_response : response -> Model.response
+      end) = struct
+        include Register_raw (struct
+          include Version_i
+
+          let model_of_response rs =
+            Pipe.map rs ~f:(fun r ->
+              match Version_i.model_of_response r with
+              | r -> Ok r
+              | exception exn ->
+                Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
+        end)
       end
 
     end
@@ -692,6 +690,7 @@ module Caller_converts = struct
 
       val dispatch_multi
         : Connection_with_menu.t -> msg -> unit Or_error.t
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
@@ -704,13 +703,15 @@ module Caller_converts = struct
 
       let registry = Int.Table.create ~size:1 ()
 
+      let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
+
       let versions () = Int.Set.of_list (Int.Table.keys registry)
 
       let dispatch_multi conn_with_menu msg =
         Dispatch.Direct.with_version_menu conn_with_menu msg ~name ~versions ~registry
 
       module Register (Version_i : sig
-          type msg with bin_io
+          type msg [@@deriving bin_io]
           val version : int
           val msg_of_model : Model.msg -> msg
         end) = struct
@@ -728,7 +729,7 @@ module Caller_converts = struct
               One_way.dispatch rpc conn q
           in
           match Hashtbl.find registry version with
-          | None -> Hashtbl.set registry ~key:version ~data:dispatch
+          | None -> Hashtbl.set registry ~key:version ~data:(dispatch, Any.One_way rpc)
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
@@ -757,6 +758,7 @@ module Both_convert = struct
         -> ('state -> version:int -> callee_query -> callee_response Deferred.t)
         -> 'state Implementation.t list
 
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
 
       val name : string
@@ -774,13 +776,13 @@ module Both_convert = struct
       module Caller = Caller_converts.Rpc.Make (struct let name = name include Caller end)
       module Callee = Callee_converts.Rpc.Make (struct let name = name include Callee end)
 
-      TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+      let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
       module Register (Version : sig
           open Model
           val version : int
-          type query    with bin_io
-          type response with bin_io
+          type query    [@@deriving bin_io]
+          type response [@@deriving bin_io]
           val query_of_caller_model : Caller.query -> query
           val callee_model_of_query : query -> Callee.query
           val response_of_callee_model : Callee.response -> response
@@ -796,7 +798,7 @@ module Both_convert = struct
             let query_of_model    = query_of_caller_model
             let model_of_response = caller_model_of_response
           end)
-        TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+        let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
       end
 
       let dispatch_multi = Caller.dispatch_multi
@@ -804,8 +806,117 @@ module Both_convert = struct
       let implement_multi = Callee.implement_multi
 
       (* Note: Caller.versions is the same as Callee.versions, so it doesn't matter which
-         one we call here *)
+         one we call here. Same for [rpcs]. *)
       let versions () = Caller.versions ()
+
+      let rpcs () = Caller.rpcs ()
+    end
+  end
+
+  module Pipe_rpc = struct
+    module type S = sig
+      type caller_query
+      type callee_query
+      type caller_response
+      type callee_response
+      type caller_error
+      type callee_error
+
+      val dispatch_multi
+        :  Connection_with_menu.t
+        -> caller_query
+        -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
+           , caller_error
+           ) Result.t Or_error.t Deferred.t
+
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+            -> version : int
+            -> callee_query
+            -> aborted : unit Deferred.t
+            -> (callee_response Pipe.Reader.t, callee_error) Result.t Deferred.t)
+        -> 'state Implementation.t list
+
+      val rpcs : unit -> Any.t list
+      val versions : unit -> Int.Set.t
+
+      val name : string
+    end
+
+    module Make (Model : sig
+        val name : string
+        module Caller : sig type query type response type error end
+        module Callee : sig type query type response type error end
+      end) = struct
+      open Model
+
+      let name = name
+
+      module Caller = Caller_converts.Pipe_rpc.Make (struct let name = name include Caller end)
+      module Callee = Callee_converts.Pipe_rpc.Make (struct let name = name include Callee end)
+
+      let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+
+      module type Version_shared = sig
+        val version : int
+        type query    [@@deriving bin_io]
+        type response [@@deriving bin_io]
+        type error    [@@deriving bin_io]
+        val query_of_caller_model : Model.Caller.query -> query
+        val callee_model_of_query : query -> Model.Callee.query
+        val error_of_callee_model : Model.Callee.error -> error
+        val caller_model_of_error : error -> Model.Caller.error
+        val client_pushes_back : bool
+      end
+
+      module Register_raw (Version_i : sig
+          include Version_shared
+          val response_of_callee_model
+            : Model.Callee.response Pipe.Reader.t -> response Pipe.Reader.t
+          val caller_model_of_response
+            : response Pipe.Reader.t -> Model.Caller.response Or_error.t Pipe.Reader.t
+        end) = struct
+        include Callee.Register_raw (struct
+            include Version_i
+            let model_of_query    = callee_model_of_query
+            let response_of_model = response_of_callee_model
+            let error_of_model    = error_of_callee_model
+          end)
+        include Caller.Register_raw (struct
+            include Version_i
+            let query_of_model    = query_of_caller_model
+            let model_of_response = caller_model_of_response
+            let model_of_error    = caller_model_of_error
+          end)
+      end
+
+      module Register (Version_i : sig
+          include Version_shared
+          val response_of_callee_model : Model.Callee.response -> response
+          val caller_model_of_response : response -> Model.Caller.response
+        end) = struct
+        include Callee.Register (struct
+            include Version_i
+            let model_of_query    = callee_model_of_query
+            let response_of_model = response_of_callee_model
+            let error_of_model    = error_of_callee_model
+          end)
+        include Caller.Register (struct
+            include Version_i
+            let query_of_model    = query_of_caller_model
+            let model_of_response = caller_model_of_response
+            let model_of_error    = caller_model_of_error
+          end)
+      end
+
+      let dispatch_multi = Caller.dispatch_multi
+
+      let implement_multi = Callee.implement_multi
+
+      let versions () = Caller.versions ()
+
+      let rpcs () = Caller.rpcs ()
     end
   end
 
@@ -821,6 +932,7 @@ module Both_convert = struct
         -> ('state -> version:int -> callee_msg -> unit)
         -> 'state Implementation.t list
 
+      val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
     end
 
@@ -838,12 +950,12 @@ module Both_convert = struct
       module Callee =
         Callee_converts.One_way.Make (struct let name = name include Callee end)
 
-      TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+      let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
       module Register (Version : sig
           open Model
           val version : int
-          type msg with bin_io
+          type msg [@@deriving bin_io]
           val msg_of_caller_model : Caller.msg -> msg
           val callee_model_of_msg : msg -> Callee.msg
         end) = struct
@@ -855,7 +967,7 @@ module Both_convert = struct
             include Version
             let msg_of_model = msg_of_caller_model
           end)
-        TEST = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+        let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
       end
 
       let dispatch_multi = Caller.dispatch_multi
@@ -863,8 +975,10 @@ module Both_convert = struct
       let implement_multi = Callee.implement_multi
 
       (* Note: Caller.versions is the same as Callee.versions, so it doesn't matter which
-         one we call here *)
+         one we call here. Same for [rpcs]. *)
       let versions () = Caller.versions ()
+
+      let rpcs () = Caller.rpcs ()
     end
   end
 end

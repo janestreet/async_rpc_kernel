@@ -6,7 +6,7 @@ module Stable = struct
       { name    : string
       ; version : int
       }
-    with compare, sexp, bin_io
+    [@@deriving compare, sexp, bin_io]
     let hash = Hashtbl.hash
   end
 end

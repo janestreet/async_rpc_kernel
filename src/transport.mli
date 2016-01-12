@@ -37,6 +37,8 @@ module Reader : sig
     -> ('a, [ `Closed | `Eof ]) Result.t Deferred.t
 end
 
+module Send_result = Transport_intf.Send_result
+
 module Writer : sig
   module type S = Transport_intf.Writer
   include S
@@ -60,7 +62,7 @@ type t =
   { reader : Reader.t
   ; writer : Writer.t
   }
-with sexp_of
+[@@deriving sexp_of]
 
 (** Closes both parts of the transport. *)
 val close : t -> unit Deferred.t

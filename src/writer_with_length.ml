@@ -15,7 +15,7 @@ let of_writer { Bin_prot.Type_class. write; size } =
 
 let of_type_class (bin_a : _ Bin_prot.Type_class.t) = of_writer bin_a.writer
 
-TEST_MODULE = struct
+let%test_module _ = (module struct
   let bigstring_bin_prot s =
     let bigstring = Bin_prot.Utils.bin_dump String.bin_writer_t s in
     Bin_prot.Utils.bin_dump Bigstring.bin_writer_t bigstring
@@ -34,13 +34,13 @@ TEST_MODULE = struct
     then failwithf "mismatch for length %d" len ()
   ;;
 
-  TEST_UNIT =
+  let%test_unit _ =
     for len = 0 to Int.pow 2 10 do test len done;
     for pow = 10 to 20 do
       let x = Int.pow 2 pow in
       test (x - 1);
       test x;
       test (x + 1);
-    done;
+    done
   ;;
-end
+end)
