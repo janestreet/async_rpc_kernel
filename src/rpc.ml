@@ -300,8 +300,8 @@ module Streaming_rpc = struct
   ;;
 
   let implement t f =
-    let f c query ~aborted =
-      f c query ~aborted
+    let f c query =
+      f c query
       >>| function
       | Error err -> Error (make_initial_message (Error err))
       | Ok (initial, pipe) -> Ok (make_initial_message (Ok initial), pipe)
@@ -558,8 +558,8 @@ module Pipe_rpc = struct
   let bin_error t = t.Streaming_rpc.bin_error_response
 
   let implement t f =
-    Streaming_rpc.implement t (fun a query ~aborted ->
-      f a query ~aborted >>| fun x ->
+    Streaming_rpc.implement t (fun a query ->
+      f a query >>| fun x ->
       x >>|~ fun x -> (), x
     )
 

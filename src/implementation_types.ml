@@ -30,7 +30,6 @@ module rec Implementation : sig
       | Pipe of
           ('connection_state
            -> 'query
-           -> aborted:unit Deferred.t
            -> ('init * 'update Pipe.Reader.t, 'init) Result.t Deferred.t
           )
       | Direct of
@@ -108,8 +107,7 @@ and Implementations : sig
 
   module rec Instance : sig
     type streaming_response =
-      | Pending_pipe : unit Ivar.t -> streaming_response
-      | Pipe : unit Ivar.t * _ Pipe.Reader.t -> streaming_response
+      | Pipe : _ Pipe.Reader.t -> streaming_response
       | Direct : _ Direct_stream_writer.t -> streaming_response
 
     type 'a unpacked =

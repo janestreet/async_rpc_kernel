@@ -92,7 +92,7 @@ module Writer = struct
         let rec iter () =
           if can_send t then begin
             match
-              Pipe.read_now_at_most pipe ~consumer ~num_values:max_num_values_per_read
+              Pipe.read_now' pipe ~consumer ~max_queue_length:max_num_values_per_read
             with
             | `Ok q ->
               Queue.iter q ~f;

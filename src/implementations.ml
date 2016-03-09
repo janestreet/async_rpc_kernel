@@ -71,12 +71,7 @@ let descriptions t = Hashtbl.keys t.implementations
 
 module Instance = struct
   type streaming_response = Instance.streaming_response =
-    (* We create a [streaming_response] as soon as a streaming RPC query comes in, but we
-       don't get the pipe until later, so we use a [Pending_pipe] initially. The ivar in
-       both cases indicates when the query is aborted, which is distinct from when the
-       pipe is closed. *)
-    | Pending_pipe : unit Ivar.t -> streaming_response
-    | Pipe : unit Ivar.t * _ Pipe.Reader.t -> streaming_response
+    | Pipe : _ Pipe.Reader.t -> streaming_response
     | Direct :
         _ Implementation_types.Direct_stream_writer.t sexp_opaque -> streaming_response
   [@@deriving sexp_of]
@@ -210,7 +205,6 @@ module Instance = struct
         ~(query : Nat0.t P.Query.t)
         ~read_buffer
         ~read_buffer_pos_ref
-        ~aborted
     : _ Transport.Handler_result.t =
     let id = query.id in
     match implementation with
@@ -255,9 +249,18 @@ module Instance = struct
         let data =
           try query_contents >>|~ f t.connection_state with
           | exn ->
-            Rpc_result.uncaught_exn
-              ~location:"server-side blocking rpc computation"
-              exn
+            (* In the [Deferred] branch we use [Monitor.try_with], which includes
+               backtraces when it catches an exception. For consistency, we also get
+               backtraces here. *)
+            let backtrace = Exn.backtrace () in
+            let sexp =
+              [%sexp
+                { location = "server-side blocking rpc computation"
+                ; exn = (exn : exn)
+                ; backtrace = (backtrace : string)
+                }]
+            in
+            Error (Rpc_error.Uncaught_exn sexp)
         in
         write_response t id bin_response_writer data
       | Implementation.F.Deferred ->
@@ -358,8 +361,14 @@ module Instance = struct
         match stream_query with
         | Error _err -> ()
         | Ok `Abort ->
+          (* Note that there's some delay between when we receive a pipe RPC query and
+             when we put something in [open_streaming_responses] (we wait for
+             a user-supplied function to return). During this time, an abort message would
+             just be ignored. The dispatcher can't abort the query while this is
+             happening, though, since the interface doesn't expose the ID required to
+             abort the query until after a response has been returned. *)
           Option.iter (Hashtbl.find t.open_streaming_responses query.id) ~f:(function
-            | Pending_pipe abort | Pipe (abort, _) -> Ivar.fill_if_empty abort ()
+            | Pipe pipe -> Pipe.close_read pipe
             | Direct w -> Direct_stream_writer.close w
           )
         | Ok (`Query len) ->
@@ -368,11 +377,9 @@ module Instance = struct
               ~pos_ref:read_buffer_pos_ref ~len
               ~location:"streaming_rpc server-side query un-bin-io'ing"
           in
-          let (impl_with_state, (streaming_response : streaming_response)) =
+          let impl_with_state =
             match impl with
-            | Pipe f ->
-              let aborted = Ivar.create () in
-              (`Pipe (f, aborted), Pending_pipe aborted)
+            | Pipe f -> `Pipe f
             | Direct f ->
               let writer : _ Direct_stream_writer.t =
                 { state = Not_started (Queue.create ());
@@ -382,9 +389,9 @@ module Instance = struct
                   bin_writer = bin_update_writer;
                 }
               in
-              (`Direct (f, writer), Direct writer)
+              Hashtbl.set t.open_streaming_responses ~key:query.id ~data:(Direct writer);
+              `Direct (f, writer)
           in
-          Hashtbl.set t.open_streaming_responses ~key:query.id ~data:streaming_response;
           let run_impl impl split_ok handle_ok =
             Rpc_result.try_with (fun () -> defer_result (data >>|~ impl))
               ~location:"server-side pipe_rpc computation"
@@ -401,14 +408,12 @@ module Instance = struct
               handle_ok rest
           in
           match impl_with_state with
-          | `Pipe (f, query_aborted) ->
-            let aborted = Deferred.any [aborted; Ivar.read query_aborted] in
+          | `Pipe f ->
             run_impl
-              (fun data -> f t.connection_state data ~aborted)
+              (fun data -> f t.connection_state data)
               Fn.id
               (fun pipe_r ->
-                 Hashtbl.set t.open_streaming_responses ~key:id
-                   ~data:(Pipe (query_aborted, pipe_r));
+                 Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
                  let bin_update_writer = make_stream_update_writer bin_update_writer in
                  don't_wait_for
                    (Writer.transfer t.writer pipe_r (fun x ->
@@ -435,8 +440,8 @@ module Instance = struct
       Hashtbl.fold t.open_streaming_responses ~init:[]
         ~f:(fun ~key:_ ~data acc ->
           match data with
-          | Direct _ | Pending_pipe _ -> acc
-          | Pipe (_, pipe) -> Deferred.ignore (Pipe.upstream_flushed pipe) :: acc)
+          | Direct _ -> acc
+          | Pipe pipe -> Deferred.ignore (Pipe.upstream_flushed pipe) :: acc)
     in
     Deferred.all_unit producers_flushed
   ;;
@@ -448,7 +453,7 @@ module Instance = struct
         (* Don't remove the writer from the instance, as that would modify the hashtable
            that we are currently iterating over. *)
         Direct_stream_writer.close_without_removing_from_instance writer
-      | Pipe _ | Pending_pipe _ -> ()
+      | Pipe _ -> ()
     );
     Hashtbl.clear t.open_streaming_responses
   ;;
@@ -467,7 +472,7 @@ module Instance = struct
       | `Continue         -> Continue
   ;;
 
-  let handle_query_internal t ~(query : Nat0.t P.Query.t) ~aborted
+  let handle_query_internal t ~(query : Nat0.t P.Query.t)
         ~read_buffer ~read_buffer_pos_ref =
     let { implementations; on_unknown_rpc } = t.implementations in
     let description : Description.t =
@@ -476,13 +481,11 @@ module Instance = struct
     match t.last_dispatched_implementation with
     | Some (last_desc, implementation) when Description.equal last_desc description ->
       apply_implementation t implementation ~query ~read_buffer ~read_buffer_pos_ref
-        ~aborted
     | None | Some _ ->
       match Hashtbl.find implementations description with
       | Some implementation ->
         t.last_dispatched_implementation <- Some (description, implementation);
         apply_implementation t implementation ~query ~read_buffer ~read_buffer_pos_ref
-          ~aborted
       | None ->
         match on_unknown_rpc with
         | `Expert impl ->
@@ -502,12 +505,12 @@ module Instance = struct
           handle_unknown_rpc on_unknown_rpc error t query
   ;;
 
-  let handle_query (T t) ~query ~aborted ~read_buffer ~read_buffer_pos_ref =
+  let handle_query (T t) ~query ~read_buffer ~read_buffer_pos_ref =
     assert (not t.stopped);
     if Writer.is_closed t.writer then
       Transport.Handler_result.Stop (Ok ())
     else
-      handle_query_internal t ~query ~aborted ~read_buffer ~read_buffer_pos_ref
+      handle_query_internal t ~query ~read_buffer ~read_buffer_pos_ref
   ;;
 end
 

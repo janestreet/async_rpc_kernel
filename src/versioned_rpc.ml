@@ -186,7 +186,6 @@ module Callee_converts = struct
         -> ('state
             -> version:int
             -> query
-            -> aborted:unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
       val rpcs : unit -> Any.t list
@@ -206,7 +205,6 @@ module Callee_converts = struct
         's
         -> version:int
         -> Model.query
-        -> aborted:unit Deferred.t
         -> (Model.response Pipe.Reader.t, Model.error) Result.t Deferred.t
 
       type implementer =
@@ -250,14 +248,14 @@ module Callee_converts = struct
 
         let () =
           let implement ~log_version f =
-            Pipe_rpc.implement rpc (fun s q ~aborted ->
+            Pipe_rpc.implement rpc (fun s q ->
               log_version version;
               match Version_i.model_of_query q with
               | exception exn ->
                 Error.raise
                   (failed_conversion (`Response, `Rpc name, `Version version, exn))
               | q ->
-                f s ~version q ~aborted
+                f s ~version q
                 >>= function
                 | Ok pipe ->
                   Monitor.handle_errors
@@ -575,6 +573,7 @@ module Caller_converts = struct
       type query
       type response
       type error
+
       val deprecated_dispatch_multi
         :  version:int
         -> Connection.t
@@ -834,7 +833,6 @@ module Both_convert = struct
         -> ('state
             -> version : int
             -> callee_query
-            -> aborted : unit Deferred.t
             -> (callee_response Pipe.Reader.t, callee_error) Result.t Deferred.t)
         -> 'state Implementation.t list
 

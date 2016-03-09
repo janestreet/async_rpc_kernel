@@ -179,8 +179,7 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
   | Query query ->
     let instance = Set_once.get_exn t.implementations_instance in
     Implementations.Instance.handle_query instance
-      ~query ~aborted:(Ivar.read t.close_started)
-      ~read_buffer ~read_buffer_pos_ref
+      ~query ~read_buffer ~read_buffer_pos_ref
 ;;
 
 let close_reason t = Ivar.read t.close_finished

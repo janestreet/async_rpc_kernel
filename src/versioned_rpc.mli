@@ -62,8 +62,8 @@
     v}
 *)
 
-open Core_kernel.Std
-open Async_kernel.Std
+open! Core_kernel.Std
+open! Async_kernel.Std
 
 open Rpc
 
@@ -115,6 +115,7 @@ module Caller_converts : sig
 
       val deprecated_dispatch_multi
         : version:int -> Connection.t -> query -> response Or_error.t Deferred.t
+        [@@deprecated "[since 2016-02] use dispatch_multi"]
 
       (** multi-version dispatch *)
       val dispatch_multi
@@ -185,6 +186,7 @@ module Caller_converts : sig
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
            , error
            ) Result.t Or_error.t Deferred.t
+        [@@deprecated "[since 2016-02] use dispatch_multi"]
 
       val dispatch_multi
         : Connection_with_menu.t
@@ -433,7 +435,6 @@ module Callee_converts : sig
         -> ('state
             -> version : int
             -> query
-            -> aborted : unit Deferred.t
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
@@ -668,7 +669,6 @@ module Both_convert : sig
         -> ('state
             -> version : int
             -> callee_query
-            -> aborted : unit Deferred.t
             -> (callee_response Pipe.Reader.t, callee_error) Result.t Deferred.t)
         -> 'state Implementation.t list
 

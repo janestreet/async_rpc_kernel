@@ -35,7 +35,6 @@ module F = struct
     | Pipe of
         ('connection_state
          -> 'query
-         -> aborted:unit Deferred.t
          -> ('init * 'update Pipe.Reader.t, 'init) Result.t Deferred.t
         )
     | Direct of
@@ -90,7 +89,7 @@ module F = struct
     | Streaming_rpc (bin_q, bin_i, bin_u, impl) ->
       let impl =
         match impl with
-        | Pipe impl -> Pipe (fun state q ~aborted -> impl (f state) q ~aborted)
+        | Pipe impl -> Pipe (fun state q -> impl (f state) q)
         | Direct impl -> Direct (fun state q w -> impl (f state) q w)
       in
       Streaming_rpc (bin_q, bin_i, bin_u, impl)

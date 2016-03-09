@@ -1,7 +1,7 @@
 (** Internal to [Async_rpc_kernel].  See [Rpc.Implementation]. *)
 
-open Core_kernel.Std
-open Async_kernel.Std
+open! Core_kernel.Std
+open! Async_kernel.Std
 open Protocol
 
 open Implementation_types.Implementation
@@ -32,7 +32,6 @@ module F : sig
     | Pipe of
         ('connection_state
          -> 'query
-         -> aborted:unit Deferred.t
          -> ('init * 'update Pipe.Reader.t, 'init) Result.t Deferred.t
         )
     | Direct of

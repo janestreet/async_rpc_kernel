@@ -7,8 +7,8 @@
     based on [Async_unix]'s [Reader] and [Writer] modules.
 *)
 
-open Core_kernel.Std
-open Async_kernel.Std
+open! Core_kernel.Std
+open! Async_kernel.Std
 
 (** Binary headers containing message lengths.  All transports should use this to ensure
     binary compatibility. *)

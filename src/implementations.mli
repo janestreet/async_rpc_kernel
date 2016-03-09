@@ -1,7 +1,7 @@
 (** Internal to [Async_rpc_kernel].  See [Rpc.Implementations]. *)
 
-open Core_kernel.Std
-open Async_kernel.Std
+open! Core_kernel.Std
+open! Async_kernel.Std
 open Protocol
 
 type 'a t
@@ -42,7 +42,6 @@ module Instance : sig
   val handle_query
     :  t
     -> query : Nat0.t Query.t
-    -> aborted : unit Deferred.t
     -> read_buffer : Bigstring.t
     -> read_buffer_pos_ref : int ref
     -> unit Rpc_result.t Transport.Handler_result.t

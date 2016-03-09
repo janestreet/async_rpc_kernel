@@ -10,10 +10,10 @@ module Rpc_tag : Core_kernel.Std.Identifiable = Core_kernel.Std.String
 module Query_id = Core_kernel.Std.Unique_id.Int63 ()
 
 module Unused_query_id : sig
-  type t [@@deriving bin_io]
+  type t [@@deriving bin_io, sexp_of]
   val t : t
 end = struct
-  type t = Query_id.t [@@deriving bin_io]
+  type t = Query_id.t [@@deriving bin_io, sexp_of]
   let t = Query_id.create ()
 end
 
@@ -29,7 +29,7 @@ module Rpc_error = struct
 end
 
 module Rpc_result = struct
-  type 'a t = ('a, Rpc_error.t) Core_kernel.Std.Result.t [@@deriving bin_io]
+  type 'a t = ('a, Rpc_error.t) Core_kernel.Std.Result.t [@@deriving bin_io, sexp_of]
 end
 
 module Header = struct
@@ -43,7 +43,7 @@ module Query = struct
     ; id      : Query_id.t
     ; data    : 'a
     }
-  [@@deriving bin_io]
+  [@@deriving bin_io, sexp_of]
   type 'a t = 'a needs_length [@@deriving bin_read]
 end
 
@@ -52,7 +52,7 @@ module Response = struct
     { id   : Query_id.t
     ; data : 'a Rpc_result.t
     }
-  [@@deriving bin_io]
+  [@@deriving bin_io, sexp_of]
   type 'a t = 'a needs_length [@@deriving bin_read]
 end
 
@@ -67,7 +67,7 @@ module Stream_initial_message = struct
     { unused_query_id : Unused_query_id.t
     ; initial         : ('response, 'error) Core_kernel.Std.Result.t
     }
-  [@@deriving bin_io]
+  [@@deriving bin_io, sexp_of]
 end
 
 module Stream_response_data = struct
@@ -81,7 +81,7 @@ module Message = struct
     | Heartbeat
     | Query     of 'a Query.   needs_length
     | Response  of 'a Response.needs_length
-  [@@deriving bin_io]
-  type 'a t = 'a needs_length [@@deriving bin_read]
+  [@@deriving bin_io, sexp_of]
+  type 'a t = 'a needs_length [@@deriving bin_read, sexp_of]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end

@@ -17,8 +17,8 @@
     (name, version) pair.  RPCs with the same name but different versions should implement
     similar functionality. *)
 
-open Core_kernel.Std
-open Async_kernel.Std
+open! Core_kernel.Std
+open! Async_kernel.Std
 
 module Description : sig
   type t =
@@ -348,11 +348,12 @@ module Pipe_rpc : sig
   val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
   val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
 
+  (** The pipe returned by the implementation function will be closed automatically when
+      either the connection to the client is closed or the client closes their pipe. *)
   val implement
     :  ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
-        -> aborted : unit Deferred.t
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
@@ -439,9 +440,9 @@ module Pipe_rpc : sig
 
       When successful, [dispatch_iter] returns an [Id.t] after the subscription is
       started. This may be fed to [abort] with the same [Pipe_rpc.t] and [Connection.t] as
-      the call to [dispatch_iter] to cancel the subscription, which will fill in the
-      implementation's [aborted] [Deferred.t]. Calling it with a different [Pipe_rpc.t] or
-      [Connection.t] has undefined behavior.
+      the call to [dispatch_iter] to cancel the subscription, which will close the pipe on
+      the implementation side. Calling it with a different [Pipe_rpc.t] or [Connection.t]
+      has undefined behavior.
   *)
   val dispatch_iter
     :  ('query, 'response, 'error) t
@@ -452,7 +453,12 @@ module Pipe_rpc : sig
 
   (** [abort rpc connection id] given an RPC and the id returned as part of a call to
       dispatch, abort requests that the other side of the connection stop sending
-      updates. *)
+      updates.
+
+      If you are using [dispatch] rather than [dispatch_iter], you are encouraged to close
+      the pipe you receive rather than calling [abort] -- both of these have the same
+      effect.
+  *)
   val abort : (_, _, _) t -> Connection.t -> Id.t -> unit
 
   (** [close_reason metadata] will be determined sometime after the pipe associated with
@@ -501,7 +507,6 @@ module State_rpc : sig
     :  ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
-        -> aborted : unit Deferred.t
         -> (('state * 'update Pipe.Reader.t), 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 

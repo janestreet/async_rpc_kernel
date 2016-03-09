@@ -1,6 +1,6 @@
 (** Internal to [Async_rpc_kernel]. *)
 
-open Core_kernel.Std
+open! Core_kernel.Std
 
 include module type of struct include Protocol.Rpc_error end
 

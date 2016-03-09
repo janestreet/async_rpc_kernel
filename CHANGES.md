@@ -1,3 +1,69 @@
+## 113.33.00
+
+- Cleans up the implementation-side interface for aborting `Pipe_rpc`s.
+
+  Summary
+
+  The `aborted` `Deferred.t` that got passed to `Pipe_rpc` implementations is
+  gone. The situations where it would have been determined now close the reading
+  end of the user-supplied pipe instead.
+
+  Details
+
+  Previously, when an RPC dispatcher decided to abort a query, the RPC
+  implementation would get its `aborted` `Deferred.t` filled in, but would remain
+  free to write some final elements to the pipe.
+
+  This is a little bit more flexible than the new interface, but it's also
+  problematic in that the implementer could easily just not pay attention to
+  `aborted`. (They're not obligated to pay attention to when the pipe is closed,
+  either, but at least they can't keep writing to it.) We don't think the extra
+  flexibility was used at all.
+
+  In the future, we may also simplify the client side to remove the `abort`
+  function on the dispatch side (at least when not using `dispatch_iter`). For the
+  time being it remains, but closing the received pipe is the preferred way of
+  aborting the query.
+
+  There are a couple of known ways this might have changed behavior from before.
+  Both of these appear not to cause problems in the jane repo.
+
+  - In the past, an implementation could write to a pipe as long as the client
+    didn't disconnect, even if it closed its pipe. Now writes will raise after
+    a client closes its pipe (or calls `abort`), since the implementor's pipe will
+    also be closed in this case. Doing this was already unsafe, though, since the
+    pipe *was* closed if the RPC connection was closed.
+
+  - `aborted` was only determined if a client aborted the query or the connection
+    was closed. The new alternative, `Pipe.closed` called on the returned pipe,
+    will also be determined if the implementation closes the pipe itself. This is
+    unlikely to cause serious issues but could potentially cause some confusing
+    logging.
+
+- Blocking RPC implementations (i.e., ones made with `Rpc.implement'`) now capture
+  the backtrace when they raise. This is consistent with what happens in the
+  deferred implementation case, since in that case the implementation is run
+  inside a `Monitor.try_with`, which captures backtraces as well.
+
+  Here's an example of what a new error looks like:
+
+    ((rpc_error
+      (Uncaught_exn
+       ((location "server-side blocking rpc computation")
+        (exn
+         (Invalid_argument
+          "Float.iround_up_exn: argument (100000000000000000000.000000) is too large"))
+        (backtrace
+          "Raised at file \"pervasives.ml\", line 31, characters 25-45\
+         \nCalled from file \"result.ml\", line 43, characters 17-22\
+         \nCalled from file \"monad.ml\", line 17, characters 20-28\
+         \n"))))
+     (connection_description ("Client connected via TCP" (localhost 3333)))
+     (rpc_tag foo) (rpc_version 1))
+
+- Actually deprecated `deprecated_dispatch_multi` functions in
+  `Versioned_rpc`.
+
 ## 113.24.00
 
 - When `Transfer.Writer.send*` raises, send an error to the client.
