@@ -243,9 +243,14 @@ let on_message t =
   Staged.stage f
 ;;
 
+let process_time () =
+  Sys.time ()
+  |> Time_ns.Span.of_sec
+  |> Time_ns.of_span_since_epoch
+
 let heartbeat t ~last_heartbeat =
   if not (is_closed t) then begin
-    let since_last_heartbeat = Time_ns.diff (Time_ns.now ()) last_heartbeat in
+    let since_last_heartbeat = Time_ns.diff (process_time ()) last_heartbeat in
     if Time_ns.Span.(>) since_last_heartbeat t.heartbeat_config.timeout then begin
       let reason () =
         sprintf !"No heartbeats received for %{sexp:Time_ns.Span.t}."
@@ -308,13 +313,13 @@ let run_after_handshake t ~implementations ~connection_state =
        ])))
     ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
-    let last_heartbeat = ref (Time_ns.now ()) in
+    let last_heartbeat = ref (process_time ()) in
     every ~stop:(Ivar.read t.close_started) t.heartbeat_config.send_every
       (fun () -> heartbeat t ~last_heartbeat:!last_heartbeat);
     Reader.read_forever t.reader
       ~on_message:(Staged.unstage (on_message t))
       ~on_end_of_batch:(fun () ->
-        last_heartbeat := Time_ns.now ();
+        last_heartbeat := process_time ();
         List.iter !(t.heartbeat_callbacks) ~f:(fun f -> f ())
       )
     >>> function
