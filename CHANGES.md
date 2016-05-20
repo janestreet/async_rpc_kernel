@@ -1,3 +1,71 @@
+## 113.43.00
+
+- Add some benchmarks for Pipe_rpc
+
+- Optimize the server side of Pipe RPC and add an expert interface.
+  This feature will benefit all Pipe RPC implementors.
+
+  At base:
+
+    ┌─────────────────────────┬──────────┬─────────┬────────────┐
+    │ Name                    │ Time/Run │ mWd/Run │ Percentage │
+    ├─────────────────────────┼──────────┼─────────┼────────────┤
+    │ `bench.ml` direct write │ 148.87ns │ 126.00w │    100.00% │
+    └─────────────────────────┴──────────┴─────────┴────────────┘
+
+  At tip:
+
+    ┌────────────────────────────────┬──────────┬─────────┬────────────┐
+    │ Name                           │ Time/Run │ mWd/Run │ Percentage │
+    ├────────────────────────────────┼──────────┼─────────┼────────────┤
+    │ `bench.ml` direct write        │  69.71ns │   3.00w │     94.99% │
+    │ `bench.ml` direct write expert │  73.39ns │         │    100.00% │
+    └────────────────────────────────┴──────────┴─────────┴────────────┘
+
+  Note: the reason the expert version is slightly slower is identified:
+  if we replace the `blit`s by `unsafe_blit`s in
+  `rpc_transport_low_latency.ml`, then the expert version becomes faster.
+
+  The RPC tests for Pipe RPC showed a nice improvement on the server
+  side: lower CPU consumption and roughly 20% faster
+
+- Remove the ~update argument from State_rpc.dispatch.
+
+  Before this feature, the dispatch method for State_rpcs looked like this:
+
+    val dispatch
+      :  ('query, 'state, 'update, 'error) t
+      -> Connection.t
+      -> 'query
+      -> update : ('state -> 'update -> 'state)
+      -> ( 'state * ('state * 'update) Pipe.Reader.t * Metadata.t
+         , 'error
+         ) Result.t Or_error.t Deferred.t
+
+  There are a couple of cases where having the `update` method there can be
+  cumbersome:
+  - sometimes the type of the state that it sent over the wire is different
+  from the type that is naturally maintained on the client side.
+  - sometimes the update method needs to perform some Async computation to
+  return a new state.
+
+  It feels like the method is trying to be helpful, but has more of a tendency
+  of getting in the way. This feature removes this method.
+
+  The old API may be reinstated by using a `Pipe.fold_map` as below:
+
+    State_rpc.dispatch rpc connection query
+    >>|? fun (state, update_pipe, pipe_metadata) ->
+    state,
+    Pipe.fold_map pipe ~init:state ~f:(fun state update ->
+      let new_state = update_state state update in
+      new_state, (new_state, update)),
+    pipe_metadata
+
+- Add support for `State_rpcs` in `Versioned_rpc.Callee_converts`.
+  Implementation and interface very closely resemble that of a
+  Pipe_rpc.
+
 ## 113.33.00
 
 - Cleans up the implementation-side interface for aborting `Pipe_rpc`s.
@@ -257,4 +325,3 @@
     hard to check the correctness of the code.  Moreover it is only
     required for `Async_unix.Writer.with_flushed_at_close` which we
     don't use.
-
