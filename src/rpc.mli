@@ -261,7 +261,7 @@ module Rpc : sig
           bigstring, but hasn't send the response yet. When [d] becomes determined
           it is expected that the response has been sent.
 
-        Note: it is not OK for an implementation to return:
+        Note: it is NOT OK for an implementation to return:
 
         {[
           Delayed_response (Responder.schedule responder buf ~pos:... ~len:...)
@@ -369,6 +369,22 @@ module Pipe_rpc : sig
     val close : _ t -> unit
     val closed : _ t -> unit Deferred.t
     val is_closed : _ t -> bool
+
+    module Expert : sig
+      val write
+        :  'a t
+        -> buf:Bigstring.t
+        -> pos:int
+        -> len:int
+        -> [`Flushed of unit Deferred.t | `Closed]
+
+      val write_without_pushback
+        :  'a t
+        -> buf:Bigstring.t
+        -> pos:int
+        -> len:int
+        -> [`Ok | `Closed]
+    end
   end
 
   (** Similar to [implement], but you are given the writer instead of providing a writer
@@ -470,7 +486,6 @@ module Pipe_rpc : sig
 
   val description : (_, _, _) t -> Description.t
 
-
 end
 
 (** A state rpc is an easy way for two processes to synchronize a data structure by
@@ -514,8 +529,7 @@ module State_rpc : sig
     :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
-    -> update : ('state -> 'update -> 'state)
-    -> ( 'state * ('state * 'update) Pipe.Reader.t * Metadata.t
+    -> ( 'state * 'update Pipe.Reader.t * Metadata.t
        , 'error
        ) Result.t Or_error.t Deferred.t
 

@@ -127,9 +127,15 @@ and Implementations : sig
 end = Implementations
 
 and Direct_stream_writer : sig
+  module Pending_response : sig
+    type 'a t =
+      | Normal of 'a
+      | Expert of string
+  end
+
   module State : sig
     type 'a t =
-      | Not_started of 'a Queue.t
+      | Not_started of 'a Pending_response.t Queue.t
       | Started
   end
 
@@ -138,6 +144,14 @@ and Direct_stream_writer : sig
     closed : unit Ivar.t;
     instance : Implementations.Instance.t;
     query_id : Query_id.t;
-    bin_writer : 'a Bin_prot.Type_class.writer;
+    stream_writer : 'a Cached_stream_writer.t;
   }
 end = Direct_stream_writer
+
+and Cached_stream_writer : sig
+  type 'a t =
+    { header_prefix    : string (* Bin_protted constant prefix of the message *)
+    ; mutable data_len : Nat0.t
+    ; bin_writer       : 'a Bin_prot.Type_class.writer
+    }
+end = Cached_stream_writer

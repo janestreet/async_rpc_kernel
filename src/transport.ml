@@ -22,10 +22,14 @@ module Reader = struct
 
   let pack m t = T (m, t)
 
-  let sexp_of_t      (T ((module M), t)) = M.sexp_of_t      t
-  let close          (T ((module M), t)) = M.close          t
-  let is_closed      (T ((module M), t)) = M.is_closed      t
-  let read_forever   (T ((module M), t)) = M.read_forever   t
+  (* We put type annotations to be sure the type is not a function type, i.e. to avoid
+     creating closures *)
+  let sexp_of_t (T ((module M), t)) : Sexp.t          = M.sexp_of_t t
+  let close     (T ((module M), t)) : unit Deferred.t = M.close     t
+  let is_closed (T ((module M), t)) : bool            = M.is_closed t
+
+  let read_forever (T ((module M), t)) ~on_message ~on_end_of_batch : _ Deferred.t =
+    M.read_forever t ~on_message ~on_end_of_batch
 
   let read_one_message_bin_prot t
         (bin_reader : _ Bin_prot.Type_class.reader) =
@@ -64,18 +68,22 @@ module Writer = struct
       }
   ;;
 
-  let sexp_of_t      (T { impl = (module M); t; _ }) = M.sexp_of_t      t
-  let close          (T { impl = (module M); t; _ }) = M.close          t
-  let is_closed      (T { impl = (module M); t; _ }) = M.is_closed      t
-  let monitor        (T { impl = (module M); t; _ }) = M.monitor        t
-  let bytes_to_write (T { impl = (module M); t; _ }) = M.bytes_to_write t
-  let flushed        (T { impl = (module M); t; _ }) = M.flushed        t
-  let ready_to_write (T { impl = (module M); t; _ }) = M.ready_to_write t
-  let send_bin_prot  (T { impl = (module M); t; _ }) = M.send_bin_prot  t
-  let send_bin_prot_and_bigstring (T { impl = (module M); t; _ }) =
-    M.send_bin_prot_and_bigstring t
-  let send_bin_prot_and_bigstring_non_copying (T { impl = (module M); t; _ }) =
-    M.send_bin_prot_and_bigstring_non_copying t
+  let sexp_of_t      (T { impl=(module M); t; _ }) : Sexp.t          = M.sexp_of_t      t
+  let close          (T { impl=(module M); t; _ }) : unit Deferred.t = M.close          t
+  let is_closed      (T { impl=(module M); t; _ }) : bool            = M.is_closed      t
+  let monitor        (T { impl=(module M); t; _ }) : Monitor.t       = M.monitor        t
+  let bytes_to_write (T { impl=(module M); t; _ }) : int             = M.bytes_to_write t
+  let flushed        (T { impl=(module M); t; _ }) : unit Deferred.t = M.flushed        t
+  let ready_to_write (T { impl=(module M); t; _ }) : unit Deferred.t = M.ready_to_write t
+
+  let send_bin_prot (T { impl=(module M); t; _ }) bin_writer x : _ Send_result.t =
+    M.send_bin_prot t bin_writer x
+  let send_bin_prot_and_bigstring (T { impl = (module M); t; _ }) bin_writer x
+        ~buf ~pos ~len : _ Send_result.t =
+    M.send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len
+  let send_bin_prot_and_bigstring_non_copying (T { impl = (module M); t; _ }) bin_writer x
+        ~buf ~pos ~len : _ Send_result.t =
+    M.send_bin_prot_and_bigstring_non_copying t bin_writer x ~buf ~pos ~len
 
   let stopped  (T { stopped; _ }) = stopped
   let can_send (T { impl = (module M); t; stopped }) =

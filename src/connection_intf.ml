@@ -72,9 +72,10 @@ module type S = sig
       from [close] in that it does not have the side effect of initiating a close. *)
   val close_finished : t -> unit Deferred.t
 
-  (** [close_reason t] becomes determined at the same time as [close_finished t], but
-      additionally returns the reason that the connection was closed. *)
-  val close_reason : t -> Info.t Deferred.t
+  (** [close_reason ~on_close t] becomes determined when close starts or finishes
+      based on [on_close], but additionally returns the reason that the connection was
+      closed. *)
+  val close_reason : t -> on_close: [`started | `finished] -> Info.t Deferred.t
 
   (** [is_closed t] returns [true] iff [close t] has been called.  [close] may be called
       internally upon errors or timeouts. *)

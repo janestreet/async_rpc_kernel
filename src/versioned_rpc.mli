@@ -127,6 +127,8 @@ module Caller_converts : sig
       (** All versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
@@ -201,6 +203,8 @@ module Caller_converts : sig
       (** All versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of Pipe_RPCs, this functor
@@ -264,6 +268,102 @@ module Caller_converts : sig
     end
   end
 
+  module State_rpc : sig
+    (* signature for dispatchers *)
+    module type S = sig
+      type query
+      type state
+      type update
+      type error
+
+      (** multi-version dispatch
+
+          The return type varies slightly from [Rpc.State_rpc.dispatch] to make it clear
+          that conversion of each individual element in the returned pipe may fail. *)
+      val dispatch_multi
+        : Connection_with_menu.t
+        -> query
+        -> ( state * update Or_error.t Pipe.Reader.t * State_rpc.Metadata.t
+           , error
+           ) Result.t Or_error.t Deferred.t
+
+      (** All rpcs supported by [dispatch_multi] *)
+      val rpcs : unit -> Any.t list
+
+      (** All versions supported by [dispatch_multi].
+          (useful for computing which old versions may be pruned) *)
+      val versions : unit -> Int.Set.t
+
+      val name : string
+    end
+
+    (** Given a model of the types involved in a family of State_RPCs, this functor
+        provides a single State_RPC versioned dispatch function [dispatch_multi] in terms
+        of that model and a mechanism for registering the individual versions that
+        [dispatch_multi] knows about.  Registration requires knowing how to get into and
+        out of the model.
+
+        {v
+            ,-->-- Q1 --> (S1, U1s) -->----.       E1 -->-.
+           /                                \              \
+          Q --->-- Q2 --> (S2, U2s) -->-- (S, Us)  E2 -->-- E
+           \                                /              /
+            `-->-- Q3 --> (S3, U3s) -->----´       E3 -->-´
+        v}
+    *)
+    module Make (Model : sig
+        val name : string  (* the name of the Rpc's being unified in the model *)
+        type query
+        type state
+        type update
+        type error
+      end) : sig
+
+      module type Version_shared = sig
+        type query  [@@deriving bin_io]
+        type state  [@@deriving bin_io]
+        type update [@@deriving bin_io]
+        type error  [@@deriving bin_io]
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_state : state -> Model.state
+        val model_of_error : error -> Model.error
+        val client_pushes_back : bool
+      end
+
+      (** add a new version to the set of versions available via [dispatch_multi]. *)
+      module Register (Version_i : sig
+        include Version_shared
+        val model_of_update : update -> Model.update
+      end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      (** [Register_raw] is like [Register] except you get to deal with the whole pipe.
+          This is useful if, e.g., your [model_of_update] function can fail, so that
+          you'd like to filter items out from the result pipe. *)
+      module Register_raw (Version_i : sig
+        include Version_shared
+
+        (** [model_of_update] should never raise exceptions.  If it does,
+            [dispatch_multi] is going to raise, which is not supposed to happen. *)
+        val model_of_update
+          :  update Pipe.Reader.t
+          -> Model.update Or_error.t Pipe.Reader.t
+      end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      include S
+        with type query  := Model.query
+        with type state  := Model.state
+        with type update := Model.update
+        with type error  := Model.error
+    end
+  end
+
   module One_way : sig
 
     (** signature for rpc dispatchers *)
@@ -279,6 +379,8 @@ module Caller_converts : sig
       (** All versions supported by [dispatch_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
@@ -382,6 +484,8 @@ module Callee_converts : sig
       (** All versions implemented by [implement_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
@@ -444,6 +548,8 @@ module Callee_converts : sig
       (** All versions supported by [implement_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of Pipe_RPCs, this functor
@@ -502,6 +608,99 @@ module Callee_converts : sig
     end
   end
 
+  module State_rpc : sig
+
+    module type S = sig
+      type query
+      type state
+      type update
+      type error
+
+      (** implement multiple versions at once *)
+      val implement_multi
+        :  ?log_not_previously_seen_version : (name:string -> int -> unit)
+        -> ('connection_state
+            -> version : int
+            -> query
+            -> (state * update Pipe.Reader.t, error) Result.t Deferred.t)
+        -> 'connection_state Implementation.t list
+
+      (** All rpcs implemented by [implement_multi] *)
+      val rpcs : unit -> Any.t list
+
+      (** All versions supported by [implement_multi].
+          (useful for computing which old versions may be pruned) *)
+      val versions : unit -> Int.Set.t
+
+      val name : string
+    end
+
+    (** Given a model of the types involved in a family of State_RPCs, this functor
+        provides a single multi-version implementation function [implement_multi] in terms
+        of that model and a mechanism for registering the individual versions that
+        [implement_multi] knows about.  Registration requires knowing how to get into and
+        out of the model.
+
+        {v
+          Q1 -->-.            ,---->-- (S1, U1s)
+                  \          /
+          Q2 -->-- Q --> (S, Us) -->-- (S2, U2s)
+                  /          \
+          Q3 -->-´            `---->-- (S3, U3s)
+        v}
+    *)
+    module Make (Model : sig
+        val name : string  (* the name of the Rpc's being unified in the model *)
+        type query
+        type state
+        type update
+        type error
+      end) : sig
+
+      module type Version_shared = sig
+        type query  [@@deriving bin_io]
+        type state  [@@deriving bin_io]
+        type update [@@deriving bin_io]
+        type error  [@@deriving bin_io]
+        val version : int
+        val model_of_query : query -> Model.query
+        val state_of_model : Model.state -> state
+        val error_of_model : Model.error -> error
+        val client_pushes_back : bool
+      end
+
+      (** add a new version to the set of versions available via [implement_multi]. *)
+      module Register (Version_i : sig
+          include Version_shared
+          val update_of_model : Model.update -> update
+        end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      (** [Register_raw] is like [Register] except you get the whole update pipe to deal
+          with. This is useful if, e.g., your [update_of_model] function can fail, so
+          that you'd like to filter items out from the result pipe. *)
+      module Register_raw (Version_i : sig
+          include Version_shared
+          val update_of_model
+            :  Model.state
+            -> Model.update Pipe.Reader.t
+            -> update Pipe.Reader.t
+        end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      include S
+        with type query  := Model.query
+        with type state  := Model.state
+        with type update := Model.update
+        with type error  := Model.error
+    end
+
+  end
+
   module One_way : sig
 
     module type S = sig
@@ -519,6 +718,8 @@ module Callee_converts : sig
       (** All versions implemented by [implement_multi].
           (useful for computing which old versions may be pruned) *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
@@ -766,6 +967,8 @@ module Both_convert : sig
       (** All supported versions.  Useful for detecting old versions that may be
           pruned. *)
       val versions : unit -> Int.Set.t
+
+      val name : string
     end
 
     module Make (Model : sig

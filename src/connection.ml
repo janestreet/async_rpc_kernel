@@ -71,8 +71,8 @@ type t =
   ; reader              : Reader.t
   ; writer              : Writer.t
   ; open_queries        : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
-  ; close_started       : unit Ivar.t
-  ; close_finished      : Info.t Ivar.t
+  ; close_started       : Info.t Ivar.t
+  ; close_finished      : unit Ivar.t
   (* There's a circular dependency between connections and their implementation instances
      (the latter depends on the connection state, which is given access to the connection
      when it is created). *)
@@ -182,9 +182,16 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
       ~query ~read_buffer ~read_buffer_pos_ref
 ;;
 
-let close_reason t = Ivar.read t.close_finished
+let close_reason t ~on_close =
+  let reason = Ivar.read t.close_started in
+  match on_close with
+  | `started -> reason
+  | `finished ->
+    Ivar.read t.close_finished
+    >>= fun () ->
+    reason
 
-let close_finished t = Ivar.read t.close_finished >>| fun (_ : Info.t) -> ()
+let close_finished t = Ivar.read t.close_finished
 
 let add_heartbeat_callback t f =
   t.heartbeat_callbacks := f :: !(t.heartbeat_callbacks)
@@ -192,7 +199,7 @@ let add_heartbeat_callback t f =
 
 let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
   if not (is_closed t) then begin
-    Ivar.fill t.close_started ();
+    Ivar.fill t.close_started reason;
     begin
       match Set_once.get t.implementations_instance with
       | None          -> Deferred.unit
@@ -216,7 +223,7 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
     >>> fun () ->
     Reader.close t.reader
     >>> fun () ->
-    Ivar.fill t.close_finished reason;
+    Ivar.fill t.close_finished ();
   end;
   close_finished t;
 ;;
@@ -297,7 +304,7 @@ let run_after_handshake t ~implementations ~connection_state =
   Set_once.set_exn t.implementations_instance instance;
   let monitor = Monitor.create ~name:"RPC connection loop" () in
   let reason name exn =
-    (exn, Info.tag (Info.of_exn exn) ("exn raised in RPC connection " ^ name))
+    (exn, Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name))
   in
   Stream.iter
     (Stream.interleave (Stream.of_list (
@@ -309,8 +316,14 @@ let run_after_handshake t ~implementations ~connection_state =
     ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
     let last_heartbeat = ref (Time_ns.now ()) in
-    every ~stop:(Ivar.read t.close_started) t.heartbeat_config.send_every
-      (fun () -> heartbeat t ~last_heartbeat:!last_heartbeat);
+    every ~stop:(Ivar.read t.close_started >>| fun (_ : Info.t) -> ())
+      t.heartbeat_config.send_every
+      (fun () ->
+         (* Make sure not to do this after calling [close] -- this function could be
+            called between when [t.close_started] is determined and when [stop] is, since
+            they happen in different Async jobs. *)
+         if not (Ivar.is_full t.close_started)
+         then heartbeat t ~last_heartbeat:!last_heartbeat);
     Reader.read_forever t.reader
       ~on_message:(Staged.unstage (on_message t))
       ~on_end_of_batch:(fun () ->

@@ -111,36 +111,202 @@ module Instance = struct
       ]
   ;;
 
-  let write_response t id bin_writer_data data =
-    if not t.stopped
-    then
-      let bin_writer =
-        P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_data)
-      in
-      match
-        Writer.send_bin_prot t.writer bin_writer (Response { id; data })
-      with
-      | Sent () -> ()
-      | Closed  -> ()
-      | Message_too_big _ as r ->
-        send_write_error t id ([%sexp_of: unit Transport.Send_result.t] r)
+  let handle_send_result t id (result : _ Transport.Send_result.t) =
+    match result with
+    | Sent () -> ()
+    | Closed  -> ()
+    | Message_too_big _ as r ->
+      send_write_error t id ([%sexp_of: unit Transport.Send_result.t] r)
   ;;
 
-  let make_stream_update_writer bin_writer =
-    P.Stream_response_data.bin_writer_needs_length
-      (Writer_with_length.of_writer bin_writer)
+  let write_message t ~id bin_writer x =
+    if not t.stopped
+    then
+      Writer.send_bin_prot t.writer bin_writer x
+      |> handle_send_result t id
   ;;
+
+  let write_message_expert t ~id bin_writer x ~buf ~pos ~len =
+    if not t.stopped
+    then
+      Writer.send_bin_prot_and_bigstring t.writer bin_writer x ~buf ~pos ~len
+      |> handle_send_result t id
+  ;;
+
+  let write_response t id bin_writer_data data =
+    let bin_writer =
+      P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_data)
+    in
+    write_message t ~id bin_writer (Response { id; data })
+  ;;
+
+  module Cached_stream_writer : sig
+    type instance
+    type 'a t = 'a Implementation_types.Cached_stream_writer.t
+
+    val create
+      :  id:P.Query_id.t
+      -> bin_writer:'a Bin_prot.Type_class.writer
+      -> 'a t
+
+    val write        : 'a t -> instance -> P.Query_id.t -> 'a -> unit
+    val write_expert : 'a t -> instance -> P.Query_id.t -> buf:Bigstring.t -> pos:int -> len:int -> unit
+    val write_string : 'a t -> instance -> P.Query_id.t -> string -> unit
+  end with type instance := t = struct
+    type 'a t = 'a Implementation_types.Cached_stream_writer.t =
+      { header_prefix    : string (* Bin_protted constant prefix of the message *)
+      ; (* Length of the user data part. We set this field when sending a message. This
+           relies on the fact that the message is serialized immediately (which is the
+           only acceptable semantics for the transport layer anyway, as it doesn't know if
+           the value is mutable or not).
+
+           [data_len] is passed to bin-prot writers by mutating [data_len] instead of by
+           passing an additional argument to avoid some allocation.
+        *)
+        mutable data_len : Nat0.t
+      ; bin_writer       : 'a Bin_prot.Type_class.writer
+      }
+
+
+    type void = Void
+    let bin_size_void Void = 0
+    let bin_write_void _buf ~pos Void = pos
+
+    type void_message = void P.Message.needs_length
+    [@@deriving bin_write]
+
+    type void_stream_response_data = void P.Stream_response_data.needs_length
+    [@@deriving bin_write]
+
+    (* This is not re-entrant but Async code always runs on one thread at a time *)
+    let buffer = Bigstring.create 32
+    let cache_bin_protted (bin_writer : _ Bin_prot.Type_class.writer) x =
+      let len = bin_writer.write buffer ~pos:0 x in
+      Bigstring.To_string.sub buffer ~pos:0 ~len
+    ;;
+
+    let create (type a) ~id ~bin_writer : a t =
+      let header_prefix =
+        cache_bin_protted bin_writer_void_message (Response { id; data = Ok Void })
+      in
+      { header_prefix
+      ; bin_writer
+      ; data_len = Nat0.of_int_exn 0
+      }
+    ;;
+
+    (* This part of the message header is a constant, make it a literal to make the
+       writing code slightly faster. *)
+    let stream_response_data_header_len      = 4
+    let stream_response_data_header_as_int32 = 0x8a79l
+
+    let%test_unit "stream_response_* constants are correct" =
+      let len =
+        bin_writer_void_stream_response_data.write buffer ~pos:0
+          (`Ok Void : void_stream_response_data)
+      in
+      assert (len = stream_response_data_header_len);
+      assert (Bigstring.unsafe_get_int32_t_le buffer ~pos:0
+              = stream_response_data_header_as_int32);
+    ;;
+
+    let bin_write_string_no_length buf ~pos str =
+      let str_len = String.length str in
+      (* Very low-level bin_prot stuff... *)
+      Bin_prot.Common.assert_pos pos;
+      let next = pos + str_len in
+      Bin_prot.Common.check_next buf next;
+      Bin_prot.Common.unsafe_blit_string_buf ~src_pos:0 str ~dst_pos:pos buf
+        ~len:str_len;
+      next
+    ;;
+
+    (* The two following functions are used by the 3 variants exposed by this module. They
+       serialize a [Response { id; data = Ok (`Ok data_len) }] value, taking care of
+       writing the [Nat0.t] length prefix where approriate.
+
+       Bear in mind that there are two levels of length prefixes for stream response data
+       message: one for the user data (under the `Ok, before the actual data), and one for
+       the response data (under the .data field, before the Ok). *)
+    let bin_size_nat0_header { header_prefix; data_len; _ } =
+      let stream_response_data_nat0_len =
+        stream_response_data_header_len + Nat0.bin_size_t data_len
+      in
+      let stream_response_data_len =
+        stream_response_data_nat0_len + (data_len : Nat0.t :> int)
+      in
+      String.length header_prefix
+      + Nat0.bin_size_t (Nat0.of_int_exn stream_response_data_len)
+      + stream_response_data_nat0_len
+
+    let bin_write_nat0_header buf ~pos { header_prefix; data_len; _ } =
+      let pos = bin_write_string_no_length buf ~pos header_prefix in
+      let stream_response_data_len =
+        stream_response_data_header_len
+        + Nat0.bin_size_t data_len
+        + (data_len : Nat0.t :> int)
+      in
+      let pos = Nat0.bin_write_t buf ~pos (Nat0.of_int_exn stream_response_data_len) in
+      let next = pos + 4 in
+      Bin_prot.Common.check_next buf next;
+      Bigstring.unsafe_set_int32_t_le buf ~pos stream_response_data_header_as_int32;
+      Nat0.bin_write_t buf ~pos:next data_len
+
+    let bin_writer_nat0_header : _ Bin_prot.Type_class.writer =
+      { size  = bin_size_nat0_header
+      ; write = bin_write_nat0_header
+      }
+
+    let bin_size_message (t, _) =
+      bin_size_nat0_header t + (t.data_len : Nat0.t :> int)
+
+    let bin_write_message buf ~pos (t, data) =
+      let pos = bin_write_nat0_header buf ~pos t in
+      t.bin_writer.write buf ~pos data
+
+    let bin_writer_message : _ Bin_prot.Type_class.writer =
+      { size  = bin_size_message
+      ; write = bin_write_message
+      }
+
+    let bin_size_message_as_string (t, _) =
+      bin_size_nat0_header t + (t.data_len : Nat0.t :> int)
+
+    let bin_write_message_as_string buf ~pos (t, str) =
+      let pos = bin_write_nat0_header buf ~pos t in
+      bin_write_string_no_length buf ~pos str
+
+    let bin_writer_message_as_string : _ Bin_prot.Type_class.writer =
+      { size  = bin_size_message_as_string
+      ; write = bin_write_message_as_string
+      }
+
+    (* [write] and [write_string] both allocate 3 words for the tuples. [write_expert]
+       does not allocate. *)
+    let write t (T instance) id data =
+      t.data_len <- Nat0.of_int_exn (t.bin_writer.size data);
+      write_message instance ~id bin_writer_message (t, data)
+
+    let write_string t (T instance) id str =
+      t.data_len <- Nat0.of_int_exn (String.length str);
+      write_message instance ~id bin_writer_message_as_string (t, str)
+
+    let write_expert t (T instance) id ~buf ~pos ~len =
+      t.data_len <- Nat0.of_int_exn len;
+      write_message_expert instance ~id bin_writer_nat0_header t
+        ~buf ~pos ~len
+  end
 
   module Direct_stream_writer = struct
     module State = Implementation_types.Direct_stream_writer.State
 
-    type 'a t = 'a Implementation_types.Direct_stream_writer.t = {
-      mutable state : 'a State.t;
-      closed : unit Ivar.t;
-      instance : Instance.t;
-      query_id : P.Query_id.t;
-      bin_writer : 'a Bin_prot.Type_class.writer;
-    }
+    type 'a t = 'a Implementation_types.Direct_stream_writer.t =
+      { mutable state : 'a State.t
+      ; closed        : unit Ivar.t
+      ; instance      : Instance.t
+      ; query_id      : P.Query_id.t
+      ; stream_writer : 'a Cached_stream_writer.t
+      }
 
     let is_closed t = Ivar.is_full t.closed
     let closed t = Ivar.read t.closed
@@ -151,10 +317,16 @@ module Instance = struct
         (Ok `Eof)
     ;;
 
-    let write_message {instance = T instance; query_id; bin_writer; _} x =
-      write_response instance query_id
-        (make_stream_update_writer bin_writer)
-        (Ok (`Ok x))
+    let write_message {instance; stream_writer; query_id; _} x =
+      Cached_stream_writer.write stream_writer instance query_id x
+    ;;
+
+    let write_message_string {instance; stream_writer; query_id; _} x =
+      Cached_stream_writer.write_string stream_writer instance query_id x
+    ;;
+
+    let write_message_expert {instance; stream_writer; query_id; _} ~buf ~pos ~len =
+      Cached_stream_writer.write_expert stream_writer instance query_id ~buf ~pos ~len
     ;;
 
     let close_without_removing_from_instance t =
@@ -176,7 +348,7 @@ module Instance = struct
         `Closed
       else begin
         begin match t.state with
-        | Not_started q -> Queue.enqueue q x
+        | Not_started q -> Queue.enqueue q (Normal x)
         | Started -> write_message t x
         end;
         `Ok
@@ -189,12 +361,35 @@ module Instance = struct
       | `Ok -> `Flushed (Writer.flushed instance.writer)
     ;;
 
+    module Expert = struct
+      let write_without_pushback t ~buf ~pos ~len =
+        if Ivar.is_full t.closed then
+          `Closed
+        else begin
+          begin match t.state with
+          | Not_started q ->
+            Queue.enqueue q (Expert (Bigstring.To_string.sub buf ~pos ~len))
+          | Started -> write_message_expert t ~buf ~pos ~len
+          end;
+          `Ok
+        end
+      ;;
+
+      let write ({instance = T instance; _} as t) ~buf ~pos ~len =
+        match write_without_pushback t ~buf ~pos ~len with
+        | `Closed -> `Closed
+        | `Ok -> `Flushed (Writer.flushed instance.writer)
+      ;;
+    end
+
     let start t =
       match t.state with
       | Started -> failwith "attempted to start writer which was already started"
       | Not_started q ->
         t.state <- Started;
-        Queue.iter q ~f:(fun x -> write_message t x);
+        Queue.iter q ~f:(function
+          | Normal x -> write_message        t x
+          | Expert x -> write_message_string t x);
         if Ivar.is_full t.closed then write_eof t;
     ;;
   end
@@ -377,16 +572,19 @@ module Instance = struct
               ~pos_ref:read_buffer_pos_ref ~len
               ~location:"streaming_rpc server-side query un-bin-io'ing"
           in
+          let stream_writer =
+            Cached_stream_writer.create ~id ~bin_writer:bin_update_writer
+          in
           let impl_with_state =
             match impl with
             | Pipe f -> `Pipe f
             | Direct f ->
               let writer : _ Direct_stream_writer.t =
-                { state = Not_started (Queue.create ());
-                  closed = Ivar.create ();
-                  instance = t.packed_self;
-                  query_id = id;
-                  bin_writer = bin_update_writer;
+                { state      = Not_started (Queue.create ())
+                ; closed     = Ivar.create ()
+                ; instance   = t.packed_self
+                ; query_id   = id
+                ; stream_writer
                 }
               in
               Hashtbl.set t.open_streaming_responses ~key:query.id ~data:(Direct writer);
@@ -414,15 +612,14 @@ module Instance = struct
               Fn.id
               (fun pipe_r ->
                  Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
-                 let bin_update_writer = make_stream_update_writer bin_update_writer in
                  don't_wait_for
-                   (Writer.transfer t.writer pipe_r (fun x ->
-                      write_response t id bin_update_writer (Ok (`Ok x))));
+                   (Writer.transfer t.writer pipe_r
+                      (Cached_stream_writer.write stream_writer t.packed_self id));
                  Pipe.closed pipe_r >>> fun () ->
                  Pipe.upstream_flushed pipe_r
                  >>> function
                  | `Ok | `Reader_closed ->
-                   write_response t id bin_update_writer (Ok `Eof);
+                   write_response t id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof);
                    Hashtbl.remove t.open_streaming_responses id
               )
           | `Direct (f, writer) ->
@@ -448,7 +645,7 @@ module Instance = struct
 
   let stop (T t) =
     t.stopped <- true;
-    Hashtbl.iter_vals t.open_streaming_responses ~f:(function
+    Hashtbl.iter t.open_streaming_responses ~f:(function
       | Direct writer ->
         (* Don't remove the writer from the instance, as that would modify the hashtable
            that we are currently iterating over. *)

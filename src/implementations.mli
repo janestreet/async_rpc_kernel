@@ -34,6 +34,22 @@ module Direct_stream_writer : sig
   val is_closed : _ t -> bool
   val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
   val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+
+  module Expert : sig
+    val write
+      :  'a t
+      -> buf:Bigstring.t
+      -> pos:int
+      -> len:int
+      -> [`Flushed of unit Deferred.t | `Closed]
+
+    val write_without_pushback
+      :  'a t
+      -> buf:Bigstring.t
+      -> pos:int
+      -> len:int
+      -> [`Ok | `Closed]
+  end
 end
 
 module Instance : sig

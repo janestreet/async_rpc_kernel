@@ -570,8 +570,8 @@ module Pipe_rpc = struct
   let dispatch t conn query =
     Streaming_rpc.dispatch t conn query >>| fun response ->
     response >>|~ fun x ->
-    x >>|~ fun (query_id, (), pipe_r) ->
-    pipe_r, query_id
+    x >>|~ fun (metadata, (), pipe_r) ->
+    pipe_r, metadata
 
   exception Pipe_rpc_failed
 
@@ -629,21 +629,11 @@ module State_rpc = struct
 
   let implement = Streaming_rpc.implement
 
-  let folding_map input_r ~init ~f =
-    let state = ref init in
-    Pipe.map input_r
-      ~f:(fun update ->
-        let state' = f !state update in
-        state := state';
-        state', update)
-
-  let dispatch t conn query ~update =
+  let dispatch t conn query =
     Streaming_rpc.dispatch t conn query >>| fun response ->
     response >>|~ fun x ->
-    x >>|~ fun (id, state, update_r) ->
-    state,
-    folding_map update_r ~init:state ~f:update,
-    id
+    x >>|~ fun (metadata, state, update_r) ->
+    state, update_r, metadata
 
   let abort = Streaming_rpc.abort
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
