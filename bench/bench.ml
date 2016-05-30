@@ -18,19 +18,34 @@ let rpc =
     ~bin_error:[%bin_type_class: unit]
     ()
 
-let implementation, direct_writer =
-  let ivar = Ivar.create () in
+let rpc_big =
+  Rpc.Pipe_rpc.create
+    ~name:"test-big"
+    ~version:42
+    ~bin_query:[%bin_type_class: unit]
+    ~bin_response:[%bin_type_class: int list]
+    ~bin_error:[%bin_type_class: unit]
+    ()
+
+let make rpc =
+  let pipe_reader, pipe_writer = Pipe.create () in
   let impl =
     Rpc.Pipe_rpc.implement_direct rpc
       (fun () () writer ->
-         Ivar.fill ivar writer;
+         Pipe.write_without_pushback pipe_writer writer;
          return (Ok ()))
   in
-  (impl, Ivar.read ivar)
+  (impl, fun () ->
+     Pipe.read pipe_reader >>| function
+     | `Eof -> assert false
+     | `Ok x -> x)
+
+let implementation, next_direct_writer = make rpc
+let implementation_big, next_direct_writer_big = make rpc_big
 
 let implementations =
   Rpc.Implementations.create_exn
-    ~implementations:[implementation]
+    ~implementations:[implementation; implementation_big]
     ~on_unknown_rpc:`Raise
 
 let create fdr fdw =
@@ -54,18 +69,33 @@ let client, server, server_to_client_fdw =
     in
     (client, server, s2c_fdw))
 
-let direct_writer =
+let new_direct_writer rpc next_direct_writer =
   Thread_safe.block_on_async_exn (fun () ->
     let%map () =
       match%map Rpc.Pipe_rpc.dispatch_iter rpc client () ~f:(fun _ -> Continue) with
       | Ok _    -> ()
       | Error _ -> assert false
-    and direct_writer = direct_writer in
+    and direct_writer = next_direct_writer () in
     direct_writer)
 
-external stop_inlining : 'a -> 'a = "async_rpc_kernel_bench_identity"
+let direct_writer = new_direct_writer rpc next_direct_writer
 
-let data = stop_inlining (42, 0x1234_5678)
+let direct_writers_big =
+  Array.init 100 ~f:(fun _ -> new_direct_writer rpc_big next_direct_writer_big)
+let group1 = Rpc.Pipe_rpc.Direct_stream_writer.Group.create ()
+let group10 = Rpc.Pipe_rpc.Direct_stream_writer.Group.create ()
+let group100 = Rpc.Pipe_rpc.Direct_stream_writer.Group.create ()
+let groups =
+  [ 1   , group1
+  ; 10  , group10
+  ; 100 , group100
+  ]
+let () =
+  List.iter groups ~f:(fun (n, group) ->
+    for i = 0 to n - 1 do
+      Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn group direct_writers_big.(i)
+    done)
+;;
 
 let () =
   (* Now replace the server fd by /dev/null, so that writes always succeed *)
@@ -76,15 +106,57 @@ let () =
   Unix.close devnull
 ;;
 
+(* [stop_inlining] makes sure the compiler knows nothing about [data] *)
+external stop_inlining : 'a -> 'a = "async_rpc_kernel_bench_identity"
+let data = stop_inlining (42, 0x1234_5678)
+let bin_writer_int_int = [%bin_writer: int * int]
+
+let buf = Bigstring.create 8192
 let%bench "direct write" =
-  Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer
-    data
+  assert (
+    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer
+      data
+    = `Ok)
 ;;
 
-let buf = Bigstring.create 32
-let len = [%bin_writer: int * int].write buf ~pos:0 data
-
 let%bench "direct write expert" =
-  Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback direct_writer
-    ~buf ~pos:0 ~len
+  let len = bin_writer_int_int.write buf ~pos:0 data in
+  assert (
+    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback direct_writer
+      ~buf ~pos:0 ~len
+    = `Ok)
+;;
+
+let big_data = stop_inlining (List.init 1000 ~f:(fun x -> x * 1000))
+let bin_writer_int_list = [%bin_writer: int list]
+
+let%bench "direct write (big)" =
+  assert (
+    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writers_big.(0)
+      big_data
+    = `Ok)
+;;
+
+
+let%bench "direct write expert (big)" =
+  let len = bin_writer_int_list.write buf ~pos:0 big_data in
+  assert (
+    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback direct_writers_big.(0)
+      ~buf ~pos:0 ~len
+    = `Ok)
+;;
+
+let%bench "iter direct write (big)" [@indexed n = [1; 10; 100]] =
+  for i = 0 to n - 1 do
+    assert (
+      Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writers_big.(i)
+        big_data
+      = `Ok)
+  done
+;;
+
+let%bench_fun "direct write to group (big)" [@indexed n = [1; 10; 100]] =
+  let group = List.Assoc.find_exn groups n in
+  fun () ->
+    Rpc.Pipe_rpc.Direct_stream_writer.Group.write_without_pushback group big_data
 ;;

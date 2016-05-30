@@ -563,7 +563,131 @@ module Pipe_rpc = struct
       x >>|~ fun x -> (), x
     )
 
-  module Direct_stream_writer = Implementations.Direct_stream_writer
+  module Direct_stream_writer = struct
+    include Implementations.Direct_stream_writer
+
+    module Group = struct
+      module Buffer = struct
+        type t = Bigstring.t ref
+        let create ?(initial_size=4096) () =
+          if initial_size < 0 then
+            failwiths
+              "Rpc.Pipe_rpc.Direct_stream_writer.Group.Buffer.create \
+               got negative buffer size"
+              initial_size Int.sexp_of_t;
+          ref (Bigstring.create initial_size)
+      end
+
+      type 'a direct_stream_writer = 'a t
+
+      module T = Implementation_types.Direct_stream_writer
+
+      type 'a t = 'a T.Group.t =
+        { mutable components : 'a direct_stream_writer Bag.t
+        ; components_by_id   : 'a component Id.Table.t
+        ; buffer             : Bigstring.t ref
+        }
+
+      and 'a component = 'a T.Group.component =
+        { writer_element_in_group : 'a direct_stream_writer Bag.Elt.t
+        ; group_element_in_writer : 'a T.group_entry Bag.Elt.t
+        }
+
+      let create ?buffer () =
+        let buffer =
+          match buffer with
+          | None -> Buffer.create ()
+          | Some b -> b
+        in
+        { components       = Bag.create ()
+        ; components_by_id = Id.Table.create ()
+        ; buffer
+        }
+      ;;
+
+
+      let add_exn t (writer : _ Implementations.Direct_stream_writer.t) =
+        if is_closed writer then
+          failwith "Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn: \
+                    cannot add a closed direct stream writer";
+        if Hashtbl.mem t.components_by_id writer.id then
+          failwith "Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn: \
+                    trying to add a direct stream writer that is already present \
+                    in the group";
+        (match Bag.choose t.components with
+         | None -> ()
+         | Some one ->
+           let one = Bag.Elt.value one in
+           if not (phys_equal (bin_writer one) (bin_writer writer)) then
+             failwith "Rpc.Pipe_rpc.Direct_stream_writer.Group.add: \
+                       cannot add a direct stream writer with a different bin_writer");
+        let writer_element_in_group = Bag.add t.components writer in
+        let group_element_in_writer =
+          Bag.add writer.groups
+            { group = t
+            ; element_in_group = writer_element_in_group
+            }
+        in
+        Hashtbl.add_exn t.components_by_id ~key:writer.id
+          ~data:{ writer_element_in_group
+                ; group_element_in_writer
+                };
+      ;;
+
+      let remove t (writer : _ Implementations.Direct_stream_writer.t) =
+        match Hashtbl.find_and_remove t.components_by_id writer.id with
+        | None -> ()
+        | Some { writer_element_in_group; group_element_in_writer } ->
+          Bag.remove t.components  writer_element_in_group;
+          Bag.remove writer.groups group_element_in_writer;
+      ;;
+
+      let to_list t = Bag.to_list t.components
+
+      let flushed t = Deferred.all_unit (List.map (to_list t) ~f:flushed)
+
+      module Expert = struct
+        let write_without_pushback t ~buf ~pos ~len =
+          Bag.iter t.components ~f:(fun direct_stream_writer ->
+            (* Writers are automatically scheduled to be removed from their groups when
+               closed, so [`Closed] here just means that the removal didn't happen yet. *)
+            ignore
+              (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
+               : [ `Ok | `Closed ]))
+        ;;
+
+        let write t ~buf ~pos ~len =
+          write_without_pushback t ~buf ~pos ~len;
+          flushed t
+        ;;
+      end
+
+      let write_without_pushback t x =
+        match Bag.choose t.components with
+        | None -> ()
+        | Some one ->
+          let one = Bag.Elt.value one in
+          let { Bin_prot.Type_class. write; size } = bin_writer one in
+          let buffer = !(t.buffer) in
+          (* Optimistic first try *)
+          match write buffer ~pos:0 x with
+          | len ->
+            Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len
+          | exception Bin_prot.Common.Buffer_short ->
+            let len = size x in
+            Bigstring.unsafe_destroy buffer;
+            let buffer = Bigstring.create (Int.ceil_pow2 len) in
+            t.buffer := buffer;
+            let len = write buffer ~pos:0 x in
+            Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len
+      ;;
+
+      let write t x =
+        write_without_pushback t x;
+        flushed t
+      ;;
+    end
+  end
 
   let implement_direct t f = Streaming_rpc.implement_direct t f
 

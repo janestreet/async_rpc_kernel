@@ -29,11 +29,15 @@ val lift : 'a t -> f:('b -> 'a) -> 'b t
 module Direct_stream_writer : sig
   type 'a t = 'a Implementation_types.Direct_stream_writer.t
 
+  module Id = Implementation_types.Direct_stream_writer.Id
+
   val close : _ t -> unit
   val closed : _ t -> unit Deferred.t
   val is_closed : _ t -> bool
   val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
   val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+  val flushed : _ t -> unit Deferred.t
+  val bin_writer : 'a t -> 'a Bin_prot.Type_class.writer
 
   module Expert : sig
     val write

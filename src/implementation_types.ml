@@ -6,6 +6,8 @@ open Protocol
     a dependency cyle: [Implementation] -> [Direct_stream_writer] ->
     [Implementations] -> [Implementation]. *)
 
+module Direct_stream_writer_id = Unique_id.Int63 ()
+
 module rec Implementation : sig
   module Expert : sig
     module Responder : sig
@@ -139,13 +141,40 @@ and Direct_stream_writer : sig
       | Started
   end
 
-  type 'a t = {
-    mutable state : 'a State.t;
-    closed : unit Ivar.t;
-    instance : Implementations.Instance.t;
-    query_id : Query_id.t;
-    stream_writer : 'a Cached_stream_writer.t;
-  }
+  module Id = Direct_stream_writer_id
+
+  type 'a t =
+    { id            : Id.t
+    ; mutable state : 'a State.t
+    ; closed        : unit Ivar.t
+    ; instance      : Implementations.Instance.t
+    ; query_id      : Query_id.t
+    ; stream_writer : 'a Cached_stream_writer.t
+    ; groups        : 'a group_entry Bag.t
+    }
+
+  and 'a group_entry =
+    { group            : 'a Direct_stream_writer.Group.t
+    ; element_in_group : 'a t Bag.Elt.t
+    }
+
+  module Group : sig
+    type 'a direct_stream_writer = 'a t
+
+    type 'a t =
+      (* [components] is only tracked separately from [components_by_id] so we can iterate
+         over its elements more quickly than we could iterate over the values of
+         [components_by_id]. *)
+      { mutable components : 'a direct_stream_writer Bag.t
+      ; components_by_id   : 'a component Id.Table.t
+      ; buffer             : Bigstring.t ref
+      }
+
+    and 'a component =
+      { writer_element_in_group : 'a direct_stream_writer Bag.Elt.t
+      ; group_element_in_writer : 'a group_entry Bag.Elt.t
+      }
+  end with type 'a direct_stream_writer := 'a t
 end = Direct_stream_writer
 
 and Cached_stream_writer : sig

@@ -298,18 +298,35 @@ module Instance = struct
   end
 
   module Direct_stream_writer = struct
-    module State = Implementation_types.Direct_stream_writer.State
+    module T = Implementation_types.Direct_stream_writer
 
-    type 'a t = 'a Implementation_types.Direct_stream_writer.t =
-      { mutable state : 'a State.t
+    module State = T.State
+
+    module Id = T.Id
+
+    type 'a t = 'a T.t =
+      { id            : Id.t
+      ; mutable state : 'a State.t
       ; closed        : unit Ivar.t
       ; instance      : Instance.t
       ; query_id      : P.Query_id.t
       ; stream_writer : 'a Cached_stream_writer.t
+      ; groups        : 'a group_entry Bag.t
+      }
+
+    and 'a group_entry = 'a T.group_entry =
+      { group            : 'a T.Group.t
+      ; element_in_group : 'a t Bag.Elt.t
       }
 
     let is_closed t = Ivar.is_full t.closed
     let closed t = Ivar.read t.closed
+    let flushed t =
+      let (T instance) = t.instance in
+      Transport.Writer.flushed instance.writer
+    ;;
+
+    let bin_writer t = t.stream_writer.bin_writer
 
     let write_eof {instance = T instance; query_id; _} =
       write_response instance query_id
@@ -332,6 +349,15 @@ module Instance = struct
     let close_without_removing_from_instance t =
       if not (Ivar.is_full t.closed) then begin
         Ivar.fill t.closed ();
+        let groups = t.groups in
+        if not (Bag.is_empty groups) then
+          Async_kernel.Scheduler.Very_low_priority_work.enqueue ~f:(fun () ->
+            match Bag.remove_one groups with
+            | None -> Finished
+            | Some { group; element_in_group } ->
+              Bag.remove group.components element_in_group;
+              Hashtbl.remove group.components_by_id t.id;
+              Not_finished);
         match t.state with
         | Not_started _ -> ()
         | Started -> write_eof t
@@ -580,10 +606,12 @@ module Instance = struct
             | Pipe f -> `Pipe f
             | Direct f ->
               let writer : _ Direct_stream_writer.t =
-                { state      = Not_started (Queue.create ())
+                { id         = Direct_stream_writer.Id.create ()
+                ; state      = Not_started (Queue.create ())
                 ; closed     = Ivar.create ()
                 ; instance   = t.packed_self
                 ; query_id   = id
+                ; groups     = Bag.create ()
                 ; stream_writer
                 }
               in

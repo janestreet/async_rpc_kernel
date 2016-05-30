@@ -385,6 +385,66 @@ module Pipe_rpc : sig
         -> len:int
         -> [`Ok | `Closed]
     end
+
+    (** Group of direct writers. Groups are optimized for sending the same message to
+        multiple clients at once. *)
+    module Group : sig
+      type 'a direct_stream_writer
+      type 'a t
+
+      (** A group internally holds a buffer to serialize messages only once. This buffer
+          will grow automatically to accomodate bigger messages.
+
+          It is safe to share the same buffer between multiple groups. *)
+      module Buffer : sig
+        type t
+        val create : ?initial_size:int (* default 4096 *) -> unit -> t
+      end
+
+      val create : ?buffer:Buffer.t -> unit -> _ t
+
+      (** [flushed t] is determined when the underlying writer for each member of [t] is
+          flushed. *)
+      val flushed : _ t -> unit Deferred.t
+
+      (** Add a direct stream writer to the group. Raises if the writer is closed or
+          already part of the group, or if its bin-prot writer is different than an
+          existing group member's. When the writer is closed, it is automatically
+          removed from the group. *)
+      val add_exn : 'a t -> 'a direct_stream_writer -> unit
+
+      (** Remove a writer from a group. Note that writers are automatically removed from
+          all groups when they are closed, so you only need to call this if you want to
+          remove a writer without closing it. *)
+      val remove : 'a t -> 'a direct_stream_writer -> unit
+
+      (** Write a message on all direct writers in the group. Contrary to
+          [Direct_stream_writer.write], this cannot return [`Closed] as elements of the
+          group are removed immediately when they are closed.
+
+          [write t x] is the same as [write_without_pushback t x; flushed t].
+      *)
+      val write : 'a t -> 'a -> unit Deferred.t
+      val write_without_pushback : 'a t -> 'a -> unit
+
+      val to_list : 'a t -> 'a direct_stream_writer list
+
+      module Expert : sig
+        val write
+          :  'a t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> unit Deferred.t
+
+        val write_without_pushback
+          :  'a t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> unit
+      end
+    end with type 'a direct_stream_writer := 'a t
   end
 
   (** Similar to [implement], but you are given the writer instead of providing a writer
