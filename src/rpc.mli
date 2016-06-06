@@ -306,6 +306,17 @@ module Pipe_close_reason : sig
         closes before either side explicitly closes the pipe, it will also go into this
         case. *)
     | Error of Error.t
+    [@@deriving bin_io, compare, sexp]
+
+  module Stable : sig
+    module V1 : sig
+      type nonrec t = t =
+        | Closed_locally
+        | Closed_remotely
+        | Error of Error.Stable.V2.t
+        [@@deriving bin_io, compare, sexp]
+    end
+  end
 end
 
 module Pipe_rpc : sig

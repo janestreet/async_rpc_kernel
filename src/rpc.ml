@@ -242,6 +242,17 @@ module Pipe_close_reason = struct
     | Closed_locally
     | Closed_remotely
     | Error of Error.t
+    [@@deriving bin_io, compare, sexp]
+
+  module Stable = struct
+    module V1 = struct
+      type nonrec t = t =
+        | Closed_locally
+        | Closed_remotely
+        | Error of Error.Stable.V2.t
+        [@@deriving bin_io, compare, sexp]
+    end
+  end
 end
 
 (* the basis of the implementations of Pipe_rpc and State_rpc *)
