@@ -1,4 +1,4 @@
-type t = Bin_prot.Nat0.t
+type t = Bin_prot.Nat0.t [@@deriving bin_shape ~basetype:"899e2f4a-490a-11e6-b68f-bbd62472516c"]
 
 let bin_t = Bin_prot.Type_class.bin_nat0
 let bin_size_t = Bin_prot.Size.bin_size_nat0
