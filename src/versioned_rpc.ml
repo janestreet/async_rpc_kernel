@@ -682,7 +682,7 @@ module Caller_converts = struct
             | Ok q ->
               Rpc.dispatch rpc conn q
               >>| fun result ->
-              Result.bind result (fun r ->
+              Result.bind result ~f:(fun r ->
                 match Result.try_with (fun () -> Version_i.model_of_response r) with
                 | Ok r -> Ok r
                 | Error exn ->
