@@ -1,0 +1,4 @@
+(library
+ ((name async_rpc_kernel_bench)
+  (c_names (stubs))
+  (libraries (async))))
