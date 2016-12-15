@@ -440,6 +440,8 @@ module Pipe_rpc : sig
 
       val to_list : 'a t -> 'a direct_stream_writer list
 
+      val length : _ t -> int
+
       module Expert : sig
         val write
           :  'a t
@@ -552,8 +554,9 @@ module Pipe_rpc : sig
       [metadata] is closed. Its value will indicate what caused the pipe to be closed. *)
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
 
-  val name    : (_, _, _) t -> string
-  val version : (_, _, _) t -> int
+  val client_pushes_back : (_, _, _) t -> bool
+  val name               : (_, _, _) t -> string
+  val version            : (_, _, _) t -> int
 
   val description : (_, _, _) t -> Description.t
 

@@ -567,6 +567,7 @@ module Pipe_rpc = struct
   let bin_query t = t.Streaming_rpc.bin_query
   let bin_response t = t.Streaming_rpc.bin_update_response
   let bin_error t = t.Streaming_rpc.bin_error_response
+  let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
   let implement t f =
     Streaming_rpc.implement t (fun a query ->
@@ -616,6 +617,7 @@ module Pipe_rpc = struct
         }
       ;;
 
+      let length t = Bag.length t.components
 
       let add_exn t (writer : _ Implementations.Direct_stream_writer.t) =
         if is_closed writer then

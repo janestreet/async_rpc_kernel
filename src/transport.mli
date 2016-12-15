@@ -3,8 +3,9 @@
     A transport is a way to send and receive messages.  It is split between a [Reader] and
     a [Writer] part.
 
-    [Async_rpc_kernel] provides no transport.  [Async_extra] provides a unix transport
-    based on [Async_unix]'s [Reader] and [Writer] modules.
+    [Async_rpc_kernel] only provides an async [Pipe.t] transport.
+    [Async_extra] provides a unix transport based on [Async_unix]'s
+    [Reader] and [Writer] modules.
 *)
 
 open! Core_kernel.Std
