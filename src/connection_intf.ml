@@ -19,6 +19,15 @@ module type S = sig
       -> t
   end
 
+  module Client_implementations : sig
+    type nonrec 's t =
+      { connection_state : t -> 's
+      ; implementations  : 's Implementations.t
+      }
+
+    val null : unit -> unit t
+  end
+
   (** Initiate an Rpc connection on the given transport.  [implementations] should be the
       bag of implementations that the calling side implements; it defaults to
       [Implementations.null] (i.e., "I implement no RPCs").

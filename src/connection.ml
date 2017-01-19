@@ -451,3 +451,15 @@ let close
       ?(reason = Info.of_string "Rpc.Connection.close")
       t
   = close ?streaming_responses_flush_timeout ~reason t
+
+module Client_implementations = struct
+  type nonrec 's t =
+    { connection_state : t -> 's
+    ; implementations  : 's Implementations.t
+    }
+
+  let null () =
+    { connection_state = (fun _ -> ())
+    ; implementations  = Implementations.null ()
+    }
+end
