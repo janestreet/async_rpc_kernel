@@ -1,6 +1,6 @@
 (** Internal to [Async_rpc_kernel]. *)
 
-open! Core_kernel.Std
+open! Core_kernel
 open! Async_kernel.Std
 
 type 'a t = 'a Protocol.Rpc_result.t

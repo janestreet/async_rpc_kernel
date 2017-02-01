@@ -1,4 +1,4 @@
-open Core_kernel.Std
+open Core_kernel
 
 (* utility function for bin-io'ing out of a Bigstring.t *)
 let bin_read_from_bigstring (bin_reader_t : _ Bin_prot.Type_class.reader)

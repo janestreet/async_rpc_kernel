@@ -1,4 +1,4 @@
-open Core_kernel.Std
+open Core_kernel
 open Async_kernel.Std
 
 type 'a message_handler = Bigstring.t -> pos:int -> len:int -> 'a

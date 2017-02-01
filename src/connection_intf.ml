@@ -1,4 +1,4 @@
-open Core_kernel.Std
+open Core_kernel
 open Async_kernel.Std
 
 (* The reason for defining this module type explicitly is so that we can internally keep

@@ -8,7 +8,7 @@
     [Reader] and [Writer] modules.
 *)
 
-open! Core_kernel.Std
+open! Core_kernel
 open! Async_kernel.Std
 
 (** Binary headers containing message lengths.  All transports should use this to ensure

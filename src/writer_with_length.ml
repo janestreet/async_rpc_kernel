@@ -1,4 +1,4 @@
-open Core_kernel.Std
+open Core_kernel
 
 let of_writer { Bin_prot.Type_class. write; size } =
   let write buf ~pos a =
