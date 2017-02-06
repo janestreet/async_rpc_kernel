@@ -1,5 +1,5 @@
 open Core
-open Async.Std
+open Async
 
 let max_message_size = 16 lsl 20
 
