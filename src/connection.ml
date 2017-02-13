@@ -110,12 +110,12 @@ let dispatch t ~response_handler ~bin_writer_query ~query =
   match writer t with
   | Error `Closed as r -> r
   | Ok writer ->
+    Option.iter response_handler ~f:(fun response_handler ->
+      Hashtbl.set t.open_queries ~key:query.P.Query.id ~data:response_handler);
     Writer.send_bin_prot writer
       (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
       (Query query)
     |> handle_send_result t;
-    Option.iter response_handler ~f:(fun response_handler ->
-      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
     Ok ()
 ;;
 
@@ -127,12 +127,12 @@ let make_dispatch_bigstring do_send t ~tag ~version buf ~pos ~len ~response_hand
     let header : Nat0.t P.Message.t =
       Query { tag; version; id; data = Nat0.of_int_exn len }
     in
+    Option.iter response_handler ~f:(fun response_handler ->
+      Hashtbl.set t.open_queries ~key:id ~data:response_handler);
     let result =
       do_send writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len
       |> handle_send_result t
     in
-    Option.iter response_handler ~f:(fun response_handler ->
-      Hashtbl.set t.open_queries ~key:id ~data:response_handler);
     Ok result
 ;;
 
