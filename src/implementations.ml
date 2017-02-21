@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 open Util
 
 open Implementation_types.Implementations
@@ -351,13 +351,14 @@ module Instance = struct
         Ivar.fill t.closed ();
         let groups = t.groups in
         if not (Bag.is_empty groups) then
-          Async_kernel.Scheduler.Very_low_priority_work.enqueue ~f:(fun () ->
-            match Bag.remove_one groups with
-            | None -> Finished
-            | Some { group; element_in_group } ->
-              Bag.remove group.components element_in_group;
-              Hashtbl.remove group.components_by_id t.id;
-              Not_finished);
+          Async_kernel_private.Scheduler.Very_low_priority_work.enqueue
+            ~f:(fun () ->
+              match Bag.remove_one groups with
+              | None -> Finished
+              | Some { group; element_in_group } ->
+                Bag.remove group.components element_in_group;
+                Hashtbl.remove group.components_by_id t.id;
+                Not_finished);
         match t.state with
         | Not_started _ -> ()
         | Started -> write_eof t

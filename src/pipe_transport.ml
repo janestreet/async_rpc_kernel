@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 
 open Int.Replace_polymorphic_compare
 
@@ -277,7 +277,8 @@ struct
 
   let on_end_of_batch on_end_of_batch_count () = incr on_end_of_batch_count
 
-  let wait () = Async_kernel.Scheduler.run_cycles_until_no_jobs_remain ()
+  let wait () =
+    Async_kernel_private.Scheduler.run_cycles_until_no_jobs_remain ()
 
   let run_test run verify =
     let reader, writer = Pipe.create () in
@@ -408,7 +409,8 @@ struct
   let on_message _buffer ~pos:_ ~len:_ = Handler_result.Continue
   let on_end_of_batch () = ()
 
-  let wait () = Async_kernel.Scheduler.run_cycles_until_no_jobs_remain ()
+  let wait () =
+    Async_kernel_private.Scheduler.run_cycles_until_no_jobs_remain ()
 
   let run_test run =
     let reader, writer = Pipe.create () in

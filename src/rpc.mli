@@ -18,7 +18,7 @@
     similar functionality. *)
 
 open! Core_kernel
-open! Async_kernel.Std
+open! Async_kernel
 
 module Description : sig
   type t =

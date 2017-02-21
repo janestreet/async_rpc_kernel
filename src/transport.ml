@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 
 module Header = struct
   let length = 8

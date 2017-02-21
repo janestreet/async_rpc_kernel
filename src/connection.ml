@@ -1,7 +1,7 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 
-module Time_ns = Async_kernel.Time_ns
+module Time_ns = Async_kernel_private.Time_ns
 
 module P = Protocol
 module Reader = Transport.Reader

@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 
 (* The reason for defining this module type explicitly is so that we can internally keep
    track of what is and isn't exposed. *)

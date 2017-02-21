@@ -9,7 +9,7 @@
 *)
 
 open! Core_kernel
-open! Async_kernel.Std
+open! Async_kernel
 
 (** Binary headers containing message lengths.  All transports should use this to ensure
     binary compatibility. *)

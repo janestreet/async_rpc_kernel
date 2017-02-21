@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 
 type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
 

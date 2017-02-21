@@ -1,7 +1,7 @@
 (** Internal to [Async_rpc_kernel].  See [Rpc.Implementation]. *)
 
 open! Core_kernel
-open! Async_kernel.Std
+open! Async_kernel
 open Protocol
 
 open Implementation_types.Implementation

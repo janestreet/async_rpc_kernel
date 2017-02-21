@@ -1,5 +1,5 @@
 open Core_kernel
-open Async_kernel.Std
+open Async_kernel
 open Protocol
 
 (** The types of the [Implementation] and [Implementations] modules, which have
