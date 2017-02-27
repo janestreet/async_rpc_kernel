@@ -2,3 +2,5 @@
  ((name async_rpc_kernel_bench)
   (c_names (stubs))
   (libraries (async))))
+
+(jbuild_version jane_street)

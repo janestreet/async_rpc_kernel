@@ -5,3 +5,5 @@
   (libraries (core_kernel async_kernel))
   
   (js_of_ocaml ())))
+
+(jbuild_version jane_street)
