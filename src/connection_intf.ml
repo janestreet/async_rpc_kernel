@@ -53,6 +53,11 @@ module type S = sig
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
 
+  (** As of Feb 2017, the RPC protocol started to contain a magic number so that one can
+      identify RPC communication.  The bool returned by [contains_magic_prefix] says
+      whether this magic number was observed. *)
+  val contains_magic_prefix : bool Bin_prot.Type_class.reader
+
   val description : t -> Info.t
 
   (** After [add_heartbeat_callback t f], [f ()] will be called on every subsequent

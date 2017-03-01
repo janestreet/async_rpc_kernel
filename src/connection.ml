@@ -7,17 +7,41 @@ module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer
 
+let magic_word = "RPC"
+
+let magic_number =
+  String.to_list_rev magic_word
+  |> List.fold ~init:0 ~f:(fun acc c -> (acc * 256) + Char.to_int c)
+
+let%expect_test "magic number" =
+  print_endline (Int.to_string_hum magic_number);
+  [%expect {|
+    4_411_474
+  |}]
+
+let%expect_test "magic number binio" =
+  printf "%S" (Binable.to_string (module Int) magic_number);
+  [%expect {|
+    "\253RPC\000"
+  |}]
+
 module Header : sig
   type t [@@deriving bin_type_class]
   val v1 : t
   val negotiate_version : t -> t -> int option
+  val contains_magic : t -> bool
 end = struct
   include P.Header
 
-  let v1 = [ 1 ]
+  let v1 = magic_number :: [ 1 ]
+
+  let contains_magic t = List.mem ~equal:Int.equal t magic_number
 
   let negotiate_version t1 t2 =
-    Set.max_elt (Set.inter (Int.Set.of_list t1) (Int.Set.of_list t2))
+    let t1 = Int.Set.of_list t1 in
+    let t2 = Int.Set.of_list t2 in
+    let both = Set.inter t1 t2 in
+    Set.max_elt (Set.remove both magic_number)
 end
 
 module Handshake_error = struct
@@ -365,6 +389,9 @@ let do_handshake t ~handshake_timeout =
       | Some i -> Error (Negotiated_unexpected_version i)
   end
 ;;
+
+let contains_magic_prefix =
+  Bin_prot.Type_class.cnv_reader Header.contains_magic Header.bin_t.reader
 
 let create
       ?implementations

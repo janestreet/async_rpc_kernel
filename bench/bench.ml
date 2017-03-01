@@ -156,7 +156,7 @@ let%bench "iter direct write (big)" [@indexed n = [1; 10; 100]] =
 ;;
 
 let%bench_fun "direct write to group (big)" [@indexed n = [1; 10; 100]] =
-  let group = List.Assoc.find_exn groups n in
+  let group = List.Assoc.find_exn groups ~equal:Int.equal n in
   fun () ->
     Rpc.Pipe_rpc.Direct_stream_writer.Group.write_without_pushback group big_data
 ;;
