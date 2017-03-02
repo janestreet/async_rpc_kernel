@@ -1,9 +1,9 @@
 (library
  ((name async_rpc_kernel)
-  (inline_tests ((javascript build_and_run)))
   (public_name async_rpc_kernel)
   (libraries (core_kernel async_kernel))
+  (preprocess (pps (ppx_jane)))
   
-  (js_of_ocaml ())))
+))
 
 (jbuild_version jane_street)

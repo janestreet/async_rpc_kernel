@@ -29,14 +29,27 @@ module type DATA = sig
   val of_bigstring : Bigstring.t -> t
 end
 
-module Pipe_reader(Data : DATA) = struct
-  type t = Data.t Pipe.Reader.t [@@deriving sexp_of]
+module Pipe_and_buffer = struct
+  type 'a t =
+    { pipe   : 'a Pipe.Reader.t
+    ; buffer : Bigbuffer.t
+    } [@@deriving sexp_of]
 
-  let close t = Pipe.close_read t; Deferred.unit
-  let is_closed t = Pipe.is_closed t
+  let create pipe =
+    { pipe
+    ; buffer = Bigbuffer.create Header.length
+    }
+  ;;
+end
+
+module Pipe_reader(Data : DATA) = struct
+  type t = Data.t Pipe_and_buffer.t [@@deriving sexp_of]
+
+  let close (t:t) = Pipe.close_read t.pipe; Deferred.unit
+  let is_closed (t:t) = Pipe.is_closed t.pipe
 
   let read_forever (t : t) ~on_message ~on_end_of_batch : (_,_) Deferred.Result.t =
-    let buffer = Bigbuffer.create Header.length in
+    let buffer = t.buffer in
     (* Dequeue until enough data ([need]) is available and try read messages *)
     let rec process_queue ~need queue =
       match Queue.dequeue queue with
@@ -73,7 +86,16 @@ module Pipe_reader(Data : DATA) = struct
         let total_len = Header.length + payload_len in
         if length >= total_len then begin
           match on_message data ~pos:(pos + Header.length) ~len:payload_len with
-          | Handler_result.Stop x -> return (First x)
+          | Handler_result.Stop x ->
+            let pos = pos + total_len in
+            let length = length - total_len in
+            (* Make sure that all data we've read (and not "consumed") from the pipe
+               is kept in the buffer.
+               That is the remaining bits in [data] and all contents in [queue].
+            *)
+            set_buffer ~pos ~length ~data;
+            Queue.iter queue ~f:(fun data -> Data.add_to_bigbuffer buffer data);
+            return (First x)
           | Continue | Wait _ as continue_or_wait ->
             begin
               match continue_or_wait with
@@ -97,8 +119,7 @@ module Pipe_reader(Data : DATA) = struct
               set_buffer_and_process_queue ~need:Header.length ~pos ~length:0 ~queue ~data
         end else set_buffer_and_process_queue ~need:total_len ~pos ~length ~queue ~data
       end else set_buffer_and_process_queue ~need:Header.length ~pos ~length ~queue ~data
-
-    and set_buffer_and_process_queue ~need ~pos ~length ~queue ~data =
+    and set_buffer ~pos ~length ~data =
       if length = 0
       then Bigbuffer.clear buffer
       else begin
@@ -106,19 +127,39 @@ module Pipe_reader(Data : DATA) = struct
         Bigbuffer.clear buffer;
         Bigbuffer.add_bigstring buffer data
       end;
+
+    and set_buffer_and_process_queue ~need ~pos ~length ~queue ~data =
+      set_buffer ~pos ~length ~data;
       process_queue ~need queue
     in
+
     let rec wait_for_read ~need =
-      pipe_read t (function
+      pipe_read t.pipe (function
         | `Eof      -> return (Error `Eof)
         | `Ok queue ->
-          process_queue ~need queue >>= fun next ->
-          on_end_of_batch ();
-          match next with
-          | First  result -> return (Ok result)
-          | Second need   -> wait_for_read ~need)
+          process_queue ~need queue >>= end_of_batch_and_continue)
+    and end_of_batch_and_continue next =
+      on_end_of_batch ();
+      match next with
+      | First  result -> return (Ok result)
+      | Second need   -> wait_for_read ~need
     in
-    wait_for_read ~need:Header.length
+    let start_processing_existing_data ~data ~length =
+      process_data
+        ~pos:0
+        ~data
+        ~length
+        (Queue.create ())
+      >>= end_of_batch_and_continue
+    in
+    (* We either start by
+       - processing remaining bits in the buffer
+       - or waiting for more data in the pipe *)
+    let need = Header.length in
+    let length = Bigbuffer.length buffer in
+    if Int.(<) length need
+    then wait_for_read ~need
+    else start_processing_existing_data ~length ~data:(Bigbuffer.volatile_contents buffer)
 
   module For_testing = struct
     type t = Data.t
@@ -126,26 +167,34 @@ module Pipe_reader(Data : DATA) = struct
   end
 end
 
+module Pipe_and_monitor = struct
+  type 'a t =
+    { pipe    : 'a Pipe.Writer.t
+    ; monitor : Monitor.t
+    } [@@deriving sexp_of]
 
-type 'a pipe_writer =
-  { pipe    : 'a Pipe.Writer.t
-  ; monitor : Monitor.t
-  } [@@deriving sexp_of]
+  let create pipe =
+    { pipe
+    ; monitor = Monitor.create ()
+    }
+  ;;
+end
 
 (* We don't perform any buffering here.
    A message is consider to be flushed as soon as it enters the pipe. *)
 module Pipe_writer(Data : DATA) = struct
-  type t = Data.t pipe_writer [@@deriving sexp_of]
 
-  let close t = Pipe.close t.pipe; Deferred.unit
-  let is_closed t = Pipe.is_closed t.pipe
+  type t = Data.t Pipe_and_monitor.t [@@deriving sexp_of]
 
-  let monitor t = t.monitor
+  let close (t:t) = Pipe.close t.pipe; Deferred.unit
+  let is_closed (t:t) = Pipe.is_closed t.pipe
+
+  let monitor (t:t) = t.monitor
 
   (* Because we don't maintain any buffer, there are no pending writes *)
   let bytes_to_write (_ : t) = 0
 
-  let stopped t = Pipe.closed t.pipe
+  let stopped (t:t) = Pipe.closed t.pipe
 
   (* We consider that a message is flushed as soon as it reaches the underlining
      transport. *)
@@ -155,7 +204,7 @@ module Pipe_writer(Data : DATA) = struct
 
   let sent_result x : _ Send_result.t = Sent x
 
-  let check_closed t f =
+  let check_closed (t:t) f =
     if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed
 
   let send_bin_prot t writer x =
@@ -215,16 +264,13 @@ module Kind = struct
 end
 
 let make_reader (type a) (x : a Kind.t) (reader : a Pipe.Reader.t) =
+  let reader = Pipe_and_buffer.create reader in
   match x with
   | Kind.String    -> Reader.pack (module String_pipe_reader)    reader
   | Kind.Bigstring -> Reader.pack (module Bigstring_pipe_reader) reader
 
 let make_writer (type a) (x : a Kind.t) (writer : a Pipe.Writer.t) =
-  let writer =
-    { pipe = writer
-    ; monitor = Monitor.create ()
-    }
-  in
+  let writer = Pipe_and_monitor.create writer in
   match x with
   | Kind.String    -> Writer.pack (module String_pipe_writer) writer
   | Kind.Bigstring -> Writer.pack (module Bigstring_pipe_writer) writer
@@ -245,7 +291,7 @@ module type Transport_reader = sig
     type t
     val of_bigstring : Bigstring.t -> t
   end
-  include Transport.Reader.S with type t = For_testing.t Pipe.Reader.t
+  include Transport.Reader.S with type t = For_testing.t Pipe_and_buffer.t
 end
 
 module Test_reader (Transport_reader : Transport_reader) =
@@ -282,6 +328,7 @@ struct
 
   let run_test run verify =
     let reader, writer = Pipe.create () in
+    let reader = Pipe_and_buffer.create reader in
     let on_message_count = ref 0 in
     let on_end_of_batch_count = ref 0 in
     let on_message = on_message on_message_count in
@@ -371,6 +418,35 @@ struct
       write (create_message ());
     in
     run_test f (verify 7 40)
+
+
+  let%test_unit "can call read_forever multiple times" =
+    let reader, writer = Pipe.create () in
+    let reader = Pipe_and_buffer.create reader in
+    let on_end_of_batch () = () in
+    let write x = Pipe.write_without_pushback writer (of_bigstring x) in
+    let num = ref 0 in
+    let stop_after_on_message =
+      fun buffer ~pos ~len ->
+        incr num;
+        [%test_result: Bigstring.t] (Bigstring.sub buffer ~pos ~len) ~expect:default_message;
+        Handler_result.Stop ()
+    in
+    write_2_msg_1_chunk write;
+    Pipe.close writer;
+    don't_wait_for (
+      Transport_reader.read_forever reader ~on_message:stop_after_on_message ~on_end_of_batch
+      >>= fun x ->
+      assert (Result.is_ok x);
+      Transport_reader.read_forever reader ~on_message:stop_after_on_message ~on_end_of_batch
+      >>= fun x ->
+      assert (Result.is_ok x);
+      Deferred.unit
+    );
+    wait ();
+    [%test_result: Int.t] ~expect:2 !num
+
+
 end
 
 let%test_module "Test_reader_string"    = (module Test_reader(String_pipe_reader))
@@ -414,6 +490,7 @@ struct
 
   let run_test run =
     let reader, writer = Pipe.create () in
+    let reader = Pipe_and_buffer.create reader in
     let on_message = on_message in
     let on_end_of_batch = on_end_of_batch in
     ignore(Transport_reader.read_forever reader ~on_message ~on_end_of_batch);
