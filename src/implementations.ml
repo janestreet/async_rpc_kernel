@@ -474,7 +474,7 @@ module Instance = struct
             (* In the [Deferred] branch we use [Monitor.try_with], which includes
                backtraces when it catches an exception. For consistency, we also get
                backtraces here. *)
-            let backtrace = Exn.backtrace () in
+            let backtrace = Backtrace.Exn.most_recent () in
             let sexp =
               [%sexp
                 { location = "server-side blocking rpc computation"

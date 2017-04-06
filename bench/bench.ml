@@ -51,7 +51,7 @@ let implementations =
 let create fdr fdw =
   let reader = Rpc.Low_latency_transport.Reader.create fdr ~max_message_size ~config in
   let writer = Rpc.Low_latency_transport.Writer.create fdw ~max_message_size ~config in
-  Async_rpc_kernel.Std.Rpc.Connection.create
+  Async_rpc_kernel.Rpc.Connection.create
     ~implementations ~connection_state:ignore
     { reader; writer }
   >>| Result.ok_exn

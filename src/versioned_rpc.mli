@@ -104,6 +104,18 @@ module Connection_with_menu : sig
   val menu : t -> Menu.t
 end
 
+(** A [Versioned_direct_stream_writer.t] is an extension of an [Rpc.Direct_stream_writer].
+    @see [Rpc.Pipe_rpc.Direct_stream_writer] for documentation. *)
+module Versioned_direct_stream_writer : sig
+  type 'a t
+
+  val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
+  val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+  val close : _ t -> unit
+  val closed : _ t -> unit Deferred.t
+  val is_closed : _ t -> bool
+end
+
 module Caller_converts : sig
 
   module Rpc : sig
@@ -112,10 +124,6 @@ module Caller_converts : sig
     module type S = sig
       type query
       type response
-
-      val deprecated_dispatch_multi
-        : version:int -> Connection.t -> query -> response Or_error.t Deferred.t
-        [@@deprecated "[since 2016-02] use dispatch_multi"]
 
       (** multi-version dispatch *)
       val dispatch_multi
@@ -181,21 +189,18 @@ module Caller_converts : sig
           The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
 
-      val deprecated_dispatch_multi
-        :  version : int
-        -> Connection.t
-        -> query
-        -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
-           , error
-           ) Result.t Or_error.t Deferred.t
-        [@@deprecated "[since 2016-02] use dispatch_multi"]
-
       val dispatch_multi
         : Connection_with_menu.t
         -> query
         -> ( response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
            , error
            ) Result.t Or_error.t Deferred.t
+
+      val dispatch_iter_multi
+        :  Connection_with_menu.t
+        -> query
+        -> f:(response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
+        -> (Pipe_rpc.Id.t, error) Result.t Or_error.t Deferred.t
 
       (** All rpcs supported by [dispatch_multi] *)
       val rpcs : unit -> Any.t list
@@ -238,7 +243,8 @@ module Caller_converts : sig
         val client_pushes_back : bool
       end
 
-      (** add a new version to the set of versions available via [dispatch_multi]. *)
+      (** add a new version to the set of versions available via [dispatch_multi]
+          and [dispatch_iter_multi]. *)
       module Register (Version_i : sig
         include Version_shared
         val model_of_response : response -> Model.response
@@ -253,7 +259,11 @@ module Caller_converts : sig
         include Version_shared
 
         (** [model_of_response] should never raise exceptions.  If it does,
-            [dispatch_multi] is going to raise, which is not supposed to happen. *)
+            [dispatch_multi] is going to raise, which is not supposed to happen.
+
+            One may not call [dispatch_iter_multi] when using [Register_raw] as
+            [Pipe_rpc.dispatch_iter] never has access to a pipe.
+        *)
         val model_of_response
           :  response Pipe.Reader.t
           -> Model.response Or_error.t Pipe.Reader.t
@@ -542,6 +552,16 @@ module Callee_converts : sig
             -> (response Pipe.Reader.t, error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
+      (** implement multiple versions at once, using a [Versioned_direct_stream_writer] *)
+      val implement_direct_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+            -> version:int
+            -> query
+            -> response Versioned_direct_stream_writer.t
+            -> (unit, error) Result.t Deferred.t)
+        -> 'state Implementation.t list
+
       (** All rpcs implemented by [implement_multi] *)
       val rpcs : unit -> Any.t list
 
@@ -583,7 +603,8 @@ module Callee_converts : sig
         val client_pushes_back : bool
       end
 
-      (** add a new version to the set of versions available via [implement_multi]. *)
+      (** add a new version to the set of versions available via [implement_multi]
+          or [implement_direct]. *)
       module Register (Version_i : sig
           include Version_shared
           val response_of_model : Model.response -> response
@@ -592,8 +613,13 @@ module Callee_converts : sig
       end
 
       (** [Register_raw] is like [Register] except you get the whole pipe to deal with.
+
           This is useful if, e.g., your [response_of_model] function can fail, so that
-          you'd like to filter items out from the result pipe. *)
+          you'd like to filter items out from the result pipe.
+
+          You may not call [implement_direct_multi] when using [Register_raw], as
+          [Pipe_rpc.implement_direct] never has access to a pipe.
+      *)
       module Register_raw (Version_i : sig
         include Version_shared
         val response_of_model : Model.response Pipe.Reader.t -> response Pipe.Reader.t
@@ -864,6 +890,12 @@ module Both_convert : sig
            , caller_error
            ) Result.t Or_error.t Deferred.t
 
+      val dispatch_iter_multi
+        :  Connection_with_menu.t
+        -> caller_query
+        -> f:(caller_response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
+        -> (Pipe_rpc.Id.t, caller_error) Result.t Or_error.t Deferred.t
+
       (** implement multiple versions at once *)
       val implement_multi
         :  ?log_not_previously_seen_version : (name:string -> int -> unit)
@@ -871,6 +903,15 @@ module Both_convert : sig
             -> version : int
             -> callee_query
             -> (callee_response Pipe.Reader.t, callee_error) Result.t Deferred.t)
+        -> 'state Implementation.t list
+
+      val implement_direct_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+            -> version:int
+            -> callee_query
+            -> callee_response Versioned_direct_stream_writer.t
+            -> (unit, callee_error) Result.t Deferred.t)
         -> 'state Implementation.t list
 
       (** All supported rpcs. *)
@@ -912,8 +953,13 @@ module Both_convert : sig
       end
 
       (** [Register_raw] is like [Register] except you get the whole pipe to deal with.
+
           This is useful if, e.g., your [caller_model_of_response] function can fail, so
-          that you'd like to filter items out from the result pipe. *)
+          that you'd like to filter items out from the result pipe.
+
+          You can use neither [dispatch_iter_multi] nor [implement_direct_multi] if you
+          use this, as their non-versioned counterparts do not get access to pipes.
+      *)
       module Register_raw (Version_i : sig
           include Version_shared
           val response_of_callee_model
