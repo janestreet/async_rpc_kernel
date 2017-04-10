@@ -479,7 +479,7 @@ module Instance = struct
               [%sexp
                 { location = "server-side blocking rpc computation"
                 ; exn = (exn : exn)
-                ; backtrace = (backtrace : string)
+                ; backtrace = (backtrace : Backtrace.t)
                 }]
             in
             Error (Rpc_error.Uncaught_exn sexp)
