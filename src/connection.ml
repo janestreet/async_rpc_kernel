@@ -444,7 +444,10 @@ let with_close
     ~connection_state transport
   >>= fun t ->
   match t with
-  | Error e -> handle_handshake_error e
+  | Error e ->
+    Transport.close transport
+    >>= fun () ->
+    handle_handshake_error e
   | Ok t ->
     Monitor.protect
       ~finally:(fun () ->
