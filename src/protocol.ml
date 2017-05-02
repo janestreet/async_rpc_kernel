@@ -32,9 +32,7 @@ module Rpc_result = struct
   type 'a t = ('a, Rpc_error.t) Core_kernel.Result.t [@@deriving bin_io, sexp_of]
 end
 
-module Header = struct
-  type t = int list [@@deriving bin_io, sexp]
-end
+module Header = Protocol_version_header
 
 module Query = struct
   type 'a needs_length =

@@ -7,41 +7,16 @@ module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer
 
-let magic_word = "RPC"
-
-let magic_number =
-  String.to_list_rev magic_word
-  |> List.fold ~init:0 ~f:(fun acc c -> (acc * 256) + Char.to_int c)
-
-let%expect_test "magic number" =
-  print_endline (Int.to_string_hum magic_number);
-  [%expect {|
-    4_411_474
-  |}]
-
-let%expect_test "magic number binio" =
-  printf "%S" (Binable.to_string (module Int) magic_number);
-  [%expect {|
-    "\253RPC\000"
-  |}]
-
 module Header : sig
   type t [@@deriving bin_type_class]
   val v1 : t
-  val negotiate_version : t -> t -> int option
-  val contains_magic : t -> bool
+  val negotiate : us:t -> peer:t -> int Or_error.t
 end = struct
   include P.Header
 
-  let v1 = magic_number :: [ 1 ]
+  let negotiate = negotiate ~allow_legacy_peer:true
 
-  let contains_magic t = List.mem ~equal:Int.equal t magic_number
-
-  let negotiate_version t1 t2 =
-    let t1 = Int.Set.of_list t1 in
-    let t2 = Int.Set.of_list t2 in
-    let both = Set.inter t1 t2 in
-    Set.max_elt (Set.remove both magic_number)
+  let v1 = Protocol_version_header.create ~protocol:Rpc ~supported_versions:[1]
 end
 
 module Handshake_error = struct
@@ -50,7 +25,7 @@ module Handshake_error = struct
       | Eof
       | Transport_closed
       | Timeout
-      | Negotiation_failed
+      | Negotiation_failed of Error.t
       | Negotiated_unexpected_version of int
     [@@deriving sexp]
   end
@@ -382,16 +357,17 @@ let do_handshake t ~handshake_timeout =
       Error Handshake_error.Timeout
     | `Result (Error `Eof   ) -> Error Eof
     | `Result (Error `Closed) -> Error Transport_closed
-    | `Result (Ok header) ->
-      match Header.negotiate_version header Header.v1 with
-      | None -> Error Negotiation_failed
-      | Some 1 -> Ok ()
-      | Some i -> Error (Negotiated_unexpected_version i)
+    | `Result (Ok peer) ->
+      match Header.negotiate ~us:Header.v1 ~peer with
+      | Error e -> Error (Negotiation_failed e)
+      | Ok 1 -> Ok ()
+      | Ok i -> Error (Negotiated_unexpected_version i)
   end
 ;;
 
 let contains_magic_prefix =
-  Bin_prot.Type_class.cnv_reader Header.contains_magic Header.bin_t.reader
+  Protocol_version_header.contains_magic_prefix ~protocol:Rpc
+;;
 
 let create
       ?implementations
