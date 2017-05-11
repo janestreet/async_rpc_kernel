@@ -176,7 +176,7 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
   | Response response ->
     handle_response t response ~read_buffer ~read_buffer_pos_ref
   | Query query ->
-    let instance = Set_once.get_exn t.implementations_instance in
+    let instance = Set_once.get_exn t.implementations_instance [%here] in
     Implementations.Instance.handle_query instance
       ~query ~read_buffer ~read_buffer_pos_ref
 ;;
@@ -300,7 +300,7 @@ let run_after_handshake t ~implementations ~connection_state =
       ~connection_description:t.description
       ~connection_state:(connection_state t)
   in
-  Set_once.set_exn t.implementations_instance instance;
+  Set_once.set_exn t.implementations_instance [%here] instance;
   let monitor = Monitor.create ~name:"RPC connection loop" () in
   let reason name exn =
     (exn, Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name))
