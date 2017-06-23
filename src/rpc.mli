@@ -25,7 +25,7 @@ module Description : sig
     { name    : string
     ; version : int
     }
-  [@@deriving compare, sexp_of]
+  [@@deriving compare, hash, sexp_of]
 
   module Stable : sig
     module V1 : sig
