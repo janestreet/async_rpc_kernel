@@ -244,7 +244,7 @@ let on_message t =
         | Error e -> Info.create msg e Rpc_error.sexp_of_t
       in
       don't_wait_for (close t ~reason);
-      Stop ()
+      Stop reason
   in
   Staged.stage f
 ;;
@@ -330,7 +330,8 @@ let run_after_handshake t ~implementations ~connection_state =
         List.iter !(t.heartbeat_callbacks) ~f:(fun f -> f ())
       )
     >>> function
-    | Ok () -> ()
+    | Ok reason ->
+      cleanup t ~reason (Rpc_error.Rpc (Connection_closed, t.description))
     (* The protocol is such that right now, the only outcome of the other side closing the
        connection normally is that we get an eof. *)
     | Error (`Eof | `Closed) ->
