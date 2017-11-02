@@ -79,6 +79,12 @@ module Menu : sig
       implementation for providing a [Menu.t] when one is requested via [Menu.request]. *)
   val add : 's Implementation.t list -> 's Implementation.t list
 
+  (** specify directly how to handle the version menu rpc *)
+  val implement_multi
+    :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+    -> ('s -> version:int -> unit -> Description.t list Deferred.t)
+    -> 's Implementation.t list
+
   (** request an rpc version menu from an rpc connection *)
   val request : Connection.t -> t Or_error.t Deferred.t
 

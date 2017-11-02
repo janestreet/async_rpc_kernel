@@ -27,7 +27,7 @@ let%test_module _ = (module struct
   ;;
 
   let test len =
-    let s = String.create len in
+    let s = Bytes.create len in
     let bigstring_version = bigstring_bin_prot s in
     let with_length_version = bin_prot_with_length s in
     if Bigstring.to_string bigstring_version <> Bigstring.to_string with_length_version

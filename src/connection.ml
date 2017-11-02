@@ -25,6 +25,7 @@ module Handshake_error = struct
       | Eof
       | Transport_closed
       | Timeout
+      | Reading_header_failed of Error.t
       | Negotiation_failed of Error.t
       | Negotiated_unexpected_version of int
     [@@deriving sexp]
@@ -348,17 +349,24 @@ let do_handshake t ~handshake_timeout =
     (* If we use [max_connections] in the server, then this read may just hang until the
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
-    Clock_ns.with_timeout handshake_timeout
-      (Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
+    let result =
+      Monitor.try_with ~run:`Now (fun () ->
+        Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
+    in
+    Clock_ns.with_timeout handshake_timeout result
     >>| function
     | `Timeout ->
       (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
       don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
       Error Handshake_error.Timeout
-    | `Result (Error `Eof   ) -> Error Eof
-    | `Result (Error `Closed) -> Error Transport_closed
-    | `Result (Ok peer) ->
+    | `Result (Error exn) ->
+      let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
+      don't_wait_for (close t ~reason);
+      Error (Reading_header_failed (Error.of_exn exn))
+    | `Result (Ok (Error `Eof   )) -> Error Eof
+    | `Result (Ok (Error `Closed)) -> Error Transport_closed
+    | `Result (Ok (Ok     peer))   ->
       match Header.negotiate ~us:Header.v1 ~peer with
       | Error e -> Error (Negotiation_failed e)
       | Ok 1 -> Ok ()

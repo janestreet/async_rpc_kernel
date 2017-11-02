@@ -588,13 +588,10 @@ module Menu = struct
 
    *********************************************************************)
 
-  type rpc_name = string
-  type rpc_version = int
-
   module Model = struct
     let name = "__Versioned_rpc.Menu"
     type query = unit
-    type response = (rpc_name * rpc_version) list
+    type response = Description.t list
   end
 
   include Callee_converts.Rpc.Make (Model)
@@ -607,7 +604,8 @@ module Menu = struct
       type query = unit [@@deriving bin_io]
       type response = (string * int) list [@@deriving bin_io]
       let model_of_query q = q
-      let response_of_model r = r
+      let response_of_model =
+        List.map ~f:(fun { Description.name; version } -> (name, version))
     end
     include T
     include Register (T)
@@ -616,11 +614,7 @@ module Menu = struct
   module Current_version = V1
 
   let add impls =
-    let menu =
-      List.map impls ~f:(fun i ->
-        match Implementation.description i with
-          { name; version } -> (name, version))
-    in
+    let menu = List.map impls ~f:Implementation.description in
     let menu_impls = implement_multi (fun _ ~version:_ () -> return menu) in
     impls @ menu_impls
 
