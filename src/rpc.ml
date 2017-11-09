@@ -16,7 +16,6 @@ let (>>=~) = Result.(>>=)
 let (>>|~) = Result.(>>|)
 
 module Rpc_common = struct
-
   let dispatch_raw' conn ~tag ~version ~bin_writer_query ~query ~query_id
         ~response_handler =
     let query =
@@ -42,11 +41,6 @@ module Rpc_common = struct
       | Error _ as e -> Ivar.fill response_ivar e
     end;
     Ivar.read response_ivar
-    >>| Rpc_result.or_error
-          ~rpc_tag:tag
-          ~rpc_version:version
-          ~connection_description:(Connection.description conn)
-
 end
 
 module Rpc = struct
@@ -90,7 +84,7 @@ module Rpc = struct
     ; f       = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
     }
 
-  let dispatch t conn query =
+  let dispatch' t conn query =
     let response_handler ivar =
       fun (response : _ P.Response.t) ~read_buffer ~read_buffer_pos_ref ->
         let response =
@@ -106,6 +100,16 @@ module Rpc = struct
     Rpc_common.dispatch_raw conn ~tag:t.tag ~version:t.version
       ~bin_writer_query:t.bin_query.writer ~query ~query_id
       ~f:response_handler
+
+  let rpc_result_to_or_error t conn result =
+    Rpc_result.or_error result
+      ~rpc_tag:t.tag
+      ~rpc_version:t.version
+      ~connection_description:(Connection.description conn)
+
+  let dispatch t conn query =
+    dispatch' t conn query
+    >>| fun result -> rpc_result_to_or_error t conn result
 
   let dispatch_exn t conn query = dispatch t conn query >>| Or_error.ok_exn
 
@@ -200,14 +204,20 @@ module One_way = struct
     ; f       = One_way (t.bin_msg.reader, f)
     }
 
-  let dispatch t conn query =
+  let dispatch' t conn query =
     let query_id = P.Query_id.create () in
     Rpc_common.dispatch_raw' conn ~tag:t.tag ~version:t.version
       ~bin_writer_query:t.bin_msg.writer ~query ~query_id ~response_handler:None
-    |> Rpc_result.or_error
-         ~rpc_tag:t.tag
-         ~rpc_version:t.version
-         ~connection_description:(Connection.description conn)
+
+  let rpc_result_to_or_error t conn result =
+    Rpc_result.or_error result
+      ~rpc_tag:t.tag
+      ~rpc_version:t.version
+      ~connection_description:(Connection.description conn)
+
+  let dispatch t conn query =
+    dispatch' t conn query
+    |> fun result -> rpc_result_to_or_error t conn result
 
   let dispatch_exn t conn query = Or_error.ok_exn (dispatch t conn query)
 
@@ -491,6 +501,10 @@ module Streaming_rpc = struct
           ivar;
           make_update_handler;
         })
+    >>| Rpc_result.or_error
+          ~rpc_tag:t.tag
+          ~rpc_version:t.version
+          ~connection_description:(Connection.description conn)
   ;;
 
   let dispatch_iter t conn query ~f =

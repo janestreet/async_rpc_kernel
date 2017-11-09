@@ -195,6 +195,20 @@ module Rpc : sig
         -> 'response)
     -> 'connection_state Implementation.t
 
+  (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
+      [rpc_result_to_or_error] gives you the same result as [dispatch] *)
+  val dispatch'
+    :  ('query, 'response) t
+    -> Connection.t
+    -> 'query
+    -> 'response Rpc_result.t Deferred.t
+
+  val rpc_result_to_or_error
+    :  ('query, 'response) t
+    -> Connection.t
+    -> 'response Rpc_result.t
+    -> 'response Or_error.t
+
   val dispatch
     :  ('query, 'response) t
     -> Connection.t
@@ -640,6 +654,20 @@ module One_way : sig
     :  'msg t
     -> ('connection_state -> 'msg -> unit)
     -> 'connection_state Implementation.t
+
+  (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
+      [rpc_result_to_or_error] gives you the same result as [dispatch] *)
+  val dispatch'
+    :  'msg t
+    -> Connection.t
+    -> 'msg
+    -> unit Rpc_result.t
+
+  val rpc_result_to_or_error
+    :  'msg t
+    -> Connection.t
+    -> unit Rpc_result.t
+    -> unit Or_error.t
 
   val dispatch
     :  'msg t
