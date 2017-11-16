@@ -17,12 +17,12 @@ let of_type_class (bin_a : _ Bin_prot.Type_class.t) = of_writer bin_a.writer
 
 let%test_module _ = (module struct
   let bigstring_bin_prot s =
-    let bigstring = Bin_prot.Utils.bin_dump String.bin_writer_t s in
+    let bigstring = Bin_prot.Utils.bin_dump Bytes.bin_writer_t s in
     Bin_prot.Utils.bin_dump Bigstring.bin_writer_t bigstring
   ;;
 
   let bin_prot_with_length s =
-    let writer_with_length = of_writer String.bin_writer_t in
+    let writer_with_length = of_writer Bytes.bin_writer_t in
     Bin_prot.Utils.bin_dump writer_with_length s
   ;;
 
