@@ -81,7 +81,7 @@ module Callee_converts = struct
             Or_error.error
               "Version already exists" (name, version) [%sexp_of: string * int]
           | None ->
-            let adapters = Map.add adapters ~key:version ~data:adapter in
+            let adapters = Map.set adapters ~key:version ~data:adapter in
             Ok { name; adapters }
 
       let add_rpc_version t old_rpc upgrade downgrade =
