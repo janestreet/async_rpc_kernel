@@ -1,3 +1,9 @@
+## v0.10
+
+- Exposed function `Rpc.dispatch'`, which is like `dispatch` but returns an
+  `Rpc_result.t`, which has more information than the `Or_error.t` returned by
+  `dispatch`.
+
 ## 113.43.00
 
 - Add some benchmarks for Pipe_rpc
