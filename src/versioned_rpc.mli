@@ -7,35 +7,34 @@
 
     {li
 
-    The {i caller} is responsible for managing versions and dispatches to callees that
+    The {e caller} is responsible for managing versions and dispatches to callees that
     are written in a version-oblivious way.
 
-    The proto-typical example of this scenario is a commander that needs to call out to
+    The prototypical example of this scenario is a commander that needs to call out to
     many assistants for that same system.  In this scenario, the assistants each
     implement a single version of the rpc and the commander has to take this into
     account. }
 
     {li
 
-    The {i callee} is responsible for managing versions and callers need not bother
+    The {e callee} is responsible for managing versions and callers need not bother
     themselves with any versions.
 
-    The proto-typical example of this scenario is an assistant from one system calling
-    out the commander of another system.  In this scenario, the assistants each know a
-    single version of the rpc to call and the commander has to implement them all. }
+    The proto-typical example of this scenario is an assistant from one system calling out
+    the commander of another system.  In this scenario, the assistants each know a single
+    version of the rpc to call and the commander has to implement them all. }
 
     {li
 
-    Both {i caller} and {i callee} cooperate to decide which version to use, each one
+    Both {e caller} and {e callee} cooperate to decide which version to use, each one
     being able to use some subset of all possible versions.
 
-    The proto-typical example of this scenario is when two systems developed
-    independently with their rpc types defined in some shared library that has yet
-    another independent rollout schedule.  In this case one may roll out a new rpc
-    version (V) in the shared library (L) and then the caller and callee systems can each
-    upgrade to the new version of L supporting version V at their own pace, with version
-    V only being exercised once both caller and callee have upgraded.  }
-    }
+    The prototypical example of this scenario is when two systems developed independently
+    with their rpc types defined in some shared library that has yet another independent
+    rollout schedule.  In this case one may roll out a new rpc version (V) in the shared
+    library (L) and then the caller and callee systems can each upgrade to the new version
+    of L supporting version V at their own pace, with version V only being exercised once
+    both caller and callee have upgraded.  } }
 
     In each scenario, it is desirable that the party responsible for managing versions be
     coded largely in terms of a single "master" version of the types involved, with all
@@ -67,43 +66,43 @@ open! Async_kernel
 
 open Rpc
 
-(** Over the network discovery of rpc names and versions supported by a callee.
+(** Over-the-network discovery of rpc names and versions supported by a callee.
 
     This is used by the [dispatch_multi] functions in [Caller_converts] and [Both_convert]
     to dynamically determine the most appropriate version to use. *)
 module Menu : sig
 
-  type t (** a directory of supported rpc names and versions. *)
+  type t (** A directory of supported rpc names and versions. *)
 
   (** [add impls] extends a list of rpc implementations with an additional rpc
       implementation for providing a [Menu.t] when one is requested via [Menu.request]. *)
   val add : 's Implementation.t list -> 's Implementation.t list
 
-  (** specify directly how to handle the version menu rpc *)
+  (** Specifies directly how to handle the version menu rpc. *)
   val implement_multi
     :  ?log_not_previously_seen_version:(name:string -> int -> unit)
     -> ('s -> version:int -> unit -> Description.t list Deferred.t)
     -> 's Implementation.t list
 
-  (** request an rpc version menu from an rpc connection *)
+  (** Requests an rpc version menu from an rpc connection. *)
   val request : Connection.t -> t Or_error.t Deferred.t
 
-  (** find what rpcs are supported *)
+  (** Finds what rpcs are supported. *)
   val supported_rpcs : t -> Description.t list
 
-  (** find what versions of a particular rpc are supported *)
+  (** Finds what versions of a particular rpc are supported. *)
   val supported_versions : t -> rpc_name:string -> Int.Set.t
 
-  (** create a menu directly -- generally you should use [request] instead *)
+  (** Creates a menu directly -- generally you should use [request] instead. *)
   val create : Description.t list -> t
 
-  (** the internal name of this RPC -- for example to be used in [Rpc.Expert] to
+  (** The internal name of this RPC -- for example to be used in [Rpc.Expert] to
       distinguish it from other queries. *)
   val rpc_name : string
 end
 
 module Connection_with_menu : sig
-  type t (** an rpc connection paired with the menu of rpcs one may call on it *)
+  type t (** An rpc connection paired with the menu of rpcs one may call on it. *)
   val create : Connection.t -> t Deferred.Or_error.t
   val create_directly : Connection.t -> Menu.t -> t
   val connection : t -> Connection.t
@@ -131,15 +130,15 @@ module Caller_converts : sig
       type query
       type response
 
-      (** multi-version dispatch *)
+      (** Multi-version dispatch. *)
       val dispatch_multi
         : Connection_with_menu.t -> query -> response Or_error.t Deferred.t
 
-      (** All rpcs supported by [dispatch_multi] *)
+      (** All rpcs supported by [dispatch_multi]. *)
       val rpcs : unit -> Any.t list
 
-      (** All versions supported by [dispatch_multi].
-          (useful for computing which old versions may be pruned) *)
+      (** All versions supported by [dispatch_multi] (useful for computing which old
+          versions may be pruned). *)
       val versions : unit -> Int.Set.t
 
       val name : string
@@ -164,7 +163,7 @@ module Caller_converts : sig
         type response
       end) : sig
 
-      (** add a new version to the set of versions available via [dispatch_multi]. *)
+      (** Adds a new version to the set of versions available via [dispatch_multi]. *)
       module Register (Version_i : sig
           val version : int
           type query [@@deriving bin_io]
@@ -190,7 +189,7 @@ module Caller_converts : sig
       type response
       type error
 
-      (** multi-version dispatch
+      (** Multi-version dispatch.
 
           The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
@@ -292,7 +291,7 @@ module Caller_converts : sig
       type update
       type error
 
-      (** multi-version dispatch
+      (** Multi-version dispatch
 
           The return type varies slightly from [Rpc.State_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
@@ -306,8 +305,8 @@ module Caller_converts : sig
       (** All rpcs supported by [dispatch_multi] *)
       val rpcs : unit -> Any.t list
 
-      (** All versions supported by [dispatch_multi].
-          (useful for computing which old versions may be pruned) *)
+      (** All versions supported by [dispatch_multi] (useful for computing which old
+          versions may be pruned). *)
       val versions : unit -> Int.Set.t
 
       val name : string
@@ -347,7 +346,7 @@ module Caller_converts : sig
         val client_pushes_back : bool
       end
 
-      (** add a new version to the set of versions available via [dispatch_multi]. *)
+      (** Adds a new version to the set of versions available via [dispatch_multi]. *)
       module Register (Version_i : sig
         include Version_shared
         val model_of_update : update -> Model.update
