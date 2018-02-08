@@ -1,7 +1,7 @@
 open Core_kernel
 open Async_kernel
 
-module Time_ns = Async_kernel_private.Time_ns
+module Time_ns = Core_kernel.Core_kernel_private.Time_ns_alternate_sexp
 
 module P = Protocol
 module Reader = Transport.Reader
@@ -242,7 +242,15 @@ let on_message t =
         let msg = "Rpc message handling loop stopped" in
         match result with
         | Ok () -> Info.of_string msg
-        | Error e -> Info.create msg e Rpc_error.sexp_of_t
+        | Error e ->
+          Info.create msg e
+            (Rpc_error.sexp_of_t
+               ~get_connection_close_reason:(fun () ->
+                 [%sexp
+                   "Connection.on_message resulted in Connection_closed error. \
+                    This is weird."]
+               )
+            )
       in
       don't_wait_for (close t ~reason);
       Stop reason
@@ -299,6 +307,7 @@ let run_after_handshake t ~implementations ~connection_state =
   let instance =
     Implementations.instantiate implementations ~writer:t.writer
       ~connection_description:t.description
+      ~connection_close_started:(Ivar.read t.close_started)
       ~connection_state:(connection_state t)
   in
   Set_once.set_exn t.implementations_instance [%here] instance;

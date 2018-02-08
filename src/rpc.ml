@@ -106,6 +106,7 @@ module Rpc = struct
       ~rpc_tag:t.tag
       ~rpc_version:t.version
       ~connection_description:(Connection.description conn)
+      ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
 
   let dispatch t conn query =
     dispatch' t conn query
@@ -123,7 +124,12 @@ module Rpc = struct
         fun response ~read_buffer ~read_buffer_pos_ref ->
           match response.data with
           | Error e ->
-            handle_error (Error.t_of_sexp (Rpc_error.sexp_of_t e));
+            handle_error (Error.t_of_sexp (
+              Rpc_error.sexp_of_t ~get_connection_close_reason:(fun () ->
+                [%sexp
+                  (Deferred.peek (
+                     Connection.close_reason ~on_close:`started conn) : Info.t option)])
+                e));
             `remove (Ok ())
           | Ok len ->
             let len = (len : Nat0.t :> int) in
@@ -214,6 +220,7 @@ module One_way = struct
       ~rpc_tag:t.tag
       ~rpc_version:t.version
       ~connection_description:(Connection.description conn)
+      ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
 
   let dispatch t conn query =
     dispatch' t conn query
@@ -401,8 +408,11 @@ module Streaming_rpc = struct
     type 'a t = { mutable state : 'a State.t }
   end
 
-  let read_error (handler : _ Response_state.Update_handler.t) err =
-    let core_err = Error.t_of_sexp (Rpc_error.sexp_of_t err) in
+  let read_error
+        ~get_connection_close_reason (handler : _ Response_state.Update_handler.t) err =
+    let core_err =
+      Error.t_of_sexp (Rpc_error.sexp_of_t ~get_connection_close_reason err)
+    in
     ignore (handler (Closed (`Error core_err)) : Pipe_response.t);
     `remove (Error err)
 
@@ -410,7 +420,7 @@ module Streaming_rpc = struct
     ignore (handler (Closed `By_remote_side) : Pipe_response.t);
     `remove (Ok ())
 
-  let response_handler initial_state : Connection.response_handler =
+  let response_handler ~get_connection_close_reason initial_state : Connection.response_handler =
     let open Response_state in
     let state = { state = Waiting_for_initial_response initial_state } in
     fun response ~read_buffer ~read_buffer_pos_ref ->
@@ -418,7 +428,7 @@ module Streaming_rpc = struct
       | Writing_updates (bin_reader_update, handler) ->
         begin match response.data with
         | Error err ->
-          read_error handler err
+          read_error ~get_connection_close_reason handler err
         | Ok len ->
           let data =
             bin_read_from_bigstring
@@ -429,7 +439,7 @@ module Streaming_rpc = struct
           in
           match data with
           | Error err ->
-            read_error handler err
+            read_error ~get_connection_close_reason handler err
           | Ok `Eof ->
             eof handler
           | Ok (`Ok len) ->
@@ -440,7 +450,7 @@ module Streaming_rpc = struct
             in
             match data with
             | Error err ->
-              read_error handler err
+              read_error ~get_connection_close_reason handler err
             | Ok data ->
               match handler (Update data) with
               | Continue -> `keep
@@ -494,7 +504,12 @@ module Streaming_rpc = struct
     Rpc_common.dispatch_raw conn ~query_id ~tag:t.tag ~version:t.version
       ~bin_writer_query ~query
       ~f:(fun ivar ->
-        response_handler {
+        response_handler ~get_connection_close_reason:(fun () ->
+          [%sexp
+            (Deferred.peek (Connection.close_reason ~on_close:`started conn)
+             : Info.t option)
+          ]
+        ) {
           rpc = t;
           query_id;
           connection = conn;
@@ -505,6 +520,7 @@ module Streaming_rpc = struct
           ~rpc_tag:t.tag
           ~rpc_version:t.version
           ~connection_description:(Connection.description conn)
+          ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
   ;;
 
   let dispatch_iter t conn query ~f =

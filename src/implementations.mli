@@ -77,6 +77,7 @@ end
 val instantiate
   :  'a t
   -> connection_description : Info.t
+  -> connection_close_started : Info.t Deferred.t
   -> connection_state : 'a
   -> writer : Transport.Writer.t
   -> Instance.t

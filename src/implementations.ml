@@ -86,6 +86,7 @@ module Instance = struct
     ; mutable stopped          : bool
     ; connection_state         : 'a
     ; connection_description   : Info.t
+    ; connection_close_started : Info.t Deferred.t
     ; mutable last_dispatched_implementation :
         (Description.t * 'a Implementation.F.t sexp_opaque) option
     (* [packed_self] is here so we can essentially pack an unpacked instance without doing
@@ -351,7 +352,7 @@ module Instance = struct
         Ivar.fill t.closed ();
         let groups = t.groups in
         if not (Bag.is_empty groups) then
-          Async_kernel_private.Scheduler.Very_low_priority_work.enqueue
+          Async_kernel_scheduler.Very_low_priority_work.enqueue
             ~f:(fun () ->
               match Bag.remove_one groups with
               | None -> Finished
@@ -421,244 +422,247 @@ module Instance = struct
     ;;
   end
 
-  let apply_implementation
-        t
-        implementation
-        ~(query : Nat0.t P.Query.t)
-        ~read_buffer
-        ~read_buffer_pos_ref
-    : _ Transport.Handler_result.t =
-    let id = query.id in
-    match implementation with
-    | Implementation.F.One_way (bin_query_reader, f) ->
-      let query_contents =
-        bin_read_from_bigstring bin_query_reader read_buffer ~pos_ref:read_buffer_pos_ref
-          ~len:query.data
-          ~location:"server-side one-way rpc message un-bin-io'ing"
-      in
-      (match query_contents with
-       | Error _ as err ->
-         Stop err
-       | Ok q ->
-         try
-           f t.connection_state q;
-           Continue
-         with exn ->
-           Stop
-             (Rpc_result.uncaught_exn exn
-                ~location:"server-side one-way rpc computation")
-      )
-    | Implementation.F.One_way_expert f ->
-      (try
-         let len = (query.data :> int) in
-         f t.connection_state read_buffer ~pos:!read_buffer_pos_ref ~len;
-         read_buffer_pos_ref := !read_buffer_pos_ref + len;
+let apply_implementation
+      t
+      implementation
+      ~(query : Nat0.t P.Query.t)
+      ~read_buffer
+      ~read_buffer_pos_ref
+  : _ Transport.Handler_result.t =
+  let id = query.id in
+  match implementation with
+  | Implementation.F.One_way (bin_query_reader, f) ->
+    let query_contents =
+      bin_read_from_bigstring bin_query_reader read_buffer ~pos_ref:read_buffer_pos_ref
+        ~len:query.data
+        ~location:"server-side one-way rpc message un-bin-io'ing"
+    in
+    (match query_contents with
+     | Error _ as err ->
+       Stop err
+     | Ok q ->
+       try
+         f t.connection_state q;
          Continue
        with exn ->
          Stop
            (Rpc_result.uncaught_exn exn
-              ~location:"server-side one-way rpc expert computation")
-      )
-    | Implementation.F.Rpc (bin_query_reader, bin_response_writer, f, result_mode) ->
-      let query_contents =
-        bin_read_from_bigstring bin_query_reader read_buffer
-          ~pos_ref:read_buffer_pos_ref
-          ~len:query.data
-          ~location:"server-side rpc query un-bin-io'ing"
-      in
-      begin match result_mode with
-      | Implementation.F.Blocking ->
-        let data =
-          try query_contents >>|~ f t.connection_state with
-          | exn ->
-            (* In the [Deferred] branch we use [Monitor.try_with], which includes
-               backtraces when it catches an exception. For consistency, we also get
-               backtraces here. *)
-            let backtrace = Backtrace.Exn.most_recent () in
-            let sexp =
-              [%sexp
-                { location = "server-side blocking rpc computation"
-                ; exn = (exn : exn)
-                ; backtrace = (backtrace : Backtrace.t)
-                }]
-            in
-            Error (Rpc_error.Uncaught_exn sexp)
-        in
-        write_response t id bin_response_writer data
-      | Implementation.F.Deferred ->
-        let data =
-          Rpc_result.try_with ~run:`Now
-            ~location:"server-side rpc computation" (fun () ->
-              defer_result (query_contents >>|~ f t.connection_state))
-        in
-        (* In the common case that the implementation returns a value immediately, we will
-           write the response immediately as well (this is also why the above [try_with]
-           has [~run:`Now]).  This can be a big performance win for servers that get many
-           queries in a single Async cycle. *)
-        ( match Deferred.peek data with
-          | None -> data >>> write_response t id bin_response_writer
-          | Some data -> write_response t id bin_response_writer data );
-      end;
-      Continue
-    | Implementation.F.Rpc_expert (f, result_mode) ->
-      let responder = Implementation.Expert.Responder.create query.id t.writer in
-      let d =
-        (* We need the [Monitor.try_with] even for the blocking mode as the implementation
-           might return [Delayed_reponse], so we don't bother optimizing the blocking
-           mode. *)
-        Monitor.try_with ~run:`Now (fun () ->
-          let len = (query.data :> int) in
-          let result =
-            f t.connection_state responder read_buffer
-              ~pos:!read_buffer_pos_ref ~len
+              ~location:"server-side one-way rpc computation")
+    )
+  | Implementation.F.One_way_expert f ->
+    (try
+       let len = (query.data :> int) in
+       f t.connection_state read_buffer ~pos:!read_buffer_pos_ref ~len;
+       read_buffer_pos_ref := !read_buffer_pos_ref + len;
+       Continue
+     with exn ->
+       Stop
+         (Rpc_result.uncaught_exn exn
+            ~location:"server-side one-way rpc expert computation")
+    )
+  | Implementation.F.Rpc (bin_query_reader, bin_response_writer, f, result_mode) ->
+    let query_contents =
+      bin_read_from_bigstring bin_query_reader read_buffer
+        ~pos_ref:read_buffer_pos_ref
+        ~len:query.data
+        ~location:"server-side rpc query un-bin-io'ing"
+    in
+    begin match result_mode with
+    | Implementation.F.Blocking ->
+      let data =
+        try query_contents >>|~ f t.connection_state with
+        | exn ->
+          (* In the [Deferred] branch we use [Monitor.try_with], which includes
+             backtraces when it catches an exception. For consistency, we also get
+             backtraces here. *)
+          let backtrace = Backtrace.Exn.most_recent () in
+          let sexp =
+            [%sexp
+              { location = "server-side blocking rpc computation"
+              ; exn = (exn : exn)
+              ; backtrace = (backtrace : Backtrace.t)
+              }]
           in
-          match result_mode with
-          | Implementation.F.Deferred -> result
-          | Implementation.F.Blocking -> Deferred.return result
-        )
+          Error (Rpc_error.Uncaught_exn sexp)
       in
-      let handle_exn exn =
+      write_response t id bin_response_writer data
+    | Implementation.F.Deferred ->
+      let data =
+        Rpc_result.try_with ~run:`Now
+          ~location:"server-side rpc computation" (fun () ->
+            defer_result (query_contents >>|~ f t.connection_state))
+      in
+      (* In the common case that the implementation returns a value immediately, we will
+         write the response immediately as well (this is also why the above [try_with]
+         has [~run:`Now]).  This can be a big performance win for servers that get many
+         queries in a single Async cycle. *)
+      ( match Deferred.peek data with
+        | None -> data >>> write_response t id bin_response_writer
+        | Some data -> write_response t id bin_response_writer data );
+    end;
+    Continue
+  | Implementation.F.Rpc_expert (f, result_mode) ->
+    let responder = Implementation.Expert.Responder.create query.id t.writer in
+    let d =
+      (* We need the [Monitor.try_with] even for the blocking mode as the implementation
+         might return [Delayed_reponse], so we don't bother optimizing the blocking
+         mode. *)
+      Monitor.try_with ~run:`Now (fun () ->
+        let len = (query.data :> int) in
         let result =
-          Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
+          f t.connection_state responder read_buffer
+            ~pos:!read_buffer_pos_ref ~len
         in
-        if responder.responded then
-          result
+        match result_mode with
+        | Implementation.F.Deferred -> result
+        | Implementation.F.Blocking -> Deferred.return result
+      )
+    in
+    let handle_exn exn =
+      let result =
+        Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
+      in
+      if responder.responded then
+        result
+      else begin
+        write_response t id bin_writer_unit result;
+        Ok ()
+      end
+    in
+    let check_responded () =
+      if responder.responded
+      then Ok ()
+      else handle_exn (Failure "Expert implementation did not reply")
+    in
+    let d =
+      let open Deferred_immediate in
+      d >>| function
+      | Ok result ->
+        let d =
+          match result with
+          | Replied -> Deferred.unit
+          | Delayed_response d -> d
+        in
+        if Deferred.is_determined d then
+          check_responded ()
         else begin
-          write_response t id bin_writer_unit result;
+          upon d
+            (fun () ->
+               check_responded ()
+               |> Rpc_result.or_error
+                    ~rpc_tag:query.tag
+                    ~rpc_version:query.version
+                    ~connection_description:t.connection_description
+                    ~connection_close_started:t.connection_close_started
+               |> ok_exn);
           Ok ()
         end
-      in
-      let check_responded () =
-        if responder.responded
-        then Ok ()
-        else handle_exn (Failure "Expert implementation did not reply")
-      in
-      let d =
-        let open Deferred_immediate in
-        d >>| function
-        | Ok result ->
-          let d =
-            match result with
-            | Replied -> Deferred.unit
-            | Delayed_response d -> d
-          in
-          if Deferred.is_determined d then
-            check_responded ()
-          else begin
-            upon d
-              (fun () ->
-                 check_responded ()
-                 |> Rpc_result.or_error
-                      ~rpc_tag:query.tag
-                      ~rpc_version:query.version
-                      ~connection_description:t.connection_description
-                 |> ok_exn);
-            Ok ()
-          end
-        | Error exn -> handle_exn exn
-      in
-      ( match Deferred.peek d with
-        | None ->
-          Wait (d >>| fun r ->
-                ok_exn (Rpc_result.or_error
-                          ~rpc_tag:query.tag
-                          ~rpc_version:query.version
-                          ~connection_description:t.connection_description
-                          r))
-        | Some result ->
-          match result with
-          | Ok ()   -> Continue
-          | Error _ -> Stop result
-      )
-    | Implementation.F.Streaming_rpc
-        (bin_query_reader, bin_init_writer, bin_update_writer, impl) ->
-      let stream_query =
-        bin_read_from_bigstring P.Stream_query.bin_reader_nat0_t
-          read_buffer ~pos_ref:read_buffer_pos_ref
-          ~len:query.data
-          ~location:"server-side pipe_rpc stream_query un-bin-io'ing"
-          ~add_len:(function `Abort -> 0 | `Query (len : Nat0.t) -> (len :> int))
-      in
-      begin
-        match stream_query with
-        | Error _err -> ()
-        | Ok `Abort ->
-          (* Note that there's some delay between when we receive a pipe RPC query and
-             when we put something in [open_streaming_responses] (we wait for
-             a user-supplied function to return). During this time, an abort message would
-             just be ignored. The dispatcher can't abort the query while this is
-             happening, though, since the interface doesn't expose the ID required to
-             abort the query until after a response has been returned. *)
-          Option.iter (Hashtbl.find t.open_streaming_responses query.id) ~f:(function
-            | Pipe pipe -> Pipe.close_read pipe
-            | Direct w -> Direct_stream_writer.close w
-          )
-        | Ok (`Query len) ->
-          let data =
-            bin_read_from_bigstring bin_query_reader read_buffer
-              ~pos_ref:read_buffer_pos_ref ~len
-              ~location:"streaming_rpc server-side query un-bin-io'ing"
-          in
-          let stream_writer =
-            Cached_stream_writer.create ~id ~bin_writer:bin_update_writer
-          in
-          let impl_with_state =
-            match impl with
-            | Pipe f -> `Pipe f
-            | Direct f ->
-              let writer : _ Direct_stream_writer.t =
-                { id         = Direct_stream_writer.Id.create ()
-                ; state      = Not_started (Queue.create ())
-                ; closed     = Ivar.create ()
-                ; instance   = t.packed_self
-                ; query_id   = id
-                ; groups     = Bag.create ()
-                ; stream_writer
-                }
-              in
-              Hashtbl.set t.open_streaming_responses ~key:query.id ~data:(Direct writer);
-              `Direct (f, writer)
-          in
-          let run_impl impl split_ok handle_ok =
-            Rpc_result.try_with (fun () -> defer_result (data >>|~ impl))
-              ~location:"server-side pipe_rpc computation"
-            >>> function
-            | Error err ->
-              Hashtbl.remove t.open_streaming_responses id;
-              write_response t id bin_init_writer (Error err)
-            | Ok (Error err) ->
-              Hashtbl.remove t.open_streaming_responses id;
-              write_response t id bin_init_writer (Ok err)
-            | Ok (Ok ok) ->
-              let (initial, rest) = split_ok ok in
-              write_response t id bin_init_writer (Ok initial);
-              handle_ok rest
-          in
-          match impl_with_state with
-          | `Pipe f ->
-            run_impl
-              (fun data -> f t.connection_state data)
-              Fn.id
-              (fun pipe_r ->
-                 Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
-                 don't_wait_for
-                   (Writer.transfer t.writer pipe_r
-                      (Cached_stream_writer.write stream_writer t.packed_self id));
-                 Pipe.closed pipe_r >>> fun () ->
-                 Pipe.upstream_flushed pipe_r
-                 >>> function
-                 | `Ok | `Reader_closed ->
-                   write_response t id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof);
-                   Hashtbl.remove t.open_streaming_responses id
-              )
-          | `Direct (f, writer) ->
-            run_impl
-              (fun data -> f t.connection_state data writer)
-              (fun x -> (x, ()))
-              (fun () -> Direct_stream_writer.start writer)
-      end;
-      Continue
-  ;;
+      | Error exn -> handle_exn exn
+    in
+    ( match Deferred.peek d with
+      | None ->
+        Wait (d >>| fun r ->
+              ok_exn (
+                Rpc_result.or_error
+                  ~rpc_tag:query.tag
+                  ~rpc_version:query.version
+                  ~connection_description:t.connection_description
+                  ~connection_close_started:t.connection_close_started
+                  r))
+      | Some result ->
+        match result with
+        | Ok ()   -> Continue
+        | Error _ -> Stop result
+    )
+  | Implementation.F.Streaming_rpc
+      (bin_query_reader, bin_init_writer, bin_update_writer, impl) ->
+    let stream_query =
+      bin_read_from_bigstring P.Stream_query.bin_reader_nat0_t
+        read_buffer ~pos_ref:read_buffer_pos_ref
+        ~len:query.data
+        ~location:"server-side pipe_rpc stream_query un-bin-io'ing"
+        ~add_len:(function `Abort -> 0 | `Query (len : Nat0.t) -> (len :> int))
+    in
+    begin
+      match stream_query with
+      | Error _err -> ()
+      | Ok `Abort ->
+        (* Note that there's some delay between when we receive a pipe RPC query and
+           when we put something in [open_streaming_responses] (we wait for
+           a user-supplied function to return). During this time, an abort message would
+           just be ignored. The dispatcher can't abort the query while this is
+           happening, though, since the interface doesn't expose the ID required to
+           abort the query until after a response has been returned. *)
+        Option.iter (Hashtbl.find t.open_streaming_responses query.id) ~f:(function
+          | Pipe pipe -> Pipe.close_read pipe
+          | Direct w -> Direct_stream_writer.close w
+        )
+      | Ok (`Query len) ->
+        let data =
+          bin_read_from_bigstring bin_query_reader read_buffer
+            ~pos_ref:read_buffer_pos_ref ~len
+            ~location:"streaming_rpc server-side query un-bin-io'ing"
+        in
+        let stream_writer =
+          Cached_stream_writer.create ~id ~bin_writer:bin_update_writer
+        in
+        let impl_with_state =
+          match impl with
+          | Pipe f -> `Pipe f
+          | Direct f ->
+            let writer : _ Direct_stream_writer.t =
+              { id         = Direct_stream_writer.Id.create ()
+              ; state      = Not_started (Queue.create ())
+              ; closed     = Ivar.create ()
+              ; instance   = t.packed_self
+              ; query_id   = id
+              ; groups     = Bag.create ()
+              ; stream_writer
+              }
+            in
+            Hashtbl.set t.open_streaming_responses ~key:query.id ~data:(Direct writer);
+            `Direct (f, writer)
+        in
+        let run_impl impl split_ok handle_ok =
+          Rpc_result.try_with (fun () -> defer_result (data >>|~ impl))
+            ~location:"server-side pipe_rpc computation"
+          >>> function
+          | Error err ->
+            Hashtbl.remove t.open_streaming_responses id;
+            write_response t id bin_init_writer (Error err)
+          | Ok (Error err) ->
+            Hashtbl.remove t.open_streaming_responses id;
+            write_response t id bin_init_writer (Ok err)
+          | Ok (Ok ok) ->
+            let (initial, rest) = split_ok ok in
+            write_response t id bin_init_writer (Ok initial);
+            handle_ok rest
+        in
+        match impl_with_state with
+        | `Pipe f ->
+          run_impl
+            (fun data -> f t.connection_state data)
+            Fn.id
+            (fun pipe_r ->
+               Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
+               don't_wait_for
+                 (Writer.transfer t.writer pipe_r
+                    (Cached_stream_writer.write stream_writer t.packed_self id));
+               Pipe.closed pipe_r >>> fun () ->
+               Pipe.upstream_flushed pipe_r
+               >>> function
+               | `Ok | `Reader_closed ->
+                 write_response t id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof);
+                 Hashtbl.remove t.open_streaming_responses id
+            )
+        | `Direct (f, writer) ->
+          run_impl
+            (fun data -> f t.connection_state data writer)
+            (fun x -> (x, ()))
+            (fun () -> Direct_stream_writer.start writer)
+    end;
+    Continue
+;;
 
   let flush (T t) =
     assert (not t.stopped);
@@ -765,13 +769,15 @@ let create ~implementations:i's ~on_unknown_rpc =
       on_unknown_rpc = (on_unknown_rpc :> _ on_unknown_rpc);
     }
 
-let instantiate t ~connection_description ~connection_state ~writer =
+let instantiate t
+      ~connection_description ~connection_close_started ~connection_state ~writer =
   let rec unpacked : _ Instance.unpacked =
     { implementations = t
     ; writer
     ; open_streaming_responses = Hashtbl.Poly.create ~size:10 ()
     ; connection_state
     ; connection_description
+    ; connection_close_started
     ; stopped = false
     ; last_dispatched_implementation = None
     ; packed_self = Instance.T unpacked

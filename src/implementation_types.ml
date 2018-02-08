@@ -119,6 +119,7 @@ and Implementations : sig
       ; mutable stopped          : bool
       ; connection_state         : 'a
       ; connection_description   : Info.t
+      ; connection_close_started   : Info.t Deferred.t
       ; mutable last_dispatched_implementation :
           (Description.t * 'a Implementation.F.t) option
       ; packed_self              : t

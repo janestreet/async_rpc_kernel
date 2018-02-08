@@ -1,7 +1,7 @@
 open! Core_kernel
 open! Async_kernel
 
-include module type of struct include Async_kernel_private.Persistent_connection end
+include module type of struct include Async_kernel.Persistent_connection end
 
 module Rpc : S
   with type conn    = Rpc.Connection.t

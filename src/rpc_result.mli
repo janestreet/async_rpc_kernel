@@ -17,5 +17,6 @@ val or_error
   : rpc_tag:Protocol.Rpc_tag.t
   -> rpc_version:int
   -> connection_description:Info.t
+  -> connection_close_started:Info.t Deferred.t
   -> 'a t
   -> 'a Or_error.t
