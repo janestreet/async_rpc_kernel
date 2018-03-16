@@ -3,7 +3,7 @@
   (c_names (stubs))
 (flags (:standard -safe-string))
   (libraries (async))
-  (preprocess (pps (ppx_jane ppx_driver.runner)))))
+  (preprocess (pps (ppx_jane ppxlib.runner)))))
 
 
 (jbuild_version 1)
