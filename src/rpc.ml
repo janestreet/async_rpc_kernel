@@ -716,7 +716,12 @@ module Pipe_rpc = struct
           match write buffer ~pos:0 x with
           | len ->
             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len
-          | exception Bin_prot.Common.Buffer_short ->
+          | exception _ ->
+            (* It's likely that the exception is due to a buffer overflow, so resize the
+               internal buffer and try again. Technically we could match on
+               [Bin_prot.Common.Buffer_short] only, however we can't easily enforce that
+               custom bin_write_xxx functions raise this particular exception and not
+               [Invalid_argument] or [Failure] for instance. *)
             let len = size x in
             Bigstring.unsafe_destroy buffer;
             let buffer = Bigstring.create (Int.ceil_pow2 len) in
