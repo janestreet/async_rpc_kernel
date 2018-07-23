@@ -540,7 +540,7 @@ module Streaming_rpc = struct
         | Update data ->
           if not (Pipe.is_closed pipe_w) then begin
             Pipe.write_without_pushback pipe_w data;
-            if t.client_pushes_back && Pipe.length pipe_w = Pipe.size_budget pipe_w then
+            if t.client_pushes_back && Pipe.length pipe_w >= Pipe.size_budget pipe_w then
               Wait
                 (Pipe.downstream_flushed pipe_w
                  >>| function

@@ -344,14 +344,18 @@ module Pipe_rpc : sig
   end
 
   val create
-    (** If [client_pushes_back] is set, the client side of the connection will stop
+    (** If the connection is backed up, the server stops consuming elements from the
+        pipe. Servers should pay attention to the pipe's pushback, otherwise they risk
+        running out of memory if they fill the pipe much faster than the transport can
+        handle, or if the client pushes back as discussed next.
+
+        If [client_pushes_back] is set, the client side of the connection will stop
         reading elements from the underlying file descriptor when the client's pipe has
         a sufficient number of elements enqueued, rather than reading elements eagerly.
-        This will eventually cause writes on the server's side to stop working, which
-        gives the server an indication when a client is backed up.
+        This will eventually cause writes on the server's side to block, indicating to
+        the server it should slow down.
 
-        Setting this allows a careful server to notice when its clients are unable to keep
-        up and slow down its work accordingly.  However, it has some drawbacks:
+        There are some drawbacks to using [client_pushes_back]:
 
         - RPC multiplexing doesn't work as well.  The client will stop reading *all*
         messages on the connection if any pipe gets saturated, not just ones relating
