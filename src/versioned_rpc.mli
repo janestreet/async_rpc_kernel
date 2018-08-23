@@ -103,6 +103,7 @@ end
 
 module Connection_with_menu : sig
   type t (** An rpc connection paired with the menu of rpcs one may call on it. *)
+
   val create : Connection.t -> t Deferred.Or_error.t
   val create_directly : Connection.t -> Menu.t -> t
   val connection : t -> Connection.t
