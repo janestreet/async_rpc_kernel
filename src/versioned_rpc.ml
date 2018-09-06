@@ -618,7 +618,7 @@ module Menu = struct
     let menu_impls = implement_multi (fun _ ~version:_ () -> return menu) in
     impls @ menu_impls
 
-  type t = Int.Set.t String.Table.t
+  type t = Int.Set.t String.Table.t [@@deriving sexp_of]
 
   let supported_rpcs t =
     let open List.Monad_infix in
@@ -666,17 +666,50 @@ end
 
 module Caller_converts = struct
 
-  let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions =
+  let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions ~callee_menu =
     match Set.max_elt (Set.inter callee_versions caller_versions) with
     | Some version -> Ok version
     | None ->
-      Or_error.error "caller and callee share no common versions for rpc"
-        ( `Rpc rpc_name
-        , `Caller_versions caller_versions
-        , `Callee_versions callee_versions )
-        [%sexp_of: [ `Rpc of string ]
-                    * [ `Caller_versions of Int.Set.t ]
-                    * [ `Callee_versions of Int.Set.t ]]
+      error_s [%message "caller and callee share no common versions for rpc"
+        (rpc_name : string)
+        (caller_versions : Int.Set.t)
+        (callee_versions : Int.Set.t)
+        (callee_menu : Menu.t)
+      ]
+
+  let%expect_test "highest version number is taken in most_recent_common_version" =
+    let rpc_name = "the-rpc" in
+    let menu = Menu.of_entries [rpc_name, 2] in
+    let result =
+      most_recent_common_version
+        ~rpc_name
+        ~caller_versions:(Int.Set.of_list [1;2;3])
+        ~callee_versions:(Int.Set.of_list [2])
+        ~callee_menu:menu
+    in
+    print_s [%sexp (result:int Or_error.t)];
+    [%expect {| (Ok 2) |}]
+  ;;
+
+  let%expect_test "error from most_recent_common_version looks reasonable" =
+    let the_rpc = "the-rpc" in
+    let not_the_rpc = "other-rpc" in
+    let menu = Menu.of_entries [not_the_rpc, 1; not_the_rpc, 2] in
+    let result =
+      most_recent_common_version
+        ~rpc_name:the_rpc
+        ~caller_versions:(Int.Set.of_list [1;2;3])
+        ~callee_versions:(Menu.supported_versions menu ~rpc_name:the_rpc)
+        ~callee_menu:menu
+    in
+    print_s [%sexp (result : int Or_error.t) ];
+    [%expect {|
+      (Error
+       ("caller and callee share no common versions for rpc" (rpc_name the-rpc)
+        (caller_versions (1 2 3)) (callee_versions ())
+        (callee_menu ((other-rpc (1 2))))))|}]
+
+  ;;
 
   module Dispatch = struct
     module Make (M : Monad) = struct
@@ -692,6 +725,7 @@ module Caller_converts = struct
         let caller_versions = versions () in
         match
           most_recent_common_version ~rpc_name:name ~caller_versions ~callee_versions
+            ~callee_menu:menu
         with
         | Error e -> return (Error e)
         | Ok version ->
