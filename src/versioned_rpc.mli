@@ -175,6 +175,18 @@ module Caller_converts : sig
         val rpc : (Version_i.query, Version_i.response) Rpc.t
       end
 
+      (** A variant of [Register] in which the query is made available when transforming
+          the response *)
+      module Register' (Version_i : sig
+          val version : int
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
+          val query_of_model : Model.query -> query
+          val model_of_response : Model.query -> response -> Model.response
+        end) : sig
+        val rpc : (Version_i.query, Version_i.response) Rpc.t
+      end
+
       include S
         with type query := Model.query
         with type response := Model.response

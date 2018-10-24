@@ -766,12 +766,12 @@ module Caller_converts = struct
         Dispatch.Async.with_version_menu conn_with_menu query ~name ~versions ~registry
           ~dispatcher:Fn.id
 
-      module Register (Version_i : sig
+      module Register' (Version_i : sig
           type query [@@deriving bin_io]
           type response [@@deriving bin_io]
           val version : int
           val query_of_model : Model.query -> query
-          val model_of_response : response -> Model.response
+          val model_of_response : Model.query -> response -> Model.response
         end) = struct
 
         open Version_i
@@ -779,8 +779,8 @@ module Caller_converts = struct
         let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
 
         let () =
-          let dispatch conn q =
-            match Result.try_with (fun () -> Version_i.query_of_model q) with
+          let dispatch conn mq =
+            match Result.try_with (fun () -> Version_i.query_of_model mq) with
             | Error exn ->
               return
                 (Error (failed_conversion (`Query, `Rpc name, `Version version, exn)))
@@ -788,7 +788,7 @@ module Caller_converts = struct
               Rpc.dispatch rpc conn q
               >>| fun result ->
               Result.bind result ~f:(fun r ->
-                match Result.try_with (fun () -> Version_i.model_of_response r) with
+                match Result.try_with (fun () -> Version_i.model_of_response mq r) with
                 | Ok r -> Ok r
                 | Error exn ->
                   Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
@@ -798,6 +798,17 @@ module Caller_converts = struct
           | Some _ -> Error.raise (multiple_registrations (`Rpc name, `Version version))
 
       end
+
+      module Register (Version_i : sig
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
+          val version : int
+          val query_of_model : Model.query -> query
+          val model_of_response : response -> Model.response
+        end) = Register' (struct
+          include Version_i
+          let model_of_response _ r = model_of_response r
+        end)
 
     end
 
