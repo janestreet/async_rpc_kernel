@@ -736,8 +736,7 @@ let apply_implementation
   ;;
 
   let handle_query (T t) ~query ~read_buffer ~read_buffer_pos_ref =
-    assert (not t.stopped);
-    if Writer.is_closed t.writer then
+    if t.stopped || Writer.is_closed t.writer then
       Transport.Handler_result.Stop (Ok ())
     else
       handle_query_internal t ~query ~read_buffer ~read_buffer_pos_ref

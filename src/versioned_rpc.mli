@@ -204,7 +204,7 @@ module Caller_converts : sig
 
       (** Multi-version dispatch.
 
-          The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
+       The return type varies slightly from [Rpc.Pipe_rpc.dispatch] to make it clear
           that conversion of each individual element in the returned pipe may fail. *)
 
       val dispatch_multi
@@ -995,6 +995,118 @@ module Both_convert : sig
         with type callee_query    := Callee.query
         with type callee_response := Callee.response
         with type callee_error    := Callee.error
+    end
+  end
+
+  module State_rpc : sig
+    (**
+       {v
+             (conv)  (conv)                      (conv)        (conv)
+             caller  callee                      callee        caller
+              |      |                           |             |
+        caller|      |                           |             |     caller
+        Q ---->- Q1 ->-.          (impl)       .->- (S1, U1s) ->---- (S, Us)
+         \              \         callee      /                     /
+          \--->- Q2 ->---\        |          /--->- (S2, U2s) ->---/
+           \              \callee |  callee /                     /
+            `->- Q3 ->---- Q ------> (S, Us) ---->- (S3, U3s) ->-´
+      v}
+    *)
+    module type S = sig
+      type caller_query
+      type callee_query
+      type caller_state
+      type callee_state
+      type caller_update
+      type callee_update
+      type caller_error
+      type callee_error
+
+      (** multi-version dispatch *)
+      val dispatch_multi
+        :  Connection_with_menu.t
+        -> caller_query
+        -> ( caller_state * caller_update Or_error.t Pipe.Reader.t * State_rpc.Metadata.t
+           , caller_error
+           ) Result.t Or_error.t Deferred.t
+
+      (** implement multiple versions at once *)
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+            -> version : int
+            -> callee_query
+            -> (callee_state * callee_update Pipe.Reader.t, callee_error) Result.t Deferred.t)
+        -> 'state Implementation.t list
+
+      (** All supported rpcs. *)
+      val rpcs : unit -> Any.t list
+
+      (** All supported versions. Useful for detecting old versions that may be
+          pruned. *)
+      val versions : unit -> Int.Set.t
+
+      val name : string
+    end
+
+    module Make (Model : sig
+        val name : string
+        module Caller : sig type query type state type update type error end
+        module Callee : sig type query type state type update type error end
+      end) : sig
+
+      open Model
+
+      module type Version_shared = sig
+        val version : int
+        type query  [@@deriving bin_io]
+        type state  [@@deriving bin_io]
+        type update [@@deriving bin_io]
+        type error  [@@deriving bin_io]
+        val query_of_caller_model : Model.Caller.query -> query
+        val callee_model_of_query : query -> Model.Callee.query
+        val caller_model_of_state : state -> Model.Caller.state
+        val state_of_callee_model : Model.Callee.state -> state
+        val caller_model_of_error : error -> Model.Caller.error
+        val error_of_callee_model : Model.Callee.error -> error
+        val client_pushes_back : bool
+      end
+
+      module Register (Version_i : sig
+          include Version_shared
+          val update_of_callee_model : Model.Callee.update -> update
+          val caller_model_of_update : update -> Model.Caller.update
+        end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      (** [Register_raw] is like [Register] except you get the whole pipe to deal with.
+
+          This is useful if, e.g., your [caller_model_of_update] function can fail, so
+          that you'd like to filter items out from the result pipe. *)
+      module Register_raw (Version_i : sig
+          include Version_shared
+          (** [caller_model_of_update] should never raise exceptions.  If it does,
+              [dispatch_multi] is going to raise, which is not supposed to happen. *)
+          val caller_model_of_update : update Pipe.Reader.t
+            -> Model.Caller.update Or_error.t Pipe.Reader.t
+          val update_of_callee_model : Model.Callee.state
+            -> Model.Callee.update Pipe.Reader.t -> update Pipe.Reader.t
+        end) : sig
+        val rpc : (Version_i.query, Version_i.state, Version_i.update, Version_i.error)
+                    State_rpc.t
+      end
+
+      include S
+        with type caller_query  := Caller.query
+        with type caller_state  := Caller.state
+        with type caller_update := Caller.update
+        with type caller_error  := Caller.error
+        with type callee_query  := Callee.query
+        with type callee_state  := Callee.state
+        with type callee_update := Callee.update
+        with type callee_error  := Callee.error
     end
   end
 

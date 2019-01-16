@@ -1,0 +1,3 @@
+(library (name async_rpc_kernel) (public_name async_rpc_kernel)
+ (preprocess (pps ppx_jane -dont-check-doc-comments-attachment))
+ (libraries core_kernel async_kernel protocol_version_header))

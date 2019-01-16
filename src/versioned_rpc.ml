@@ -1342,6 +1342,120 @@ module Both_convert = struct
     end
   end
 
+  module State_rpc = struct
+    module type S = sig
+      type caller_query
+      type callee_query
+      type caller_state
+      type callee_state
+      type caller_update
+      type callee_update
+      type caller_error
+      type callee_error
+
+      val dispatch_multi
+        :  Connection_with_menu.t
+        -> caller_query
+        -> ( caller_state * caller_update Or_error.t Pipe.Reader.t * State_rpc.Metadata.t
+           , caller_error
+           ) Result.t Or_error.t Deferred.t
+
+      val implement_multi
+        :  ?log_not_previously_seen_version:(name:string -> int -> unit)
+        -> ('state
+            -> version : int
+            -> callee_query
+            -> (callee_state * callee_update Pipe.Reader.t, callee_error) Result.t Deferred.t)
+        -> 'state Implementation.t list
+
+      val rpcs : unit -> Any.t list
+      val versions : unit -> Int.Set.t
+      val name : string
+    end
+
+    module Make (Model : sig
+        val name : string
+        module Caller : sig type query type state type update type error end
+        module Callee : sig type query type state type update type error end
+      end) = struct
+      open Model
+
+      let name = name
+
+      module Caller = Caller_converts.State_rpc.Make (struct let name = name include Caller end)
+      module Callee = Callee_converts.State_rpc.Make (struct let name = name include Callee end)
+
+      let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
+
+      module type Version_shared = sig
+        val version : int
+        type query  [@@deriving bin_io]
+        type state  [@@deriving bin_io]
+        type update [@@deriving bin_io]
+        type error  [@@deriving bin_io]
+        val query_of_caller_model : Model.Caller.query -> query
+        val callee_model_of_query : query -> Model.Callee.query
+        val caller_model_of_state : state -> Model.Caller.state
+        val state_of_callee_model : Model.Callee.state -> state
+        val caller_model_of_error : error -> Model.Caller.error
+        val error_of_callee_model : Model.Callee.error -> error
+        val client_pushes_back : bool
+      end
+
+      module Register_raw (Version_i : sig
+          include Version_shared
+          val caller_model_of_update : update Pipe.Reader.t
+            -> Model.Caller.update Or_error.t Pipe.Reader.t
+          val update_of_callee_model : Model.Callee.state
+            -> Model.Callee.update Pipe.Reader.t -> update Pipe.Reader.t
+        end) = struct
+        include Callee.Register_raw (struct
+            include Version_i
+            let model_of_query  = callee_model_of_query
+            let state_of_model  = state_of_callee_model
+            let update_of_model = update_of_callee_model
+            let error_of_model  = error_of_callee_model
+          end)
+        include Caller.Register_raw (struct
+            include Version_i
+            let query_of_model  = query_of_caller_model
+            let model_of_state  = caller_model_of_state
+            let model_of_update = caller_model_of_update
+            let model_of_error  = caller_model_of_error
+          end)
+      end
+
+      module Register (Version_i : sig
+          include Version_shared
+          val update_of_callee_model : Model.Callee.update -> update
+          val caller_model_of_update : update -> Model.Caller.update
+        end) = struct
+        include Callee.Register (struct
+            include Version_i
+            let model_of_query  = callee_model_of_query
+            let state_of_model  = state_of_callee_model
+            let update_of_model = update_of_callee_model
+            let error_of_model  = error_of_callee_model
+          end)
+        include Caller.Register (struct
+            include Version_i
+            let query_of_model  = query_of_caller_model
+            let model_of_state  = caller_model_of_state
+            let model_of_update = caller_model_of_update
+            let model_of_error  = caller_model_of_error
+          end)
+      end
+
+      let dispatch_multi = Caller.dispatch_multi
+
+      let implement_multi = Callee.implement_multi
+
+      let versions () = Caller.versions ()
+
+      let rpcs () = Caller.rpcs ()
+    end
+  end
+
   module One_way = struct
     module type S = sig
       type caller_msg
