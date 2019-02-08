@@ -1,7 +1,7 @@
 open! Core_kernel
 open! Async_kernel
 
-include Async_kernel_persistent_connection
+include Persistent_connection_kernel
 
 module Versioned_rpc = Make (struct
     module Address = Host_and_port
