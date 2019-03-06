@@ -6,6 +6,8 @@ module Rpc_error             = Rpc_error
 module Rpc_result            = Rpc_result
 
 module Async_rpc_kernel_private = struct
+  module Connection = Connection
   module Protocol = Protocol
+  module Transport = Transport
   let default_handshake_timeout = Connection.default_handshake_timeout
 end

@@ -43,13 +43,16 @@ module type S = sig
       [description] can be used to give some extra information about the connection, which
       will then show up in error messages and the connection's sexp. If you have lots of
       connections in your program, this can be useful for distinguishing them.
-  *)
+
+      [time_source] can be given to define the time_source for which the heartbeating
+      events will be scheduled. Defaults to wall-clock. *)
   val create
-    :  ?implementations    : 's Implementations.t
-    -> connection_state    : (t -> 's)
-    -> ?handshake_timeout  : Time_ns.Span.t
-    -> ?heartbeat_config   : Heartbeat_config.t
-    -> ?description        : Info.t
+    :  ?implementations   : 's Implementations.t
+    -> connection_state   : (t -> 's)
+    -> ?handshake_timeout : Time_ns.Span.t
+    -> ?heartbeat_config  : Heartbeat_config.t
+    -> ?description       : Info.t
+    -> ?time_source       : Synchronous_time_source.t
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
 

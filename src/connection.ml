@@ -65,18 +65,20 @@ type response_handler
      ]
 
 type t =
-  { description         : Info.t
-  ; heartbeat_config    : Heartbeat_config.t
-  ; heartbeat_callbacks : (unit -> unit) list ref
-  ; reader              : Reader.t
-  ; writer              : Writer.t
-  ; open_queries        : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
-  ; close_started       : Info.t Ivar.t
-  ; close_finished      : unit Ivar.t
+  { description                 : Info.t
+  ; heartbeat_config            : Heartbeat_config.t
+  ; mutable heartbeat_callbacks : (unit -> unit) array
+  ; reader                      : Reader.t
+  ; writer                      : Writer.t
+  ; open_queries                : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
+  ; close_started               : Info.t Ivar.t
+  ; close_finished              : unit Ivar.t
   (* There's a circular dependency between connections and their implementation instances
      (the latter depends on the connection state, which is given access to the connection
      when it is created). *)
-  ; implementations_instance     : Implementations.Instance.t Set_once.t
+  ; implementations_instance    : Implementations.Instance.t Set_once.t
+  ; time_source                 : Synchronous_time_source.t
+  ; heartbeat_event             : Synchronous_time_source.Event.t Set_once.t
   }
 [@@deriving sexp_of]
 
@@ -194,11 +196,25 @@ let close_reason t ~on_close =
 let close_finished t = Ivar.read t.close_finished
 
 let add_heartbeat_callback t f =
-  t.heartbeat_callbacks := f :: !(t.heartbeat_callbacks)
+  (* Adding heartbeat callbacks is relatively rare, but the callbacks are triggered a lot.
+     The array representation makes the addition quadratic for the sake of keeping the
+     triggering cheap. *)
+  t.heartbeat_callbacks <- Array.append [|f|] t.heartbeat_callbacks
+;;
+
+let abort_heartbeating t =
+  Option.iter (Set_once.get t.heartbeat_event) ~f:(fun event ->
+    match Synchronous_time_source.Event.abort t.time_source event with
+    | Ok
+    | Previously_unscheduled -> ()
+    | Currently_happening ->
+      Synchronous_time_source.run_after t.time_source Time_ns.Span.zero (fun () ->
+        Synchronous_time_source.Event.abort_exn t.time_source event))
 ;;
 
 let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
   if not (is_closed t) then begin
+    abort_heartbeating t;
     Ivar.fill t.close_started reason;
     begin
       match Set_once.get t.implementations_instance with
@@ -211,8 +227,10 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
         end else begin
           Deferred.any_unit
             [ flushed
-            ; Clock_ns.after streaming_responses_flush_timeout
             ; Writer.stopped t.writer
+            ; Time_source.after
+                (Time_source.of_synchronous t.time_source)
+                streaming_responses_flush_timeout
             ]
           >>| fun () ->
           Implementations.Instance.stop instance
@@ -258,19 +276,19 @@ let on_message t =
   Staged.stage f
 ;;
 
-let heartbeat t ~last_heartbeat =
-  if not (is_closed t) then begin
-    let since_last_heartbeat = Time_ns.diff (Time_ns.now ()) last_heartbeat in
-    if Time_ns.Span.(>) since_last_heartbeat t.heartbeat_config.timeout then begin
-      let reason () =
-        sprintf !"No heartbeats received for %{sexp:Time_ns.Span.t}."
-          t.heartbeat_config.timeout
-      in
-      don't_wait_for (close t ~reason:(Info.of_thunk reason));
-    end else begin
-      Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
-      |> handle_send_result t
-    end
+let heartbeat_now t ~last_heartbeat =
+  let since_last_heartbeat =
+    Time_ns.diff (Synchronous_time_source.now t.time_source) last_heartbeat
+  in
+  if Time_ns.Span.(>) since_last_heartbeat t.heartbeat_config.timeout then begin
+    let reason () =
+      sprintf !"No heartbeats received for %{sexp:Time_ns.Span.t}."
+        t.heartbeat_config.timeout
+    in
+    don't_wait_for (close t ~reason:(Info.of_thunk reason));
+  end else begin
+    Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+    |> handle_send_result t
   end
 
 let default_handshake_timeout = Time_ns.Span.of_sec 30.
@@ -303,6 +321,21 @@ let cleanup t ~reason exn =
   end
 ;;
 
+let schedule_heartbeats t =
+  let last_heartbeat = ref (Synchronous_time_source.now t.time_source) in
+  (* Heartbeat immediately, and schedule heartbeats that will begin after the time_source
+     is advanced *)
+  heartbeat_now t ~last_heartbeat:!last_heartbeat;
+  let heartbeat_from_now_on =
+    Synchronous_time_source.Event.at_intervals
+      t.time_source
+      t.heartbeat_config.send_every
+      (fun () -> heartbeat_now t ~last_heartbeat:!last_heartbeat)
+  in
+  Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on;
+  `last_heartbeat last_heartbeat
+;;
+
 let run_after_handshake t ~implementations ~connection_state =
   let instance =
     Implementations.instantiate implementations ~writer:t.writer
@@ -324,20 +357,12 @@ let run_after_handshake t ~implementations ~connection_state =
        ])))
     ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
-    let last_heartbeat = ref (Time_ns.now ()) in
-    every ~stop:(Ivar.read t.close_started >>| fun (_ : Info.t) -> ())
-      t.heartbeat_config.send_every
-      (fun () ->
-         (* Make sure not to do this after calling [close] -- this function could be
-            called between when [t.close_started] is determined and when [stop] is, since
-            they happen in different Async jobs. *)
-         if not (Ivar.is_full t.close_started)
-         then heartbeat t ~last_heartbeat:!last_heartbeat);
+    let `last_heartbeat last_heartbeat = schedule_heartbeats t in
     Reader.read_forever t.reader
       ~on_message:(Staged.unstage (on_message t))
       ~on_end_of_batch:(fun () ->
-        last_heartbeat := Time_ns.now ();
-        List.iter !(t.heartbeat_callbacks) ~f:(fun f -> f ())
+        last_heartbeat := Synchronous_time_source.now t.time_source;
+        Array.iter t.heartbeat_callbacks ~f:(fun f -> f ())
       )
     >>> function
     | Ok reason ->
@@ -362,7 +387,10 @@ let do_handshake t ~handshake_timeout =
       Monitor.try_with ~run:`Now (fun () ->
         Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
-    Clock_ns.with_timeout handshake_timeout result
+    Time_source.with_timeout
+      (Time_source.of_synchronous t.time_source)
+      handshake_timeout
+      result
     >>| function
     | `Timeout ->
       (* There's a pending read, the reader is basically useless now, so we clean it
@@ -393,6 +421,7 @@ let create
       ?(handshake_timeout = default_handshake_timeout)
       ?(heartbeat_config = Heartbeat_config.default)
       ?(description = Info.of_string "<created-directly>")
+      ?(time_source = Synchronous_time_source.wall_clock ())
       ({ reader; writer } : Transport.t)
   =
   let implementations =
@@ -401,13 +430,15 @@ let create
   let t =
     { description
     ; heartbeat_config
-    ; heartbeat_callbacks = ref []
+    ; heartbeat_callbacks = [||]
     ; reader
     ; writer
     ; open_queries   = Hashtbl.Poly.create ~size:10 ()
     ; close_started  = Ivar.create ()
     ; close_finished = Ivar.create ()
     ; implementations_instance = Set_once.create ()
+    ; time_source
+    ; heartbeat_event = Set_once.create ()
     }
   in
   upon (Writer.stopped writer) (fun () ->
