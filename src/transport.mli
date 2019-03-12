@@ -4,7 +4,7 @@
     a [Writer] part.
 
     [Async_rpc_kernel] only provides an async [Pipe.t] transport.
-    [Async_extra] provides a unix transport based on [Async_unix]'s
+    [Async_rpc] provides a unix transport based on [Async_unix]'s
     [Reader] and [Writer] modules.
 *)
 
