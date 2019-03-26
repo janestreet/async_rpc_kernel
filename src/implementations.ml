@@ -73,14 +73,14 @@ module Instance = struct
   type streaming_response = Instance.streaming_response =
     | Pipe : _ Pipe.Reader.t -> streaming_response
     | Direct :
-        _ Implementation_types.Direct_stream_writer.t sexp_opaque -> streaming_response
+        (_ Implementation_types.Direct_stream_writer.t [@sexp.opaque]) -> streaming_response
   [@@deriving sexp_of]
 
   type streaming_responses =
     (P.Query_id.t, streaming_response) Hashtbl.t [@@deriving sexp_of]
 
   type 'a unpacked = 'a Instance.unpacked =
-    { implementations          : 'a implementations sexp_opaque
+    { implementations          : ('a implementations [@sexp.opaque])
     ; writer                   : Writer.t
     ; open_streaming_responses : streaming_responses
     ; mutable stopped          : bool
@@ -88,10 +88,10 @@ module Instance = struct
     ; connection_description   : Info.t
     ; connection_close_started : Info.t Deferred.t
     ; mutable last_dispatched_implementation :
-        (Description.t * 'a Implementation.F.t sexp_opaque) option
+        (Description.t * ('a Implementation.F.t [@sexp.opaque])) option
     (* [packed_self] is here so we can essentially pack an unpacked instance without doing
        any additional allocation. *)
-    ; packed_self              : t sexp_opaque
+    ; packed_self              : (t [@sexp.opaque])
     } [@@deriving sexp_of]
 
   and t = Instance.t = T : _ unpacked -> t

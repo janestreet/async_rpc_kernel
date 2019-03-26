@@ -70,7 +70,7 @@ type t =
   ; mutable heartbeat_callbacks : (unit -> unit) array
   ; reader                      : Reader.t
   ; writer                      : Writer.t
-  ; open_queries                : (P.Query_id.t, response_handler sexp_opaque) Hashtbl.t
+  ; open_queries                : (P.Query_id.t, (response_handler [@sexp.opaque])) Hashtbl.t
   ; close_started               : Info.t Ivar.t
   ; close_finished              : unit Ivar.t
   (* There's a circular dependency between connections and their implementation instances
