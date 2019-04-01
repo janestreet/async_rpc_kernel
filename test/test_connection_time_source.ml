@@ -14,7 +14,7 @@ let advance_by_span time_source span =
 
 let heartbeat_every = sec 2.
 let heartbeat_timeout = sec 10.
-let yield () = Async_kernel_scheduler.(yield_until_no_jobs_remain (t ()))
+let yield () = Async_kernel_scheduler.yield_until_no_jobs_remain ()
 
 let establish_connection transport time_source description =
   let conn =

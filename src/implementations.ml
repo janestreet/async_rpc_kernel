@@ -352,7 +352,7 @@ module Instance = struct
         Ivar.fill t.closed ();
         let groups = t.groups in
         if not (Bag.is_empty groups) then
-          Async_kernel_scheduler.Very_low_priority_work.enqueue
+          Async_kernel_scheduler.Private.Very_low_priority_work.enqueue
             ~f:(fun () ->
               match Bag.remove_one groups with
               | None -> Finished
