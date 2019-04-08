@@ -1,4 +1,5 @@
 open Core_kernel
+open Poly
 open Async_kernel
 open Util
 

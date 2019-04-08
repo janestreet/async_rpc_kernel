@@ -1,4 +1,5 @@
 open Core_kernel
+open Poly
 
 let of_writer { Bin_prot.Type_class. write; size } =
   let write buf ~pos a =
