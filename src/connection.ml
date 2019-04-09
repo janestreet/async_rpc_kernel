@@ -82,6 +82,10 @@ type t =
   }
 [@@deriving sexp_of]
 
+let sexp_of_t_hum_writer t =
+  [%sexp { description : Info.t = t.description
+         ; writer : Writer.t = t.writer }]
+
 let description t = t.description
 
 let is_closed t = Ivar.is_full t.close_started
@@ -96,15 +100,15 @@ let handle_send_result : t -> 'a Transport.Send_result.t -> 'a = fun t r ->
   match r with
   | Sent x -> x
   | Closed ->
-    (* All of the places we call [handle_send_result] check whether [t] is closed (usually
-       via the [writer] function above). This checks whether [t.writer] is closed, which
-       should not happen unless [t] is closed. *)
-    failwiths "RPC connection got closed writer" t sexp_of_t
+    (* All of the places we call [handle_send_result] check whether [t] is closed
+       (usually via the [writer] function above). This checks whether [t.writer] is
+       closed, which should not happen unless [t] is closed. *)
+    failwiths "RPC connection got closed writer" t sexp_of_t_hum_writer
   | Message_too_big _ ->
     raise_s [%sexp
       "Message cannot be sent",
       { reason     = (r : _ Transport.Send_result.t)
-      ; connection = (t : t)
+      ; connection = (t : t_hum_writer)
       }
     ]
 
