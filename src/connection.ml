@@ -16,7 +16,7 @@ end = struct
 
   let negotiate = negotiate ~allow_legacy_peer:true
 
-  let v1 = Protocol_version_header.create ~protocol:Rpc ~supported_versions:[1]
+  let v1 = Protocol_version_header.create_exn ~protocol:Rpc ~supported_versions:[1]
 end
 
 module Handshake_error = struct
