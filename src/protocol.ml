@@ -17,15 +17,39 @@ end = struct
   let t = Query_id.create ()
 end
 
-module Rpc_error = struct
+module Rpc_error : sig
+  open Core_kernel
+
   type t =
-    | Bin_io_exn        of Core_kernel.Sexp.t
+    | Bin_io_exn        of Sexp.t
     | Connection_closed
-    | Write_error       of Core_kernel.Sexp.t
-    | Uncaught_exn      of Core_kernel.Sexp.t
+    | Write_error       of Sexp.t
+    | Uncaught_exn      of Sexp.t
     | Unimplemented_rpc of Rpc_tag.t * [`Version of int]
     | Unknown_query_id  of Query_id.t
-  [@@deriving bin_io, sexp]
+  [@@deriving bin_io, sexp, compare]
+
+  include Comparable.S with type t := t
+end = struct
+
+  module T = struct
+    type t =
+      | Bin_io_exn        of Core_kernel.Sexp.t
+      | Connection_closed
+      | Write_error       of Core_kernel.Sexp.t
+      | Uncaught_exn      of Core_kernel.Sexp.t
+      | Unimplemented_rpc of Rpc_tag.t * [`Version of Core_kernel.Int.Stable.V1.t]
+      | Unknown_query_id  of Query_id.t
+    [@@deriving bin_io, sexp, compare]
+
+    let%expect_test "stable" =
+      print_endline [%bin_digest: t];
+      [%expect {| 8cc766befa2cf565ea147d9fcd5eaaab |}]
+    ;;
+  end
+
+  include T
+  include Core_kernel.Comparable.Make(T)
 end
 
 module Rpc_result = struct
