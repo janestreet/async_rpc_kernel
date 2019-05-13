@@ -45,13 +45,8 @@ module Heartbeat_config = struct
     }
   [@@deriving sexp, bin_io]
 
-  let create ~timeout ~send_every =
+  let create ?(timeout = Time_ns.Span.of_sec 30.) ?(send_every=Time_ns.Span.of_sec 10.) () =
     { timeout ; send_every }
-
-  let default =
-    { timeout = Time_ns.Span.of_sec 30.
-    ; send_every = Time_ns.Span.of_sec 10.
-    }
 end
 
 type response_handler
@@ -423,7 +418,7 @@ let create
       ?implementations
       ~connection_state
       ?(handshake_timeout = default_handshake_timeout)
-      ?(heartbeat_config = Heartbeat_config.default)
+      ?(heartbeat_config = Heartbeat_config.create ())
       ?(description = Info.of_string "<created-directly>")
       ?(time_source = Synchronous_time_source.wall_clock ())
       ({ reader; writer } : Transport.t)

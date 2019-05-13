@@ -23,7 +23,8 @@ let establish_connection transport time_source description =
       ~heartbeat_config:
         (Connection.Heartbeat_config.create
            ~timeout:heartbeat_timeout
-           ~send_every:heartbeat_every)
+           ~send_every:heartbeat_every
+           ())
       ~description
       ~time_source
       transport

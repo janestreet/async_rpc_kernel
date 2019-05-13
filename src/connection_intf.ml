@@ -14,8 +14,9 @@ module type S = sig
         is sent.
     *)
     val create
-      :  timeout : Time_ns.Span.t
-      -> send_every : Time_ns.Span.t
+      :  ?timeout : Time_ns.Span.t
+      -> ?send_every : Time_ns.Span.t
+      -> unit
       -> t
   end
 
