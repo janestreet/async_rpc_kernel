@@ -9,10 +9,10 @@ module type S = sig
   module Heartbeat_config : sig
     type t [@@deriving sexp, bin_io]
 
-    (** We try to send a heartbeat every [send_every]. If we don't get a heartbeat
-        for [timeout], kill the connection. [timeout] is checked every time a heartbeat
-        is sent.
-    *)
+    (** Each side of the connection has its own heartbeat config. It sends a heartbeat
+        every [send_every]. If it doesn't receive a heartbeat for [timeout], it drops the
+        connection. It only checks whether [timeout] has elapsed when it sends heartbeats,
+        so effectively [timeout] is rounded up to the nearest multiple of [send_every]. *)
     val create
       :  ?timeout : Time_ns.Span.t
       -> ?send_every : Time_ns.Span.t
