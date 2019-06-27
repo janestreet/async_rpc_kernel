@@ -834,6 +834,11 @@ module Caller_converts = struct
         -> f:(response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
         -> (Pipe_rpc.Id.t, error) Result.t Or_error.t Deferred.t
 
+      val abort_multi
+        :  Connection_with_menu.t
+        -> Pipe_rpc.Id.t
+        -> unit Or_error.t
+
       val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
       val name : string
@@ -846,7 +851,8 @@ module Caller_converts = struct
       type error
     end) = struct
       type dispatcher =
-        { dispatch :
+        { abort : Connection.t -> Pipe_rpc.Id.t -> unit
+        ; dispatch :
             Connection.t
             -> Model.query
             -> ( Model.response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
@@ -874,6 +880,10 @@ module Caller_converts = struct
       let dispatch_multi conn_with_menu query =
         Dispatch.Async.with_version_menu conn_with_menu query ~name ~versions ~registry
           ~dispatcher:(fun { dispatch; _ } conn query -> dispatch conn query)
+
+      let abort_multi conn_with_menu id =
+        Dispatch.Direct.with_version_menu conn_with_menu id ~name ~versions ~registry
+          ~dispatcher:(fun { abort; _ } conn id -> abort conn id ; Ok ())
 
       module type Version_shared = sig
         type query [@@deriving bin_io]
@@ -940,11 +950,13 @@ module Caller_converts = struct
           >>| fun result ->
           convert_result result ~convert_ok:Fn.id
 
+        let abort conn id = Pipe_rpc.abort rpc conn id
+
         let () =
           match Hashtbl.find registry version with
           | None ->
             Hashtbl.set registry ~key:version
-              ~data:({dispatch; dispatch_iter}, Any.Pipe rpc)
+              ~data:({ abort; dispatch; dispatch_iter }, Any.Pipe rpc)
           | Some _ ->
             Error.raise (multiple_registrations (`Rpc name, `Version version))
       end
@@ -1240,6 +1252,11 @@ module Both_convert = struct
         -> f:(caller_response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
         -> (Pipe_rpc.Id.t, caller_error) Result.t Or_error.t Deferred.t
 
+      val abort_multi
+        :  Connection_with_menu.t
+        -> Pipe_rpc.Id.t
+        -> unit Or_error.t
+
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
         -> ('state
@@ -1331,6 +1348,8 @@ module Both_convert = struct
       let dispatch_multi = Caller.dispatch_multi
 
       let dispatch_iter_multi = Caller.dispatch_iter_multi
+
+      let abort_multi = Caller.abort_multi
 
       let implement_multi = Callee.implement_multi
 

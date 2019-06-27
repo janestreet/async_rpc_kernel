@@ -220,6 +220,11 @@ module Caller_converts : sig
         -> f:(response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
         -> (Pipe_rpc.Id.t, error) Result.t Or_error.t Deferred.t
 
+      val abort_multi
+        :  Connection_with_menu.t
+        -> Pipe_rpc.Id.t
+        -> unit Or_error.t
+
       (** All rpcs supported by [dispatch_multi] *)
       val rpcs : unit -> Any.t list
 
@@ -913,6 +918,11 @@ module Both_convert : sig
         -> caller_query
         -> f:(caller_response Pipe_rpc.Pipe_message.t -> Pipe_rpc.Pipe_response.t)
         -> (Pipe_rpc.Id.t, caller_error) Result.t Or_error.t Deferred.t
+
+      val abort_multi
+        :  Connection_with_menu.t
+        -> Pipe_rpc.Id.t
+        -> unit Or_error.t
 
       (** implement multiple versions at once *)
       val implement_multi
