@@ -179,6 +179,20 @@ module Rpc = struct
       ; version = t.version
       ; f       = Rpc_expert (f, Blocking)
       }
+
+    let implement_for_tag_and_version ~rpc_tag ~version f =
+      { Implementation.
+        tag     = P.Rpc_tag.of_string rpc_tag
+      ; version = version
+      ; f       = Rpc_expert (f, Deferred)
+      }
+
+    let implement_for_tag_and_version' ~rpc_tag ~version f =
+      { Implementation.
+        tag     = P.Rpc_tag.of_string rpc_tag
+      ; version = version
+      ; f       = Rpc_expert (f, Blocking)
+      }
   end
 end
 

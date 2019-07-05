@@ -672,7 +672,7 @@ let apply_implementation
         ~f:(fun ~key:_ ~data acc ->
           match data with
           | Direct _ -> acc
-          | Pipe pipe -> Deferred.ignore (Pipe.upstream_flushed pipe) :: acc)
+          | Pipe pipe -> Deferred.ignore_m (Pipe.upstream_flushed pipe) :: acc)
     in
     Deferred.all_unit producers_flushed
   ;;

@@ -267,7 +267,8 @@ module Rpc : sig
       -> handle_error : (Error.t -> unit)
       -> [ `Ok | `Connection_closed ]
 
-    (** Result of callbacks passed to [implement] and [implement']:
+    (** Result of callbacks passed to [implement] and [implement'] and
+        [implement_for_tag_and_version] and [implement_for_tag_and_version']:
 
         - [Replied] means that the response has already been sent using one of the
           functions of [Responder]
@@ -300,6 +301,28 @@ module Rpc : sig
 
     val implement'
       :  (_, _) t
+      -> ('connection_state
+          -> Responder.t
+          -> Bigstring.t
+          -> pos : int
+          -> len : int
+          -> implementation_result)
+      -> 'connection_state Implementation.t
+
+    val implement_for_tag_and_version
+      :  rpc_tag: string
+      -> version: int
+      -> ('connection_state
+          -> Responder.t
+          -> Bigstring.t
+          -> pos : int
+          -> len : int
+          -> implementation_result Deferred.t)
+      -> 'connection_state Implementation.t
+
+    val implement_for_tag_and_version'
+      :  rpc_tag: string
+      -> version: int
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
