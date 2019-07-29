@@ -744,4 +744,6 @@ module Any : sig
     | Pipe    : ('q, 'r, 'e) Pipe_rpc.t -> t
     | State   : ('q, 's, 'u, 'e) State_rpc.t -> t
     | One_way : 'm One_way.t -> t
+
+  val description : t -> Description.t
 end
