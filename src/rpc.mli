@@ -172,6 +172,9 @@ module Rpc : sig
   val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
   val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
 
+  (** If the function that implements the RPC raises, the implementer does not see the
+      exception. Instead, it is sent as an error to the caller of the RPC, i.e. the
+      process that called [dispatch] or one of its alternatives.*)
   val implement
     :  ('query, 'response) t
     -> ('connection_state
