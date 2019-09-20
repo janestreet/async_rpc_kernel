@@ -74,9 +74,7 @@ module type Writer = sig
       Using [let ready_to_write = flushed] is an acceptable implementation. *)
   val ready_to_write : t -> unit Deferred.t
 
-  (** All the following functions send exactly one message.
-
-      They must raise once the writer is closed. *)
+  (** All the following functions send exactly one message. *)
 
   val send_bin_prot
     :  t
