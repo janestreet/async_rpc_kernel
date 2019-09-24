@@ -847,3 +847,13 @@ module Any = struct
     | State   rpc -> State_rpc.description rpc
     | One_way rpc -> One_way.description   rpc
 end
+
+module Stable = struct
+  module Description = Description.Stable
+  module Pipe_close_reason = Pipe_close_reason.Stable
+
+  module Rpc = Rpc
+  module Pipe_rpc = Pipe_rpc
+  module State_rpc = State_rpc
+  module One_way = One_way
+end

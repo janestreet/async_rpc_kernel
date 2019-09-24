@@ -5,6 +5,10 @@ module Pipe_transport        = Pipe_transport
 module Rpc_error             = Rpc_error
 module Rpc_result            = Rpc_result
 
+module Async_rpc_kernel_stable = struct
+  module Rpc           = Rpc.Stable
+end
+
 module Async_rpc_kernel_private = struct
   module Connection = Connection
   module Protocol = Protocol

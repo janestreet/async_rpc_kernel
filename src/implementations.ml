@@ -50,6 +50,10 @@ type 'connection_state on_unknown_rpc =
        -> rpc_tag : string
        -> version : int
        -> [ `Close_connection | `Continue ])
+  ]
+
+type 'connection_state on_unknown_rpc_with_expert =
+  [ 'connection_state on_unknown_rpc
   | `Expert of
       ('connection_state
        -> rpc_tag : string
@@ -63,7 +67,7 @@ type 'connection_state on_unknown_rpc =
 
 type 'connection_state t = 'connection_state Implementation_types.Implementations.t =
   { implementations : 'connection_state Implementation.F.t Description.Table.t
-  ; on_unknown_rpc  : 'connection_state on_unknown_rpc
+  ; on_unknown_rpc  : 'connection_state on_unknown_rpc_with_expert
   }
 
 type 'connection_state implementations = 'connection_state t
@@ -766,7 +770,7 @@ let create ~implementations:i's ~on_unknown_rpc =
   else
     Ok {
       implementations;
-      on_unknown_rpc = (on_unknown_rpc :> _ on_unknown_rpc);
+      on_unknown_rpc = (on_unknown_rpc :> _ on_unknown_rpc_with_expert);
     }
 
 let instantiate t

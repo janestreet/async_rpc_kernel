@@ -6,18 +6,20 @@ open Protocol
 
 type 'a t
 
+type 'connection_state on_unknown_rpc =
+  [ `Raise
+  | `Continue
+  | `Close_connection
+  | `Call of
+      ('connection_state
+       -> rpc_tag : string
+       -> version : int
+       -> [ `Close_connection | `Continue ])
+  ]
+
 val create
   :  implementations : 'connection_state Implementation.t list
-  -> on_unknown_rpc :
-       [ `Raise
-       | `Continue
-       | `Close_connection
-       | `Call of
-           ('connection_state
-            -> rpc_tag : string
-            -> version : int
-            -> [ `Close_connection | `Continue ])
-       ]
+  -> on_unknown_rpc : 'connection_state on_unknown_rpc
   -> ( 'connection_state t
      , [ `Duplicate_implementations of Description.t list ]
      ) Result.t

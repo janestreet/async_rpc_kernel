@@ -64,23 +64,26 @@ module Implementations : sig
 
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
+  type 'connection_state on_unknown_rpc =
+
+    [ `Raise
+    | `Continue
+    | `Close_connection  (** used to be the behavior of [`Ignore] *)
+    (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
+    | `Call of
+        ('connection_state
+         -> rpc_tag : string
+         -> version : int
+         -> [ `Close_connection | `Continue ])
+    ]
+
   (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
       the rpcs implemented in the implementation list.  Be careful about setting
       [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
       one causing it to crash. *)
   val create
     :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc :
-      [ `Raise
-      | `Continue
-      | `Close_connection  (** used to be the behavior of [`Ignore] *)
-      (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
-      | `Call of
-          ('connection_state
-           -> rpc_tag : string
-           -> version : int
-           -> [ `Close_connection | `Continue ])
-      ]
+    -> on_unknown_rpc : 'connection_state on_unknown_rpc
     -> ( 'connection_state t
        , [`Duplicate_implementations of Description.t list]
        ) Result.t
@@ -749,4 +752,82 @@ module Any : sig
     | One_way : 'm One_way.t -> t
 
   val description : t -> Description.t
+end
+
+module Stable : sig
+
+  module Rpc : sig
+    type ('query, 'response) t = ('query, 'response) Rpc.t
+
+    val create
+      :  name         : string
+      -> version      : int
+      -> bin_query    : 'query    Bin_prot.Type_class.t
+      -> bin_response : 'response Bin_prot.Type_class.t
+      -> ('query, 'response) t
+
+    val description : (_, _) t -> Description.t
+
+    val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
+    val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
+  end
+
+  module Pipe_rpc : sig
+    type ('query, 'response, 'error) t = ('query, 'response, 'error) Pipe_rpc.t
+
+    val create
+      :  ?client_pushes_back : unit
+      -> name : string
+      -> version : int
+      -> bin_query    : 'query    Bin_prot.Type_class.t
+      -> bin_response : 'response Bin_prot.Type_class.t
+      -> bin_error    : 'error    Bin_prot.Type_class.t
+      -> unit
+      -> ('query, 'response, 'error) t
+
+    val description : (_, _, _) t -> Description.t
+
+    val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
+    val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
+    val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
+  end
+
+  module State_rpc : sig
+    type ('query, 'state, 'update, 'error) t =
+       ('query, 'state, 'update, 'error) State_rpc.t
+
+    val create
+      :  ?client_pushes_back : unit
+      -> name : string
+      -> version : int
+      -> bin_query  : 'query  Bin_prot.Type_class.t
+      -> bin_state  : 'state  Bin_prot.Type_class.t
+      -> bin_update : 'update Bin_prot.Type_class.t
+      -> bin_error  : 'error  Bin_prot.Type_class.t
+      -> unit
+      -> ('query, 'state, 'update, 'error) t
+
+    val description : (_, _, _, _) t -> Description.t
+
+    val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t
+    val bin_state  : (_, 'state, _, _)  t -> 'state  Bin_prot.Type_class.t
+    val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
+    val bin_error  : (_, _, _, 'error)  t -> 'error  Bin_prot.Type_class.t
+  end
+
+  module One_way : sig
+    type 'msg t = 'msg One_way.t
+
+    val create
+      :  name     : string
+      -> version  : int
+      -> bin_msg  : 'msg Bin_prot.Type_class.t
+      -> 'msg t
+
+    val description : _ t -> Description.t
+
+    val bin_msg     : 'msg t -> 'msg Bin_prot.Type_class.t
+  end
+  module Description = Description.Stable
+  module Pipe_close_reason = Pipe_close_reason.Stable
 end
