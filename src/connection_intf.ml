@@ -18,6 +18,9 @@ module type S = sig
       -> ?send_every : Time_ns.Span.t
       -> unit
       -> t
+
+    val timeout : t -> Time_ns.Span.t
+    val send_every : t -> Time_ns.Span.t
   end
 
   module Client_implementations : sig

@@ -658,6 +658,7 @@ module State_rpc : sig
 
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
 
+  val client_pushes_back : (_, _, _, _) t -> bool
   val name    : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
 

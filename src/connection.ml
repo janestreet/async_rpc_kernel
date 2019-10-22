@@ -43,7 +43,7 @@ module Heartbeat_config = struct
     { timeout : Time_ns.Span.t
     ; send_every : Time_ns.Span.t
     }
-  [@@deriving sexp, bin_io]
+  [@@deriving sexp, bin_io, fields]
 
   let create ?(timeout = Time_ns.Span.of_sec 30.) ?(send_every=Time_ns.Span.of_sec 10.) () =
     { timeout ; send_every }

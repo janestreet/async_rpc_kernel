@@ -824,6 +824,7 @@ module State_rpc = struct
   let abort = Streaming_rpc.abort
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
 
+  let client_pushes_back t = t.Streaming_rpc.client_pushes_back
   let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
 
