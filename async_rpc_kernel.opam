@@ -15,7 +15,7 @@ depends: [
   "core_kernel"
   "ppx_jane"
   "protocol_version_header"
-  "dune"                    {build & >= "1.5.1"}
+  "dune"                    {>= "1.5.1"}
 ]
 synopsis: "Platform-independent core of Async RPC library"
 description: "
