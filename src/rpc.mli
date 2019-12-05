@@ -462,9 +462,10 @@ module Pipe_rpc : sig
 
       val create : ?buffer:Buffer.t -> unit -> _ t
 
-      (** [flushed t] is determined when the underlying writer for each member of [t] is
-          flushed. *)
-      val flushed : _ t -> unit Deferred.t
+      (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
+          flushed or closed. *)
+      val flushed_or_closed : _ t -> unit Deferred.t
+      val flushed : _ t -> unit Deferred.t [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]" ]
 
       (** Add a direct stream writer to the group. Raises if the writer is closed or
           already part of the group, or if its bin-prot writer is different than an

@@ -701,7 +701,13 @@ module Pipe_rpc = struct
 
       let to_list t = Bag.to_list t.components
 
-      let flushed t = Deferred.all_unit (List.map (to_list t) ~f:flushed)
+      let flushed_or_closed t =
+        to_list t
+        |> List.map ~f:(fun t -> Deferred.any_unit [flushed t; closed t])
+        |> Deferred.all_unit
+      ;;
+
+      let flushed t = flushed_or_closed t
 
       module Expert = struct
         let write_without_pushback t ~buf ~pos ~len =
@@ -715,7 +721,7 @@ module Pipe_rpc = struct
 
         let write t ~buf ~pos ~len =
           write_without_pushback t ~buf ~pos ~len;
-          flushed t
+          flushed_or_closed t
         ;;
       end
 
@@ -746,7 +752,7 @@ module Pipe_rpc = struct
 
       let write t x =
         write_without_pushback t x;
-        flushed t
+        flushed_or_closed t
       ;;
     end
   end
