@@ -580,7 +580,7 @@ module Streaming_rpc = struct
       upon (Pipe.closed pipe_r) (fun () ->
         if not (Ivar.is_full close_reason) then begin
           abort t conn id;
-          Ivar.fill close_reason Closed_locally;
+          Ivar.fill_if_empty close_reason Closed_locally;
         end);
       let pipe_metadata : Pipe_metadata.t =
         { query_id = id;
