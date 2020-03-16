@@ -427,6 +427,7 @@ module Pipe_rpc : sig
     val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
     val close : _ t -> unit
     val closed : _ t -> unit Deferred.t
+    val flushed : _ t -> unit Deferred.t
     val is_closed : _ t -> bool
 
     module Expert : sig
