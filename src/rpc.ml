@@ -627,7 +627,7 @@ module Pipe_rpc = struct
         type t = Bigstring.t ref
         let create ?(initial_size=4096) () =
           if initial_size < 0 then
-            failwiths
+            failwiths ~here:[%here]
               "Rpc.Pipe_rpc.Direct_stream_writer.Group.Buffer.create \
                got negative buffer size"
               initial_size Int.sexp_of_t;
