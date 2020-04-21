@@ -2,7 +2,8 @@ open! Core_kernel
 open! Async_kernel
 open! Async_rpc_kernel
 open! Async_rpc_kernel_private
-open! Expect_test_helpers
+open! Expect_test_helpers_core
+open! Expect_test_helpers_async
 module Time_ns = Core_kernel.Core_kernel_private.Time_ns_alternate_sexp
 
 let sec = Time_ns.Span.of_sec
