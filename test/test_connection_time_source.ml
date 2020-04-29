@@ -1,5 +1,5 @@
-open! Core_kernel
-open! Async_kernel
+open! Core
+open! Async
 open! Async_rpc_kernel
 open! Async_rpc_kernel_private
 open! Expect_test_helpers_core
