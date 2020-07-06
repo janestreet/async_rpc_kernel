@@ -341,7 +341,7 @@ let schedule_heartbeats t =
   `last_heartbeat last_heartbeat
 ;;
 
-let run_after_handshake t ~implementations ~connection_state =
+let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns =
   let instance =
     Implementations.instantiate implementations ~writer:t.writer
       ~connection_description:t.description
@@ -358,7 +358,7 @@ let run_after_handshake t ~implementations ~connection_state =
        [ Stream.map ~f:(reason "loop" )
            (Monitor.detach_and_get_error_stream monitor)
        ; Stream.map ~f:(reason "Writer.t")
-           (Monitor.detach_and_get_error_stream (Writer.monitor t.writer))
+           writer_monitor_exns
        ])))
     ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
@@ -448,12 +448,13 @@ let create
     ; heartbeat_event = Set_once.create ()
     }
   in
+  let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
     don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
   do_handshake t ~handshake_timeout
   >>| function
   | Ok () ->
-    run_after_handshake t ~implementations ~connection_state;
+    run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns;
     Ok t
   | Error error ->
     Error (Handshake_error.to_exn ~connection_description:description error)
