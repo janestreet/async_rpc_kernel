@@ -129,6 +129,7 @@ module type S = sig
     :  ?implementations    : 's Implementations.t
     -> ?handshake_timeout  : Time_ns.Span.t
     -> ?heartbeat_config   : Heartbeat_config.t
+    -> ?description        : Info.t
     -> connection_state    : (t -> 's)
     -> Transport.t
     -> dispatch_queries    : (t -> 'a Deferred.t)
@@ -141,6 +142,7 @@ module type S = sig
   val server_with_close
     :  ?handshake_timeout  : Time_ns.Span.t
     -> ?heartbeat_config   : Heartbeat_config.t
+    -> ?description        : Info.t
     -> Transport.t
     -> implementations     : 's Implementations.t
     -> connection_state    : (t -> 's)

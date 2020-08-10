@@ -464,6 +464,7 @@ let with_close
       ?implementations
       ?handshake_timeout
       ?heartbeat_config
+      ?description
       ~connection_state
       transport
       ~dispatch_queries
@@ -473,7 +474,7 @@ let with_close
     | `Call f -> f
     | `Raise -> raise
   in
-  create ?implementations ?handshake_timeout ?heartbeat_config
+  create ?implementations ?handshake_timeout ?heartbeat_config ?description
     ~connection_state transport
   >>= fun t ->
   match t with
@@ -496,7 +497,7 @@ let with_close
       )
 ;;
 
-let server_with_close ?handshake_timeout ?heartbeat_config
+let server_with_close ?handshake_timeout ?heartbeat_config ?description
       transport ~implementations ~connection_state ~on_handshake_error =
   let on_handshake_error =
     match on_handshake_error with
@@ -504,7 +505,7 @@ let server_with_close ?handshake_timeout ?heartbeat_config
     | `Raise -> `Raise
     | `Ignore -> `Call (fun _ -> Deferred.unit)
   in
-  with_close ?handshake_timeout ?heartbeat_config
+  with_close ?handshake_timeout ?heartbeat_config ?description
     transport ~implementations ~connection_state
     ~on_handshake_error ~dispatch_queries:(fun _ -> Deferred.unit)
 ;;
