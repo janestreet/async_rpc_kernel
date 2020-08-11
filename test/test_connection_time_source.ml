@@ -79,43 +79,36 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (Info.of_string "client")
   in
   let%bind server_conn, client_conn = Deferred.both server_conn client_conn in
-  let%bind () =
-    [%expect
-      {|
+  [%expect
+    {|
     ("received heartbeat"
       (now         "1970-01-01 00:00:00Z")
       (description server))
     ("received heartbeat"
       (now         "1970-01-01 00:00:00Z")
-      (description client)) |}]
-  in
+      (description client)) |}];
   advance_by_span server_time_source heartbeat_every;
   advance_by_span client_time_source heartbeat_every;
   let%bind () = yield () in
-  let%bind () =
-    [%expect
-      {|
+  [%expect
+    {|
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
       (description client))
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
-      (description server)) |}]
-  in
+      (description server)) |}];
   advance_by_span server_time_source heartbeat_timeout;
   let%bind () = yield () in
-  let%bind () =
-    [%expect
-      {|
+  [%expect
+    {|
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
-      (description client)) |}]
-  in
+      (description client)) |}];
   advance_by_span server_time_source heartbeat_every;
   let%bind () = yield () in
-  let%bind () =
-    [%expect
-      {|
+  [%expect
+    {|
     ("connection closed"
       (now         "1970-01-01 00:00:14Z")
       (description server)
@@ -123,8 +116,7 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
-      (reason      "EOF or connection closed")) |}]
-  in
+      (reason      "EOF or connection closed")) |}];
   Deferred.all_unit
     [ Connection.close_finished server_conn; Connection.close_finished client_conn ]
 ;;
