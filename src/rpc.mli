@@ -27,6 +27,9 @@ module Description : sig
     }
   [@@deriving compare, hash, sexp_of]
 
+  include Comparable.S_plain with type t := t
+  include Hashable.S_plain with type t := t
+
   module Stable : sig
     module V1 : sig
       type nonrec t = t [@@deriving compare, sexp, bin_io, hash]
