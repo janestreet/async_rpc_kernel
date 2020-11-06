@@ -391,7 +391,7 @@ let do_handshake t ~handshake_timeout =
          server starts accepting new connections (which could be never).  That is why a
          timeout is used *)
       let result =
-        Monitor.try_with ~run:`Now (fun () ->
+        Monitor.try_with ~rest:(`Log)  ~run:`Now (fun () ->
           Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
       in
       Time_source.with_timeout
@@ -483,7 +483,7 @@ let with_close
     >>= fun () ->
     handle_handshake_error e
   | Ok t ->
-    Monitor.protect
+    Monitor.protect ~run:(`Schedule)  ~rest:(`Log)
       ~finally:(fun () ->
         close t ~reason:(Info.of_string "Rpc.Connection.with_close finished")
       ) (fun () ->

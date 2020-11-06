@@ -512,7 +512,7 @@ let apply_implementation
       (* We need the [Monitor.try_with] even for the blocking mode as the implementation
          might return [Delayed_reponse], so we don't bother optimizing the blocking
          mode. *)
-      Monitor.try_with ~run:`Now (fun () ->
+      Monitor.try_with ~rest:(`Log)  ~run:`Now (fun () ->
         let len = (query.data :> int) in
         let result =
           f t.connection_state responder read_buffer

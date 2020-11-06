@@ -18,7 +18,7 @@ let bin_io_exn ~location exn =
 ;;
 
 let try_with ?run ~location f =
-  let x = Monitor.try_with ?run f in
+  let x = Monitor.try_with ~rest:(`Log)  ~run:(Option.value run ~default:(`Schedule))  f in
   let join = function
     | Ok x -> x
     | Error exn -> uncaught_exn ~location exn
