@@ -3,7 +3,7 @@ open Core_kernel
 module Stable = struct
   module V1 = struct
     type t =
-      { name    : string
+      { name : string
       ; version : int
       }
     [@@deriving bin_io, compare, hash, sexp]

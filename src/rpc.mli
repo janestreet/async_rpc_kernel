@@ -22,7 +22,7 @@ open! Async_kernel
 
 module Description : sig
   type t =
-    { name    : string
+    { name : string
     ; version : int
     }
   [@@deriving compare, hash, sexp_of]
@@ -68,16 +68,15 @@ module Implementations : sig
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
   type 'connection_state on_unknown_rpc =
-
     [ `Raise
     | `Continue
-    | `Close_connection  (** used to be the behavior of [`Ignore] *)
-    (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
+    | `Close_connection (** used to be the behavior of [`Ignore] *)
     | `Call of
-        ('connection_state
-         -> rpc_tag : string
-         -> version : int
-         -> [ `Close_connection | `Continue ])
+        'connection_state
+        -> rpc_tag:string
+        -> version:int
+        -> [ `Close_connection | `Continue ]
+        (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
     ]
 
   (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
@@ -85,24 +84,24 @@ module Implementations : sig
       [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
       one causing it to crash. *)
   val create
-    :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc : 'connection_state on_unknown_rpc
+    :  implementations:'connection_state Implementation.t list
+    -> on_unknown_rpc:'connection_state on_unknown_rpc
     -> ( 'connection_state t
-       , [`Duplicate_implementations of Description.t list]
-       ) Result.t
+       , [ `Duplicate_implementations of Description.t list ] )
+         Result.t
 
   val create_exn
-    :  implementations : 'connection_state Implementation.t list
-    -> on_unknown_rpc :
-      [ `Raise
-      | `Continue
-      | `Close_connection  (** used to be the behavior of [`Ignore] *)
-      | `Call of
-          ('connection_state
-           -> rpc_tag : string
-           -> version : int
-           -> [ `Close_connection | `Continue ])
-      ]
+    :  implementations:'connection_state Implementation.t list
+    -> on_unknown_rpc:
+         [ `Raise
+         | `Continue
+         | `Close_connection (** used to be the behavior of [`Ignore] *)
+         | `Call of
+             'connection_state
+             -> rpc_tag:string
+             -> version:int
+             -> [ `Close_connection | `Continue ]
+         ]
     -> 'connection_state t
 
   val add
@@ -126,56 +125,54 @@ module Implementations : sig
 
     (** Same as [create_exn], except for the additional [`Expert] variant. *)
     val create_exn
-      :  implementations : 'connection_state Implementation.t list
-      -> on_unknown_rpc :
-        [ `Raise
-        | `Continue
-        | `Close_connection  (** used to be the behavior of [`Ignore] *)
-        | `Call of
-            ('connection_state
-             -> rpc_tag : string
-             -> version : int
-             -> [ `Close_connection | `Continue ])
-        | `Expert of
-            (** The [Deferred.t] the function returns is only used to determine when it is
-                safe to overwrite the supplied [Bigstring.t], so it is *not* necessary to
-                completely finish handling the query before it is filled in.  In
-                particular, if you don't intend to read from the [Bigstring.t] after the
-                function returns, you can return [Deferred.unit]. *)
-            ('connection_state
-             -> rpc_tag : string
-             -> version : int
-             -> Responder.t
-             -> Bigstring.t
-             -> pos : int
-             -> len : int
-             -> unit Deferred.t)
-        ]
+      :  implementations:'connection_state Implementation.t list
+      -> on_unknown_rpc:
+           [ `Raise
+           | `Continue
+           | `Close_connection (** used to be the behavior of [`Ignore] *)
+           | `Call of
+               'connection_state
+               -> rpc_tag:string
+               -> version:int
+               -> [ `Close_connection | `Continue ]
+           | `Expert of
+               'connection_state
+               -> rpc_tag:string
+               -> version:int
+               -> Responder.t
+               -> Bigstring.t
+               -> pos:int
+               -> len:int
+               -> unit Deferred.t
+               (** The [Deferred.t] the function returns is only used to determine when it is
+                   safe to overwrite the supplied [Bigstring.t], so it is *not* necessary to
+                   completely finish handling the query before it is filled in.  In
+                   particular, if you don't intend to read from the [Bigstring.t] after the
+                   function returns, you can return [Deferred.unit]. *)
+           ]
       -> 'connection_state t
   end
 end
 
 module Transport = Transport
-
 module Connection : Connection_intf.S
 
 module Rpc : sig
   type ('query, 'response) t
 
   val create
-    :  name         : string
-    -> version      : int
-    -> bin_query    : 'query    Bin_prot.Type_class.t
-    -> bin_response : 'response Bin_prot.Type_class.t
+    :  name:string
+    -> version:int
+    -> bin_query:'query Bin_prot.Type_class.t
+    -> bin_response:'response Bin_prot.Type_class.t
     -> ('query, 'response) t
 
   (** the same values as were passed to create. *)
-  val name    : (_, _) t -> string
+  val name : (_, _) t -> string
+
   val version : (_, _) t -> int
-
   val description : (_, _) t -> Description.t
-
-  val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
+  val bin_query : ('query, _) t -> 'query Bin_prot.Type_class.t
   val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
 
   (** If the function that implements the RPC raises, the implementer does not see the
@@ -183,15 +180,13 @@ module Rpc : sig
       process that called [dispatch] or one of its alternatives.*)
   val implement
     :  ('query, 'response) t
-    -> ('connection_state
-        -> 'query
-        -> 'response Deferred.t)
+    -> ('connection_state -> 'query -> 'response Deferred.t)
     -> 'connection_state Implementation.t
 
   (** [implement'] is different from [implement] in that:
 
       1. ['response] is immediately serialized and scheduled for delivery to the RPC
-         dispatcher.
+      dispatcher.
 
       2. Less allocation happens, as none of the Async-related machinery is necessary.
 
@@ -199,9 +194,7 @@ module Rpc : sig
       [implement']. *)
   val implement'
     :  ('query, 'response) t
-    -> ('connection_state
-        -> 'query
-        -> 'response)
+    -> ('connection_state -> 'query -> 'response)
     -> 'connection_state Implementation.t
 
   (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
@@ -239,14 +232,15 @@ module Rpc : sig
       val schedule
         :  t
         -> Bigstring.t
-        -> pos : int
-        -> len : int
-        -> [`Flushed of unit Deferred.t | `Connection_closed]
+        -> pos:int
+        -> len:int
+        -> [ `Flushed of unit Deferred.t | `Connection_closed ]
 
       (** On the other hand, these are written immediately. *)
       val write_bigstring : t -> Bigstring.t -> pos:int -> len:int -> unit
-      val write_bin_prot  : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
-      val write_error     : t -> Error.t -> unit
+
+      val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
+      val write_error : t -> Error.t -> unit
     end
 
     (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
@@ -256,24 +250,24 @@ module Rpc : sig
         argument of [Implementations.Expert.create]. *)
     val schedule_dispatch
       :  Connection.t
-      -> rpc_tag : string
-      -> version : int
+      -> rpc_tag:string
+      -> version:int
       -> Bigstring.t
-      -> pos : int
-      -> len : int
-      -> handle_response : (Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
-      -> handle_error : (Error.t -> unit)
-      -> [`Flushed of unit Deferred.t | `Connection_closed]
+      -> pos:int
+      -> len:int
+      -> handle_response:(Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
+      -> handle_error:(Error.t -> unit)
+      -> [ `Flushed of unit Deferred.t | `Connection_closed ]
 
     val dispatch
       :  Connection.t
-      -> rpc_tag : string
-      -> version : int
+      -> rpc_tag:string
+      -> version:int
       -> Bigstring.t
-      -> pos : int
-      -> len : int
-      -> handle_response : (Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
-      -> handle_error : (Error.t -> unit)
+      -> pos:int
+      -> len:int
+      -> handle_response:(Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
+      -> handle_error:(Error.t -> unit)
       -> [ `Ok | `Connection_closed ]
 
     (** Result of callbacks passed to [implement] and [implement'] and
@@ -303,8 +297,8 @@ module Rpc : sig
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
-          -> pos : int
-          -> len : int
+          -> pos:int
+          -> len:int
           -> implementation_result Deferred.t)
       -> 'connection_state Implementation.t
 
@@ -313,30 +307,30 @@ module Rpc : sig
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
-          -> pos : int
-          -> len : int
+          -> pos:int
+          -> len:int
           -> implementation_result)
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version
-      :  rpc_tag: string
-      -> version: int
+      :  rpc_tag:string
+      -> version:int
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
-          -> pos : int
-          -> len : int
+          -> pos:int
+          -> len:int
           -> implementation_result Deferred.t)
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version'
-      :  rpc_tag: string
-      -> version: int
+      :  rpc_tag:string
+      -> version:int
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
-          -> pos : int
-          -> len : int
+          -> pos:int
+          -> len:int
           -> implementation_result)
       -> 'connection_state Implementation.t
   end
@@ -344,15 +338,13 @@ end
 
 module Pipe_close_reason : sig
   type t =
-    (** You closed the pipe. *)
-    | Closed_locally
-    (** The RPC implementer closed the pipe. *)
-    | Closed_remotely
+    | Closed_locally (** You closed the pipe. *)
+    | Closed_remotely (** The RPC implementer closed the pipe. *)
+    | Error of Error.t
     (** An error occurred, e.g. a message could not be deserialized.  If the connection
         closes before either side explicitly closes the pipe, it will also go into this
         case. *)
-    | Error of Error.t
-    [@@deriving bin_io, compare, sexp]
+  [@@deriving bin_io, compare, sexp]
 
   module Stable : sig
     module V1 : sig
@@ -360,7 +352,7 @@ module Pipe_close_reason : sig
         | Closed_locally
         | Closed_remotely
         | Error of Error.Stable.V2.t
-        [@@deriving bin_io, compare, sexp]
+      [@@deriving bin_io, compare, sexp]
     end
   end
 end
@@ -368,14 +360,18 @@ end
 module Pipe_rpc : sig
   type ('query, 'response, 'error) t
 
-  module Id : sig type t end
+  module Id : sig
+    type t
+  end
 
   module Metadata : sig
     type t
+
     val id : t -> Id.t
   end
 
   val create
+    :  ?client_pushes_back:unit
     (** If the connection is backed up, the server stops consuming elements from the
         pipe. Servers should pay attention to the pipe's pushback, otherwise they risk
         running out of memory if they fill the pipe much faster than the transport can
@@ -390,24 +386,23 @@ module Pipe_rpc : sig
         There are some drawbacks to using [client_pushes_back]:
 
         - RPC multiplexing doesn't work as well.  The client will stop reading *all*
-        messages on the connection if any pipe gets saturated, not just ones relating
-        to that pipe.
+          messages on the connection if any pipe gets saturated, not just ones relating
+          to that pipe.
 
         - A server that doesn't pay attention to pushback on its end will accumulate
-        elements on its side of the connection, rather than on the client's side,
-        meaning a slow client can make the server run out of memory. *)
-    :  ?client_pushes_back : unit
-    -> name : string
-    -> version : int
-    -> bin_query    : 'query    Bin_prot.Type_class.t
-    -> bin_response : 'response Bin_prot.Type_class.t
-    -> bin_error    : 'error    Bin_prot.Type_class.t
+          elements on its side of the connection, rather than on the client's side,
+          meaning a slow client can make the server run out of memory. *)
+    -> name:string
+    -> version:int
+    -> bin_query:'query Bin_prot.Type_class.t
+    -> bin_response:'response Bin_prot.Type_class.t
+    -> bin_error:'error Bin_prot.Type_class.t
     -> unit
     -> ('query, 'response, 'error) t
 
-  val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
+  val bin_query : ('query, _, _) t -> 'query Bin_prot.Type_class.t
   val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
-  val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
+  val bin_error : (_, _, 'error) t -> 'error Bin_prot.Type_class.t
 
   (** The pipe returned by the implementation function will be closed automatically when
       either the connection to the client is closed or the client closes their pipe. *)
@@ -426,8 +421,9 @@ module Pipe_rpc : sig
     (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
         the open case, [d] is determined when the message has been flushed from the
         underlying [Transport.Writer.t]. *)
-    val write : 'a t -> 'a -> [`Flushed of unit Deferred.t | `Closed]
-    val write_without_pushback : 'a t -> 'a -> [`Ok | `Closed]
+    val write : 'a t -> 'a -> [ `Flushed of unit Deferred.t | `Closed ]
+
+    val write_without_pushback : 'a t -> 'a -> [ `Ok | `Closed ]
     val close : _ t -> unit
     val closed : _ t -> unit Deferred.t
     val flushed : _ t -> unit Deferred.t
@@ -439,14 +435,14 @@ module Pipe_rpc : sig
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> [`Flushed of unit Deferred.t | `Closed]
+        -> [ `Flushed of unit Deferred.t | `Closed ]
 
       val write_without_pushback
         :  'a t
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> [`Ok | `Closed]
+        -> [ `Ok | `Closed ]
     end
 
     (** Group of direct writers. Groups are optimized for sending the same message to
@@ -461,6 +457,7 @@ module Pipe_rpc : sig
           It is safe to share the same buffer between multiple groups. *)
       module Buffer : sig
         type t
+
         val create : ?initial_size:int (* default 4096 *) -> unit -> t
       end
 
@@ -469,7 +466,9 @@ module Pipe_rpc : sig
       (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
           flushed or closed. *)
       val flushed_or_closed : _ t -> unit Deferred.t
-      val flushed : _ t -> unit Deferred.t [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]" ]
+
+      val flushed : _ t -> unit Deferred.t
+      [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]"]
 
       (** Add a direct stream writer to the group. Raises if the writer is closed or
           already part of the group, or if its bin-prot writer is different than an
@@ -489,28 +488,18 @@ module Pipe_rpc : sig
           [write t x] is the same as [write_without_pushback t x; flushed t].
       *)
       val write : 'a t -> 'a -> unit Deferred.t
+
       val write_without_pushback : 'a t -> 'a -> unit
 
       val to_list : 'a t -> 'a direct_stream_writer list
-
       val length : _ t -> int
 
       module Expert : sig
-        val write
-          :  'a t
-          -> buf:Bigstring.t
-          -> pos:int
-          -> len:int
-          -> unit Deferred.t
-
-        val write_without_pushback
-          :  'a t
-          -> buf:Bigstring.t
-          -> pos:int
-          -> len:int
-          -> unit
+        val write : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit Deferred.t
+        val write_without_pushback : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit
       end
-    end with type 'a direct_stream_writer := 'a t
+    end
+    with type 'a direct_stream_writer := 'a t
   end
 
   (** Similar to [implement], but you are given the writer instead of providing a writer
@@ -554,7 +543,7 @@ module Pipe_rpc : sig
   module Pipe_message : sig
     type 'a t =
       | Update of 'a
-      | Closed of [`By_remote_side | `Error of Error.t]
+      | Closed of [ `By_remote_side | `Error of Error.t ]
   end
 
   (** The output type of the [f] passed to [dispatch_iter]. This is analagous to a simple
@@ -591,6 +580,7 @@ module Pipe_rpc : sig
     -> f:('response Pipe_message.t -> Pipe_response.t)
     -> (Id.t, 'error) Result.t Or_error.t Deferred.t
 
+
   (** [abort rpc connection id] given an RPC and the id returned as part of a call to
       dispatch, abort requests that the other side of the connection stop sending
       updates.
@@ -605,9 +595,8 @@ module Pipe_rpc : sig
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
 
   val client_pushes_back : (_, _, _) t -> bool
-  val name               : (_, _, _) t -> string
-  val version            : (_, _, _) t -> int
-
+  val name : (_, _, _) t -> string
+  val version : (_, _, _) t -> int
   val description : (_, _, _) t -> Description.t
 
 end
@@ -619,52 +608,51 @@ end
 module State_rpc : sig
   type ('query, 'state, 'update, 'error) t
 
-  module Id : sig type t end
+  module Id : sig
+    type t
+  end
 
   module Metadata : sig
     type t
+
     val id : t -> Id.t
   end
 
   val create
-    :  ?client_pushes_back : unit
-    -> name : string
-    -> version : int
-    -> bin_query  : 'query  Bin_prot.Type_class.t
-    -> bin_state  : 'state  Bin_prot.Type_class.t
-    -> bin_update : 'update Bin_prot.Type_class.t
-    -> bin_error  : 'error  Bin_prot.Type_class.t
+    :  ?client_pushes_back:unit
+    -> name:string
+    -> version:int
+    -> bin_query:'query Bin_prot.Type_class.t
+    -> bin_state:'state Bin_prot.Type_class.t
+    -> bin_update:'update Bin_prot.Type_class.t
+    -> bin_error:'error Bin_prot.Type_class.t
     -> unit
     -> ('query, 'state, 'update, 'error) t
 
-  val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t
-  val bin_state  : (_, 'state, _, _)  t -> 'state  Bin_prot.Type_class.t
+  val bin_query : ('query, _, _, _) t -> 'query Bin_prot.Type_class.t
+  val bin_state : (_, 'state, _, _) t -> 'state Bin_prot.Type_class.t
   val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
-  val bin_error  : (_, _, _, 'error)  t -> 'error  Bin_prot.Type_class.t
+  val bin_error : (_, _, _, 'error) t -> 'error Bin_prot.Type_class.t
 
   val implement
     :  ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
-        -> (('state * 'update Pipe.Reader.t), 'error) Result.t Deferred.t)
+        -> ('state * 'update Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
   val dispatch
     :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
-    -> ( 'state * 'update Pipe.Reader.t * Metadata.t
-       , 'error
-       ) Result.t Or_error.t Deferred.t
+    -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t
+         Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
-
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
-
   val client_pushes_back : (_, _, _, _) t -> bool
-  val name    : (_, _, _, _) t -> string
+  val name : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
-
   val description : (_, _, _, _) t -> Description.t
 end
 
@@ -676,16 +664,11 @@ end
 module One_way : sig
   type 'msg t
 
-  val create
-    :  name     : string
-    -> version  : int
-    -> bin_msg  : 'msg Bin_prot.Type_class.t
-    -> 'msg t
-
-  val name        : _ t -> string
-  val version     : _ t -> int
+  val create : name:string -> version:int -> bin_msg:'msg Bin_prot.Type_class.t -> 'msg t
+  val name : _ t -> string
+  val version : _ t -> int
   val description : _ t -> Description.t
-  val bin_msg     : 'msg t -> 'msg Bin_prot.Type_class.t
+  val bin_msg : 'msg t -> 'msg Bin_prot.Type_class.t
 
   val implement
     :  'msg t
@@ -694,11 +677,7 @@ module One_way : sig
 
   (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
       [rpc_result_to_or_error] gives you the same result as [dispatch] *)
-  val dispatch'
-    :  'msg t
-    -> Connection.t
-    -> 'msg
-    -> unit Rpc_result.t
+  val dispatch' : 'msg t -> Connection.t -> 'msg -> unit Rpc_result.t
 
   val rpc_result_to_or_error
     :  'msg t
@@ -706,35 +685,22 @@ module One_way : sig
     -> unit Rpc_result.t
     -> unit Or_error.t
 
-  val dispatch
-    :  'msg t
-    -> Connection.t
-    -> 'msg
-    -> unit Or_error.t
-
-  val dispatch_exn
-    :  'msg t
-    -> Connection.t
-    -> 'msg
-    -> unit
+  val dispatch : 'msg t -> Connection.t -> 'msg -> unit Or_error.t
+  val dispatch_exn : 'msg t -> Connection.t -> 'msg -> unit
 
   module Expert : sig
     val implement
       :  _ t
-      -> ('connection_state
-          -> Bigstring.t
-          -> pos : int
-          -> len : int
-          -> unit)
+      -> ('connection_state -> Bigstring.t -> pos:int -> len:int -> unit)
       -> 'connection_state Implementation.t
 
     val dispatch
       :  _ t
       -> Connection.t
       -> Bigstring.t
-      -> pos : int
-      -> len : int
-      -> [`Ok | `Connection_closed]
+      -> pos:int
+      -> len:int
+      -> [ `Ok | `Connection_closed ]
 
     (** Like [dispatch], but does not copy data out of the buffer, so it must not change
         until the returned [unit Deferred.t] is determined. *)
@@ -742,37 +708,35 @@ module One_way : sig
       :  _ t
       -> Connection.t
       -> Bigstring.t
-      -> pos : int
-      -> len : int
-      -> [`Flushed of unit Deferred.t | `Connection_closed]
+      -> pos:int
+      -> len:int
+      -> [ `Flushed of unit Deferred.t | `Connection_closed ]
   end
 end
 
 module Any : sig
   type t =
-    | Rpc     : ('q, 'r) Rpc.t -> t
-    | Pipe    : ('q, 'r, 'e) Pipe_rpc.t -> t
-    | State   : ('q, 's, 'u, 'e) State_rpc.t -> t
+    | Rpc : ('q, 'r) Rpc.t -> t
+    | Pipe : ('q, 'r, 'e) Pipe_rpc.t -> t
+    | State : ('q, 's, 'u, 'e) State_rpc.t -> t
     | One_way : 'm One_way.t -> t
 
   val description : t -> Description.t
 end
 
 module Stable : sig
-
   module Rpc : sig
     type ('query, 'response) t = ('query, 'response) Rpc.t
 
     val create
-      :  name         : string
-      -> version      : int
-      -> bin_query    : 'query    Bin_prot.Type_class.t
-      -> bin_response : 'response Bin_prot.Type_class.t
+      :  name:string
+      -> version:int
+      -> bin_query:'query Bin_prot.Type_class.t
+      -> bin_response:'response Bin_prot.Type_class.t
       -> ('query, 'response) t
 
     val description : (_, _) t -> Description.t
-
-    val bin_query    : ('query, _)    t -> 'query    Bin_prot.Type_class.t
+    val bin_query : ('query, _) t -> 'query Bin_prot.Type_class.t
     val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
   end
 
@@ -780,58 +744,56 @@ module Stable : sig
     type ('query, 'response, 'error) t = ('query, 'response, 'error) Pipe_rpc.t
 
     val create
-      :  ?client_pushes_back : unit
-      -> name : string
-      -> version : int
-      -> bin_query    : 'query    Bin_prot.Type_class.t
-      -> bin_response : 'response Bin_prot.Type_class.t
-      -> bin_error    : 'error    Bin_prot.Type_class.t
+      :  ?client_pushes_back:unit
+      -> name:string
+      -> version:int
+      -> bin_query:'query Bin_prot.Type_class.t
+      -> bin_response:'response Bin_prot.Type_class.t
+      -> bin_error:'error Bin_prot.Type_class.t
       -> unit
       -> ('query, 'response, 'error) t
 
     val description : (_, _, _) t -> Description.t
-
-    val bin_query    : ('query, _, _) t    -> 'query    Bin_prot.Type_class.t
+    val bin_query : ('query, _, _) t -> 'query Bin_prot.Type_class.t
     val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
-    val bin_error    : (_, _, 'error) t    -> 'error    Bin_prot.Type_class.t
+    val bin_error : (_, _, 'error) t -> 'error Bin_prot.Type_class.t
   end
 
   module State_rpc : sig
     type ('query, 'state, 'update, 'error) t =
-       ('query, 'state, 'update, 'error) State_rpc.t
+      ('query, 'state, 'update, 'error) State_rpc.t
 
     val create
-      :  ?client_pushes_back : unit
-      -> name : string
-      -> version : int
-      -> bin_query  : 'query  Bin_prot.Type_class.t
-      -> bin_state  : 'state  Bin_prot.Type_class.t
-      -> bin_update : 'update Bin_prot.Type_class.t
-      -> bin_error  : 'error  Bin_prot.Type_class.t
+      :  ?client_pushes_back:unit
+      -> name:string
+      -> version:int
+      -> bin_query:'query Bin_prot.Type_class.t
+      -> bin_state:'state Bin_prot.Type_class.t
+      -> bin_update:'update Bin_prot.Type_class.t
+      -> bin_error:'error Bin_prot.Type_class.t
       -> unit
       -> ('query, 'state, 'update, 'error) t
 
     val description : (_, _, _, _) t -> Description.t
-
-    val bin_query  : ('query, _, _, _)  t -> 'query  Bin_prot.Type_class.t
-    val bin_state  : (_, 'state, _, _)  t -> 'state  Bin_prot.Type_class.t
+    val bin_query : ('query, _, _, _) t -> 'query Bin_prot.Type_class.t
+    val bin_state : (_, 'state, _, _) t -> 'state Bin_prot.Type_class.t
     val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
-    val bin_error  : (_, _, _, 'error)  t -> 'error  Bin_prot.Type_class.t
+    val bin_error : (_, _, _, 'error) t -> 'error Bin_prot.Type_class.t
   end
 
   module One_way : sig
     type 'msg t = 'msg One_way.t
 
     val create
-      :  name     : string
-      -> version  : int
-      -> bin_msg  : 'msg Bin_prot.Type_class.t
+      :  name:string
+      -> version:int
+      -> bin_msg:'msg Bin_prot.Type_class.t
       -> 'msg t
 
     val description : _ t -> Description.t
-
-    val bin_msg     : 'msg t -> 'msg Bin_prot.Type_class.t
+    val bin_msg : 'msg t -> 'msg Bin_prot.Type_class.t
   end
+
   module Description = Description.Stable
   module Pipe_close_reason = Pipe_close_reason.Stable
 end
