@@ -30,6 +30,8 @@ module Description : sig
   include Comparable.S_plain with type t := t
   include Hashable.S_plain with type t := t
 
+  val summarize : t list -> Int.Set.t String.Map.t
+
   module Stable : sig
     module V1 : sig
       type nonrec t = t [@@deriving compare, sexp, bin_io, hash]
@@ -613,7 +615,7 @@ module State_rpc : sig
   end
 
   module Metadata : sig
-    type t
+    type t = Pipe_rpc.Metadata.t
 
     val id : t -> Id.t
   end

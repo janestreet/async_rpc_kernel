@@ -108,7 +108,8 @@ let () =
 let () =
   (* Now replace the server fd by /dev/null, so that writes always succeed *)
   let fd = Fd.file_descr_exn server_to_client_fdw in
-  let open Core in
+  let open! Core in
+  let module Unix = Core_unix in
   let devnull = Unix.openfile ~mode:[ O_WRONLY ] "/dev/null" in
   Unix.dup2 ~src:devnull ~dst:fd ();
   Unix.close devnull

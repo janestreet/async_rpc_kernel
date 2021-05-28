@@ -11,6 +11,8 @@ type t =
 include Comparable.S with type t := t
 include Hashable.S with type t := t
 
+val summarize : t list -> Int.Set.t String.Map.t
+
 module Stable : sig
   module V1 : sig
     type nonrec t = t [@@deriving compare, sexp, bin_io, hash]
