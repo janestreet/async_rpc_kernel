@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Async_kernel
 
 type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]

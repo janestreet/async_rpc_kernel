@@ -1,6 +1,6 @@
 (** Internal to [Async_rpc_kernel].  See [Rpc.Decscription]. *)
 
-open! Core_kernel
+open! Core
 
 type t =
   { name : string

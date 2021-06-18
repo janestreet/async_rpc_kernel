@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Poly
 
 let of_writer { Bin_prot.Type_class.write; size } =

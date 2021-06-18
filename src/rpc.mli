@@ -17,7 +17,7 @@
     (name, version) pair.  RPCs with the same name but different versions should implement
     similar functionality. *)
 
-open! Core_kernel
+open! Core
 open! Async_kernel
 
 module Description : sig

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 include Protocol.Rpc_error
 include Sexpable.To_stringable (Protocol.Rpc_error)
 

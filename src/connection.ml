@@ -1,6 +1,6 @@
-open Core_kernel
+open Core
 open Async_kernel
-module Time_ns = Core_kernel.Core_kernel_private.Time_ns_alternate_sexp
+module Time_ns = Core.Core_private.Time_ns_alternate_sexp
 module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer
@@ -51,6 +51,16 @@ module Heartbeat_config = struct
     =
     { timeout; send_every }
   ;;
+
+  module Runtime = struct
+    type t =
+      { mutable timeout : Time_ns.Span.t
+      ; send_every : Time_ns.Span.t
+      }
+    [@@deriving sexp_of]
+  end
+
+  let to_runtime { timeout; send_every } = { Runtime.timeout; send_every }
 end
 
 type response_handler =
@@ -65,8 +75,9 @@ type response_handler =
 
 type t =
   { description : Info.t
-  ; heartbeat_config : Heartbeat_config.t
+  ; heartbeat_config : Heartbeat_config.Runtime.t
   ; mutable heartbeat_callbacks : (unit -> unit) array
+  ; mutable last_seen_alive : Time_ns.t
   ; reader : Reader.t
   ; writer : Writer.t
   ; open_queries : (P.Query_id.t, (response_handler[@sexp.opaque])) Hashtbl.t
@@ -178,7 +189,9 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
   : _ Transport.Handler_result.t
   =
   match msg with
-  | Heartbeat -> Continue
+  | Heartbeat ->
+    Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
+    Continue
   | Response response -> handle_response t response ~read_buffer ~read_buffer_pos_ref
   | Query query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
@@ -206,6 +219,13 @@ let add_heartbeat_callback t f =
      triggering cheap. *)
   t.heartbeat_callbacks <- Array.append [| f |] t.heartbeat_callbacks
 ;;
+
+let reset_heartbeat_timeout t timeout =
+  t.heartbeat_config.timeout <- timeout;
+  t.last_seen_alive <- Synchronous_time_source.now t.time_source
+;;
+
+let last_seen_alive t = t.last_seen_alive
 
 let abort_heartbeating t =
   Option.iter (Set_once.get t.heartbeat_event) ~f:(fun event ->
@@ -273,9 +293,9 @@ let on_message t =
   Staged.stage f
 ;;
 
-let heartbeat_now t ~last_heartbeat =
+let heartbeat_now t =
   let since_last_heartbeat =
-    Time_ns.diff (Synchronous_time_source.now t.time_source) last_heartbeat
+    Time_ns.diff (Synchronous_time_source.now t.time_source) t.last_seen_alive
   in
   if Time_ns.Span.( > ) since_last_heartbeat t.heartbeat_config.timeout
   then (
@@ -320,18 +340,16 @@ let cleanup t ~reason exn =
 ;;
 
 let schedule_heartbeats t =
-  let last_heartbeat = ref (Synchronous_time_source.now t.time_source) in
-  (* Heartbeat immediately, and schedule heartbeats that will begin after the time_source
-     is advanced *)
-  heartbeat_now t ~last_heartbeat:!last_heartbeat;
+  t.last_seen_alive <- Synchronous_time_source.now t.time_source;
   let heartbeat_from_now_on =
+    (* [at_intervals] will schedule the first heartbeat the first time the time_source is
+       advanced *)
     Synchronous_time_source.Event.at_intervals
       t.time_source
       t.heartbeat_config.send_every
-      (fun () -> heartbeat_now t ~last_heartbeat:!last_heartbeat)
+      (fun () -> heartbeat_now t)
   in
-  Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on;
-  `last_heartbeat last_heartbeat
+  Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on
 ;;
 
 let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns =
@@ -356,13 +374,12 @@ let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exn
           ]))
     ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
-    let (`last_heartbeat last_heartbeat) = schedule_heartbeats t in
+    schedule_heartbeats t;
     Reader.read_forever
       t.reader
       ~on_message:(Staged.unstage (on_message t))
       ~on_end_of_batch:(fun () ->
-        last_heartbeat := Synchronous_time_source.now t.time_source;
-        Array.iter t.heartbeat_callbacks ~f:(fun f -> f ()))
+        t.last_seen_alive <- Synchronous_time_source.now t.time_source)
     >>> function
     | Ok reason -> cleanup t ~reason (Rpc_error.Rpc (Connection_closed, t.description))
     (* The protocol is such that right now, the only outcome of the other side closing the
@@ -430,8 +447,9 @@ let create
   in
   let t =
     { description
-    ; heartbeat_config
+    ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
     ; heartbeat_callbacks = [||]
+    ; last_seen_alive = Synchronous_time_source.now time_source
     ; reader
     ; writer
     ; open_queries = Hashtbl.Poly.create ~size:10 ()

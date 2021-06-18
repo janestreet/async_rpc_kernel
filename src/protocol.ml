@@ -4,8 +4,8 @@
 
 open Bin_prot.Std
 open Sexplib.Std
-module Rpc_tag : Core_kernel.Identifiable = Core_kernel.String
-module Query_id = Core_kernel.Unique_id.Int63 ()
+module Rpc_tag : Core.Identifiable = Core.String
+module Query_id = Core.Unique_id.Int63 ()
 
 module Unused_query_id : sig
   type t [@@deriving bin_io, sexp_of]
@@ -18,7 +18,7 @@ end = struct
 end
 
 module Rpc_error : sig
-  open Core_kernel
+  open Core
 
   type t =
     | Bin_io_exn of Sexp.t
@@ -33,11 +33,11 @@ module Rpc_error : sig
 end = struct
   module T = struct
     type t =
-      | Bin_io_exn of Core_kernel.Sexp.t
+      | Bin_io_exn of Core.Sexp.t
       | Connection_closed
-      | Write_error of Core_kernel.Sexp.t
-      | Uncaught_exn of Core_kernel.Sexp.t
-      | Unimplemented_rpc of Rpc_tag.t * [ `Version of Core_kernel.Int.Stable.V1.t ]
+      | Write_error of Core.Sexp.t
+      | Uncaught_exn of Core.Sexp.t
+      | Unimplemented_rpc of Rpc_tag.t * [ `Version of Core.Int.Stable.V1.t ]
       | Unknown_query_id of Query_id.t
     [@@deriving bin_io, sexp, compare]
 
@@ -48,11 +48,11 @@ end = struct
   end
 
   include T
-  include Core_kernel.Comparable.Make (T)
+  include Core.Comparable.Make (T)
 end
 
 module Rpc_result = struct
-  type 'a t = ('a, Rpc_error.t) Core_kernel.Result.t [@@deriving bin_io, sexp_of]
+  type 'a t = ('a, Rpc_error.t) Core.Result.t [@@deriving bin_io, sexp_of]
 end
 
 module Header = Protocol_version_header
@@ -93,7 +93,7 @@ end
 module Stream_initial_message = struct
   type ('response, 'error) t =
     { unused_query_id : Unused_query_id.t
-    ; initial : ('response, 'error) Core_kernel.Result.t
+    ; initial : ('response, 'error) Core.Result.t
     }
   [@@deriving bin_io, sexp_of]
 end

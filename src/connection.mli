@@ -1,6 +1,6 @@
 (** Internal to [Async_rpc_kernel].  See [Connection_intf.S]. *)
 
-open! Core_kernel
+open! Core
 open! Async_kernel
 open Protocol
 include Connection_intf.S

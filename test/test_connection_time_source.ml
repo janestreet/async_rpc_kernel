@@ -4,7 +4,7 @@ open! Async_rpc_kernel
 open! Async_rpc_kernel_private
 open! Expect_test_helpers_core
 open! Expect_test_helpers_async
-module Time_ns = Core_kernel.Core_kernel_private.Time_ns_alternate_sexp
+module Time_ns = Core.Core_private.Time_ns_alternate_sexp
 
 let sec = Time_ns.Span.of_sec
 
@@ -79,6 +79,13 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (Info.of_string "client")
   in
   let%bind server_conn, client_conn = Deferred.both server_conn client_conn in
+  [%expect {| |}];
+  let print_liveness conn =
+    print_s [%message "" ~last_seen_alive:(Connection.last_seen_alive conn : Time_ns.t)]
+  in
+  advance_by_span client_time_source Time_ns.Span.zero;
+  advance_by_span server_time_source Time_ns.Span.zero;
+  let%bind () = yield () in
   [%expect
     {|
     ("received heartbeat"
@@ -87,6 +94,12 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("received heartbeat"
       (now         "1970-01-01 00:00:00Z")
       (description client)) |}];
+  print_liveness server_conn;
+  print_liveness client_conn;
+  [%expect
+    {|
+    (last_seen_alive "1970-01-01 00:00:00Z")
+    (last_seen_alive "1970-01-01 00:00:00Z") |}];
   advance_by_span server_time_source heartbeat_every;
   advance_by_span client_time_source heartbeat_every;
   let%bind () = yield () in
@@ -98,13 +111,37 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
       (description server)) |}];
+  print_liveness server_conn;
+  print_liveness client_conn;
+  [%expect
+    {|
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    (last_seen_alive "1970-01-01 00:00:02Z") |}];
   advance_by_span server_time_source heartbeat_timeout;
   let%bind () = yield () in
   [%expect
     {|
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
+      (description client))
+    ("received heartbeat"
+      (now         "1970-01-01 00:00:02Z")
+      (description client))
+    ("received heartbeat"
+      (now         "1970-01-01 00:00:02Z")
+      (description client))
+    ("received heartbeat"
+      (now         "1970-01-01 00:00:02Z")
+      (description client))
+    ("received heartbeat"
+      (now         "1970-01-01 00:00:02Z")
       (description client)) |}];
+  print_liveness server_conn;
+  print_liveness client_conn;
+  [%expect
+    {|
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    (last_seen_alive "1970-01-01 00:00:02Z") |}];
   advance_by_span server_time_source heartbeat_every;
   let%bind () = yield () in
   [%expect
@@ -117,6 +154,12 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (now         "1970-01-01 00:00:02Z")
       (description client)
       (reason      "EOF or connection closed")) |}];
+  print_liveness server_conn;
+  print_liveness client_conn;
+  [%expect
+    {|
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    (last_seen_alive "1970-01-01 00:00:02Z") |}];
   Deferred.all_unit
     [ Connection.close_finished server_conn; Connection.close_finished client_conn ]
 ;;

@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 val bin_read_from_bigstring
   :  'a Bin_prot.Type_class.reader

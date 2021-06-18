@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 
 (* utility function for bin-io'ing out of a Bigstring.t *)
 let bin_read_from_bigstring

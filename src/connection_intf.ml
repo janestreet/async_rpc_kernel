@@ -1,4 +1,4 @@
-open Core_kernel
+open Core
 open Async_kernel
 
 (* The reason for defining this module type explicitly is so that we can internally keep
@@ -10,9 +10,10 @@ module type S = sig
     type t [@@deriving sexp, bin_io]
 
     (** Each side of the connection has its own heartbeat config. It sends a heartbeat
-        every [send_every]. If it doesn't receive a heartbeat for [timeout], it drops the
-        connection. It only checks whether [timeout] has elapsed when it sends heartbeats,
-        so effectively [timeout] is rounded up to the nearest multiple of [send_every]. *)
+        every [send_every]. If it doesn't receive any messages for [timeout], whether it's
+        a heartbeat or not, it drops the connection. It only checks whether [timeout] has
+        elapsed when it sends heartbeats, so effectively [timeout] is rounded up to the
+        nearest multiple of [send_every]. *)
     val create : ?timeout:Time_ns.Span.t -> ?send_every:Time_ns.Span.t -> unit -> t
 
     val timeout : t -> Time_ns.Span.t
@@ -63,9 +64,17 @@ module type S = sig
 
   val description : t -> Info.t
 
-  (** After [add_heartbeat_callback t f], [f ()] will be called on every subsequent
-      heartbeat to [t]. *)
+  (** After [add_heartbeat_callback t f], [f ()] will be called after every subsequent
+      heartbeat received by [t]. *)
   val add_heartbeat_callback : t -> (unit -> unit) -> unit
+
+  (** Changes the heartbeat timeout and restarts the timer by setting [last_seen_alive] to
+      the current time. *)
+  val reset_heartbeat_timeout : t -> Time_ns.Span.t -> unit
+
+  (** The last time either any message has been received or [reset_heartbeat_timeout] was
+      called. *)
+  val last_seen_alive : t -> Time_ns.t
 
   (** [close] starts closing the connection's transport, and returns a deferred that
       becomes determined when its close completes.  It is ok to call [close] multiple
