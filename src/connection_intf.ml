@@ -118,7 +118,7 @@ module type S = sig
       raise an exception.  If no error results, [dispatch_queries] is called on [t].
 
       After [dispatch_queries] returns, if [server] is None, the [t] will be closed and
-      the deferred returned by [dispatch_queries] wil be determined immediately.
+      the deferred returned by [dispatch_queries] will be determined immediately.
       Otherwise, we'll wait until the other side closes the connection and then close [t]
       and determine the deferred returned by [dispatch_queries].
 
