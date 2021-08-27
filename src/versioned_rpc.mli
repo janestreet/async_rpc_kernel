@@ -1,8 +1,5 @@
-(** NOTE: You should consider using [Babel] instead of [Versioned_rpc].  It has some
-    additional features and is a bit more concise by operating at the value level rather
-    than the module level of OCaml.
 
-    Infrastructure code for managing RPCs that evolve over time to use different types at
+(** Infrastructure code for managing RPCs that evolve over time to use different types at
     different versions.
 
     Three scenarios are supported:

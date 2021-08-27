@@ -476,6 +476,7 @@ let with_close
       ?handshake_timeout
       ?heartbeat_config
       ?description
+      ?time_source
       ~connection_state
       transport
       ~dispatch_queries
@@ -492,6 +493,7 @@ let with_close
       ?handshake_timeout
       ?heartbeat_config
       ?description
+      ?time_source
       ~connection_state
       transport
   in
@@ -520,6 +522,7 @@ let server_with_close
       ?handshake_timeout
       ?heartbeat_config
       ?description
+      ?time_source
       transport
       ~implementations
       ~connection_state
@@ -535,6 +538,7 @@ let server_with_close
     ?handshake_timeout
     ?heartbeat_config
     ?description
+    ?time_source
     transport
     ~implementations
     ~connection_state

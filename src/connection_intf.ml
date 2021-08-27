@@ -136,6 +136,7 @@ module type S = sig
     -> ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
     -> ?description:Info.t
+    -> ?time_source:Synchronous_time_source.t
     -> connection_state:(t -> 's)
     -> Transport.t
     -> dispatch_queries:(t -> 'a Deferred.t)
@@ -149,6 +150,7 @@ module type S = sig
     :  ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
     -> ?description:Info.t
+    -> ?time_source:Synchronous_time_source.t
     -> Transport.t
     -> implementations:'s Implementations.t
     -> connection_state:(t -> 's)
