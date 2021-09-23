@@ -47,6 +47,13 @@ module Rpc_common = struct
   ;;
 end
 
+let shapes lst =
+  Sexp.List
+    (List.map lst ~f:(fun (name, shape) ->
+       [%message
+         "" ~_:(name : string) ~_:(Bin_prot.Shape.eval_to_digest_string shape : string)]))
+;;
+
 module Rpc = struct
   type ('query, 'response) t =
     { tag : P.Rpc_tag.t
@@ -64,11 +71,13 @@ module Rpc = struct
   let description t = { Description.name = name t; version = version t }
   let bin_query t = t.bin_query
   let bin_response t = t.bin_response
+  let shapes t = shapes [ "query", t.bin_query.shape; "response", t.bin_response.shape ]
 
   let implement t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
+    ; shapes = shapes t
     }
   ;;
 
@@ -76,6 +85,7 @@ module Rpc = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
+    ; shapes = shapes t
     }
   ;;
 
@@ -217,17 +227,26 @@ module Rpc = struct
       | Delayed_response of unit Deferred.t
 
     let implement t f =
-      { Implementation.tag = t.tag; version = t.version; f = Rpc_expert (f, Deferred) }
+      { Implementation.tag = t.tag
+      ; version = t.version
+      ; f = Rpc_expert (f, Deferred)
+      ; shapes = shapes t
+      }
     ;;
 
     let implement' t f =
-      { Implementation.tag = t.tag; version = t.version; f = Rpc_expert (f, Blocking) }
+      { Implementation.tag = t.tag
+      ; version = t.version
+      ; f = Rpc_expert (f, Blocking)
+      ; shapes = shapes t
+      }
     ;;
 
     let implement_for_tag_and_version ~rpc_tag ~version f =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Deferred)
+      ; shapes = Sexp.Atom "Unknown"
       }
     ;;
 
@@ -235,6 +254,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Blocking)
+      ; shapes = Sexp.Atom "Unknown"
       }
     ;;
   end
@@ -254,10 +274,15 @@ module One_way = struct
     { tag = P.Rpc_tag.of_string name; version; bin_msg }
   ;;
 
+  let shapes t = shapes [ "msg", t.bin_msg.shape ]
   let description t = { Description.name = name t; version = version t }
 
   let implement t f =
-    { Implementation.tag = t.tag; version = t.version; f = One_way (t.bin_msg.reader, f) }
+    { Implementation.tag = t.tag
+    ; version = t.version
+    ; f = One_way (t.bin_msg.reader, f)
+    ; shapes = shapes t
+    }
   ;;
 
   let dispatch' t conn query =
@@ -289,7 +314,11 @@ module One_way = struct
 
   module Expert = struct
     let implement t f =
-      { Implementation.tag = t.tag; version = t.version; f = One_way_expert f }
+      { Implementation.tag = t.tag
+      ; version = t.version
+      ; f = One_way_expert f
+      ; shapes = shapes t
+      }
     ;;
 
     let dispatch { tag; version; bin_msg = _ } conn buf ~pos ~len =
@@ -385,6 +414,15 @@ module Streaming_rpc = struct
     { Initial_message.unused_query_id = P.Unused_query_id.t; initial = x }
   ;;
 
+  let shapes t =
+    shapes
+      [ "query", t.bin_query.shape
+      ; "initial-response", t.bin_initial_response.shape
+      ; "update-response", t.bin_update_response.shape
+      ; "error", t.bin_error_response.shape
+      ]
+  ;;
+
   let implement_gen t impl =
     let bin_init_writer =
       Initial_message.bin_writer_t
@@ -396,6 +434,7 @@ module Streaming_rpc = struct
     ; f =
         Streaming_rpc
           (t.bin_query.reader, bin_init_writer, t.bin_update_response.writer, impl)
+    ; shapes = shapes t
     }
   ;;
 

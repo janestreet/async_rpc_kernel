@@ -48,7 +48,7 @@ end
     structure.  This way, [Implementation.t]s can be created without having the master
     structure in your hands. *)
 module Implementation : sig
-  type 'connection_state t
+  type 'connection_state t [@@deriving sexp_of]
 
   val description : _ t -> Description.t
 

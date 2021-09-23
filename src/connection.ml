@@ -1,6 +1,6 @@
 open Core
 open Async_kernel
-module Time_ns = Core.Core_private.Time_ns_alternate_sexp
+module Time_ns = Core_private.Time_ns_alternate_sexp
 module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer

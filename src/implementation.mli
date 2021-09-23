@@ -76,7 +76,9 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
+  ; shapes : Sexp.t
   }
+[@@deriving sexp_of]
 
 val description : _ t -> Description.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t

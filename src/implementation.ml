@@ -67,6 +67,12 @@ module F = struct
         * ('connection_state, 'query, 'init, 'update) streaming_impl
         -> 'connection_state t
 
+  let sexp_of_t _ = function
+    | One_way_expert _ | One_way _ -> [%message "one-way"]
+    | Rpc_expert _ | Rpc _ -> [%message "rpc"]
+    | Streaming_rpc _ -> [%message "streaming-rpc"]
+  ;;
+
   let lift t ~f =
     match t with
     | One_way (bin_msg, impl) -> One_way (bin_msg, fun state str -> impl (f state) str)
@@ -91,7 +97,9 @@ type nonrec 'connection_state t = 'connection_state t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
+  ; shapes : Sexp.t
   }
+[@@deriving sexp_of]
 
 let description t = { Description.name = Rpc_tag.to_string t.tag; version = t.version }
 let lift t ~f = { t with f = F.lift ~f t.f }
