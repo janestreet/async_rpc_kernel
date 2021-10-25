@@ -77,7 +77,7 @@ module Rpc = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
-    ; shapes = shapes t
+    ; shapes = lazy (shapes t)
     }
   ;;
 
@@ -85,7 +85,7 @@ module Rpc = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
-    ; shapes = shapes t
+    ; shapes = lazy (shapes t)
     }
   ;;
 
@@ -230,7 +230,7 @@ module Rpc = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (f, Deferred)
-      ; shapes = shapes t
+      ; shapes = lazy (shapes t)
       }
     ;;
 
@@ -238,7 +238,7 @@ module Rpc = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (f, Blocking)
-      ; shapes = shapes t
+      ; shapes = lazy (shapes t)
       }
     ;;
 
@@ -246,7 +246,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Deferred)
-      ; shapes = Sexp.Atom "Unknown"
+      ; shapes = lazy (Sexp.Atom "Unknown")
       }
     ;;
 
@@ -254,7 +254,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Blocking)
-      ; shapes = Sexp.Atom "Unknown"
+      ; shapes = lazy (Sexp.Atom "Unknown")
       }
     ;;
   end
@@ -281,7 +281,7 @@ module One_way = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = One_way (t.bin_msg.reader, f)
-    ; shapes = shapes t
+    ; shapes = lazy (shapes t)
     }
   ;;
 
@@ -317,7 +317,7 @@ module One_way = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = One_way_expert f
-      ; shapes = shapes t
+      ; shapes = lazy (shapes t)
       }
     ;;
 
@@ -434,7 +434,7 @@ module Streaming_rpc = struct
     ; f =
         Streaming_rpc
           (t.bin_query.reader, bin_init_writer, t.bin_update_response.writer, impl)
-    ; shapes = shapes t
+    ; shapes = lazy (shapes t)
     }
   ;;
 

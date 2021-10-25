@@ -73,7 +73,7 @@ module rec Implementation : sig
     { tag : Rpc_tag.t
     ; version : int
     ; f : 'connection_state F.t
-    ; shapes : Sexp.t
+    ; shapes : Sexp.t Lazy.t
     }
 end =
   Implementation

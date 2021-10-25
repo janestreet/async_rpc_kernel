@@ -97,7 +97,7 @@ type nonrec 'connection_state t = 'connection_state t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
-  ; shapes : Sexp.t
+  ; shapes : Sexp.t Lazy.t
   }
 [@@deriving sexp_of]
 
