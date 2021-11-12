@@ -4,7 +4,6 @@ open Async_kernel
 open Util
 open Implementation_types.Implementations
 module P = Protocol
-module Reader = Transport.Reader
 module Writer = Transport.Writer
 
 (* The Result monad is also used. *)
@@ -559,8 +558,8 @@ module Instance = struct
             upon d (fun () ->
               check_responded ()
               |> Rpc_result.or_error
-                   ~rpc_tag:query.tag
-                   ~rpc_version:query.version
+                   ~rpc_description:
+                     { name = P.Rpc_tag.to_string query.tag; version = query.version }
                    ~connection_description:t.connection_description
                    ~connection_close_started:t.connection_close_started
               |> ok_exn);
@@ -573,8 +572,8 @@ module Instance = struct
            (let%map r = d in
             ok_exn
               (Rpc_result.or_error
-                 ~rpc_tag:query.tag
-                 ~rpc_version:query.version
+                 ~rpc_description:
+                   { name = P.Rpc_tag.to_string query.tag; version = query.version }
                  ~connection_description:t.connection_description
                  ~connection_close_started:t.connection_close_started
                  r))

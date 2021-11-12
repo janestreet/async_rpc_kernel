@@ -123,8 +123,7 @@ module Rpc = struct
   let rpc_result_to_or_error t conn result =
     Rpc_result.or_error
       result
-      ~rpc_tag:t.tag
-      ~rpc_version:t.version
+      ~rpc_description:(description t)
       ~connection_description:(Connection.description conn)
       ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
   ;;
@@ -300,8 +299,7 @@ module One_way = struct
   let rpc_result_to_or_error t conn result =
     Rpc_result.or_error
       result
-      ~rpc_tag:t.tag
-      ~rpc_version:t.version
+      ~rpc_description:(description t)
       ~connection_description:(Connection.description conn)
       ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
   ;;
@@ -632,8 +630,7 @@ module Streaming_rpc = struct
                : Info.t option)])
           { rpc = t; query_id; connection = conn; ivar; make_update_handler })
     >>| Rpc_result.or_error
-          ~rpc_tag:t.tag
-          ~rpc_version:t.version
+          ~rpc_description:{ name = P.Rpc_tag.to_string t.tag; version = t.version }
           ~connection_description:(Connection.description conn)
           ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
   ;;

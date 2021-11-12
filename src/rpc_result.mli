@@ -13,8 +13,7 @@ val try_with
   -> 'a t Deferred.t
 
 val or_error
-  :  rpc_tag:Protocol.Rpc_tag.t
-  -> rpc_version:int
+  :  rpc_description:Description.t
   -> connection_description:Info.t
   -> connection_close_started:Info.t Deferred.t
   -> 'a t

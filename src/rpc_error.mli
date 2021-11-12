@@ -1,4 +1,5 @@
 open! Core
+open! Async_kernel
 
 include module type of struct
   include Protocol.Rpc_error
@@ -11,3 +12,10 @@ include Stringable.S with type t := t
 exception Rpc of t * Info.t
 
 val raise : t -> Info.t -> 'a
+
+val to_error
+  :  t
+  -> rpc_description:Description.t
+  -> connection_description:Info.t
+  -> connection_close_started:Info.t Deferred.t
+  -> Error.t
