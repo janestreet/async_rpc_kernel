@@ -21,7 +21,7 @@ open! Core
 open! Async_kernel
 
 module Description : sig
-  type t =
+  type t = Description.t =
     { name : string
     ; version : int
     }
@@ -174,6 +174,8 @@ module Rpc : sig
 
   val version : (_, _) t -> int
   val description : (_, _) t -> Description.t
+  val query_type_id : ('query, _) t -> 'query Type_equal.Id.t
+  val response_type_id : (_, 'response) t -> 'response Type_equal.Id.t
   val bin_query : ('query, _) t -> 'query Bin_prot.Type_class.t
   val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
 
@@ -600,6 +602,9 @@ module Pipe_rpc : sig
   val name : (_, _, _) t -> string
   val version : (_, _, _) t -> int
   val description : (_, _, _) t -> Description.t
+  val query_type_id : ('query, _, _) t -> 'query Type_equal.Id.t
+  val response_type_id : (_, 'response, _) t -> 'response Type_equal.Id.t
+  val error_type_id : (_, _, 'error) t -> 'error Type_equal.Id.t
 
 end
 
@@ -656,6 +661,10 @@ module State_rpc : sig
   val name : (_, _, _, _) t -> string
   val version : (_, _, _, _) t -> int
   val description : (_, _, _, _) t -> Description.t
+  val query_type_id : ('query, _, _, _) t -> 'query Type_equal.Id.t
+  val state_type_id : (_, 'state, _, _) t -> 'state Type_equal.Id.t
+  val update_type_id : (_, _, 'update, _) t -> 'update Type_equal.Id.t
+  val error_type_id : (_, _, _, 'error) t -> 'error Type_equal.Id.t
 end
 
 (** An RPC that has no response.  Error handling is trickier here than it is for RPCs with
@@ -670,6 +679,7 @@ module One_way : sig
   val name : _ t -> string
   val version : _ t -> int
   val description : _ t -> Description.t
+  val msg_type_id : 'msg t -> 'msg Type_equal.Id.t
   val bin_msg : 'msg t -> 'msg Bin_prot.Type_class.t
 
   val implement

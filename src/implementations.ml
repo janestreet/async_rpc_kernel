@@ -68,7 +68,7 @@ type 'connection_state on_unknown_rpc_with_expert =
   ]
 
 type 'connection_state t = 'connection_state Implementation_types.Implementations.t =
-  { implementations : 'connection_state Implementation.F.t Description.Table.t
+  { implementations : 'connection_state Implementation.t Description.Table.t
   ; on_unknown_rpc : 'connection_state on_unknown_rpc_with_expert
   }
 
@@ -96,7 +96,7 @@ module Instance = struct
     ; connection_description : Info.t
     ; connection_close_started : Info.t Deferred.t
     ; mutable last_dispatched_implementation :
-        (Description.t * ('a Implementation.F.t[@sexp.opaque])) option
+        (Description.t * ('a Implementation.t[@sexp.opaque])) option
     (* [packed_self] is here so we can essentially pack an unpacked instance without doing
        any additional allocation. *)
     ; packed_self : (t[@sexp.opaque])
@@ -728,12 +728,12 @@ module Instance = struct
     in
     match t.last_dispatched_implementation with
     | Some (last_desc, implementation) when Description.equal last_desc description ->
-      apply_implementation t implementation ~query ~read_buffer ~read_buffer_pos_ref
+      apply_implementation t implementation.f ~query ~read_buffer ~read_buffer_pos_ref
     | None | Some _ ->
       (match Hashtbl.find implementations description with
        | Some implementation ->
          t.last_dispatched_implementation <- Some (description, implementation);
-         apply_implementation t implementation ~query ~read_buffer ~read_buffer_pos_ref
+         apply_implementation t implementation.f ~query ~read_buffer ~read_buffer_pos_ref
        | None ->
          (match on_unknown_rpc with
           | `Expert impl ->
@@ -773,7 +773,7 @@ let create ~implementations:i's ~on_unknown_rpc =
     let description =
       { Description.name = P.Rpc_tag.to_string i.tag; version = i.version }
     in
-    match Hashtbl.add implementations ~key:description ~data:i.f with
+    match Hashtbl.add implementations ~key:description ~data:i with
     | `Ok -> ()
     | `Duplicate -> Hash_set.add dups description);
   if not (Hash_set.is_empty dups)
@@ -822,7 +822,7 @@ let add_exn t (implementation : _ Implementation.t) =
     { name = P.Rpc_tag.to_string implementation.tag; version = implementation.version }
   in
   let implementations = Hashtbl.copy t.implementations in
-  match Hashtbl.add implementations ~key:desc ~data:implementation.f with
+  match Hashtbl.add implementations ~key:desc ~data:implementation with
   | `Duplicate -> raise (Duplicate_implementations [ desc ])
   | `Ok -> { t with implementations }
 ;;
@@ -830,7 +830,7 @@ let add_exn t (implementation : _ Implementation.t) =
 let add t implementation = Or_error.try_with (fun () -> add_exn t implementation)
 
 let lift { implementations; on_unknown_rpc } ~f =
-  let implementations = Hashtbl.map implementations ~f:(Implementation.F.lift ~f) in
+  let implementations = Hashtbl.map implementations ~f:(Implementation.lift ~f) in
   let on_unknown_rpc =
     match on_unknown_rpc with
     | (`Raise | `Continue | `Close_connection) as x -> x

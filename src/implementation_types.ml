@@ -100,7 +100,7 @@ and Implementations : sig
     ]
 
   type 'connection_state t =
-    { implementations : 'connection_state Implementation.F.t Description.Table.t
+    { implementations : 'connection_state Implementation.t Description.Table.t
     ; on_unknown_rpc : 'connection_state on_unknown_rpc
     }
 
@@ -120,7 +120,7 @@ and Implementations : sig
       ; connection_description : Info.t
       ; connection_close_started : Info.t Deferred.t
       ; mutable last_dispatched_implementation :
-          (Description.t * 'a Implementation.F.t) option
+          (Description.t * 'a Implementation.t) option
       ; packed_self : t
       }
 

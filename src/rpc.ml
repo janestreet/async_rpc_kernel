@@ -60,15 +60,31 @@ module Rpc = struct
     ; version : int
     ; bin_query : 'query Bin_prot.Type_class.t
     ; bin_response : 'response Bin_prot.Type_class.t
+    ; query_type_id : 'query Type_equal.Id.t
+    ; response_type_id : 'response Type_equal.Id.t
     }
 
   let create ~name ~version ~bin_query ~bin_response =
-    { tag = P.Rpc_tag.of_string name; version; bin_query; bin_response }
+    let query_type_id =
+      Type_equal.Id.create ~name:[%string "%{name}:query"] sexp_of_opaque
+    in
+    let response_type_id =
+      Type_equal.Id.create ~name:[%string "%{name}:response"] sexp_of_opaque
+    in
+    { tag = P.Rpc_tag.of_string name
+    ; version
+    ; bin_query
+    ; bin_response
+    ; query_type_id
+    ; response_type_id
+    }
   ;;
 
   let name t = P.Rpc_tag.to_string t.tag
   let version t = t.version
   let description t = { Description.name = name t; version = version t }
+  let query_type_id t = t.query_type_id
+  let response_type_id t = t.response_type_id
   let bin_query t = t.bin_query
   let bin_response t = t.bin_response
   let shapes t = shapes [ "query", t.bin_query.shape; "response", t.bin_response.shape ]
@@ -264,17 +280,20 @@ module One_way = struct
     { tag : P.Rpc_tag.t
     ; version : int
     ; bin_msg : 'msg Bin_prot.Type_class.t
+    ; msg_type_id : 'msg Type_equal.Id.t
     }
   [@@deriving fields]
 
   let name t = P.Rpc_tag.to_string t.tag
 
   let create ~name ~version ~bin_msg =
-    { tag = P.Rpc_tag.of_string name; version; bin_msg }
+    let msg_type_id = Type_equal.Id.create ~name:[%string "%{name}:msg"] sexp_of_opaque in
+    { tag = P.Rpc_tag.of_string name; version; bin_msg; msg_type_id }
   ;;
 
   let shapes t = shapes [ "msg", t.bin_msg.shape ]
   let description t = { Description.name = name t; version = version t }
+  let msg_type_id t = t.msg_type_id
 
   let implement t f =
     { Implementation.tag = t.tag
@@ -319,7 +338,7 @@ module One_way = struct
       }
     ;;
 
-    let dispatch { tag; version; bin_msg = _ } conn buf ~pos ~len =
+    let dispatch { tag; version; bin_msg = _; msg_type_id = _ } conn buf ~pos ~len =
       match
         Connection.dispatch_bigstring
           conn
@@ -334,7 +353,13 @@ module One_way = struct
       | Error `Closed -> `Connection_closed
     ;;
 
-    let schedule_dispatch { tag; version; bin_msg = _ } conn buf ~pos ~len =
+    let schedule_dispatch
+          { tag; version; bin_msg = _; msg_type_id = _ }
+          conn
+          buf
+          ~pos
+          ~len
+      =
       match
         Connection.schedule_dispatch_bigstring
           conn
@@ -381,6 +406,10 @@ module Streaming_rpc = struct
     ; bin_update_response : 'update_response Bin_prot.Type_class.t
     ; bin_error_response : 'error_response Bin_prot.Type_class.t
     ; client_pushes_back : bool
+    ; query_type_id : 'query Type_equal.Id.t
+    ; initial_response_type_id : 'initial_response Type_equal.Id.t
+    ; update_response_type_id : 'update_response Type_equal.Id.t
+    ; error_response_type_id : 'error_response Type_equal.Id.t
     }
 
   let create
@@ -391,12 +420,30 @@ module Streaming_rpc = struct
         ~bin_initial_response
         ~bin_update_response
         ~bin_error
+        ~alias_for_initial_response
+        ~alias_for_update_response
         ()
     =
     let client_pushes_back =
       match client_pushes_back with
       | None -> false
       | Some () -> true
+    in
+    let query_type_id =
+      Type_equal.Id.create ~name:[%string "%{name}:query"] sexp_of_opaque
+    in
+    let initial_response_type_id =
+      Type_equal.Id.create
+        ~name:[%string "%{name}:%{alias_for_initial_response}"]
+        sexp_of_opaque
+    in
+    let update_response_type_id =
+      Type_equal.Id.create
+        ~name:[%string "%{name}:%{alias_for_update_response}"]
+        sexp_of_opaque
+    in
+    let error_response_type_id =
+      Type_equal.Id.create ~name:[%string "%{name}:error"] sexp_of_opaque
     in
     { tag = P.Rpc_tag.of_string name
     ; version
@@ -405,6 +452,10 @@ module Streaming_rpc = struct
     ; bin_update_response
     ; bin_error_response = bin_error
     ; client_pushes_back
+    ; query_type_id
+    ; initial_response_type_id
+    ; update_response_type_id
+    ; error_response_type_id
     }
   ;;
 
@@ -702,6 +753,11 @@ module Pipe_rpc = struct
       ~bin_initial_response:Unit.bin_t
       ~bin_update_response:bin_response
       ~bin_error
+      (* [initial_response] doesn't show up in [Pipe_rpc]'s signature,
+         so the type-id created using [alias_for_initial_response] is
+         unreachable. *)
+      ~alias_for_initial_response:""
+      ~alias_for_update_response:"response"
       ()
   ;;
 
@@ -887,11 +943,14 @@ module Pipe_rpc = struct
   let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
   let description t = { Description.name = name t; version = version t }
+  let query_type_id t = t.Streaming_rpc.query_type_id
+  let error_type_id t = t.Streaming_rpc.error_response_type_id
+  let response_type_id t = t.Streaming_rpc.update_response_type_id
 end
 
 module State_rpc = struct
-  type ('query, 'initial, 'response, 'error) t =
-    ('query, 'initial, 'response, 'error) Streaming_rpc.t
+  type ('query, 'state, 'update, 'error) t =
+    ('query, 'state, 'update, 'error) Streaming_rpc.t
 
   module Id = P.Query_id
   module Metadata = Streaming_rpc.Pipe_metadata
@@ -914,6 +973,8 @@ module State_rpc = struct
       ~bin_initial_response:bin_state
       ~bin_update_response:bin_update
       ~bin_error
+      ~alias_for_initial_response:"state"
+      ~alias_for_update_response:"update"
       ()
   ;;
 
@@ -935,6 +996,10 @@ module State_rpc = struct
   let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
   let version t = t.Streaming_rpc.version
   let description t = { Description.name = name t; version = version t }
+  let query_type_id t = t.Streaming_rpc.query_type_id
+  let state_type_id t = t.Streaming_rpc.initial_response_type_id
+  let update_type_id t = t.Streaming_rpc.update_response_type_id
+  let error_type_id t = t.Streaming_rpc.error_response_type_id
 end
 
 module Any = struct
