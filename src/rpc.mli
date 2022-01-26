@@ -39,6 +39,26 @@ module Description : sig
   end
 end
 
+module On_exception : sig
+  (** When your implementation raises an exception, that exception might happen before a
+      value is returned or after a value is returned. The latter kind of exception is
+      what the [~rest] flag to [Monitor.try_with] is dealing with.
+
+      In both these cases, [callback] will be called with the exception.
+
+      In the case where the exception raises before a value is returned,
+      [close_connection_if_no_return_value] determines whether the connection is closed.
+      Exceptions raised after a value is returned will never close a connection. *)
+
+  type t =
+    { callback : (exn -> unit) option
+    ; close_connection_if_no_return_value : bool
+    }
+
+  val close_connection : t
+  val continue : t
+end
+
 (** A ['connection_state Implementation.t] is something that knows how to respond to one
     query, given a ['connection_state].  That is, you can create a ['connection_state
     Implementation.t] by providing a function which takes a query *and* a
@@ -56,6 +76,8 @@ module Implementation : sig
       ['b t] context.  We can do this as long as we can map our state into the state
       expected by the original implementer. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
+
+  val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
 end
 
 (** A ['connection_state Implementations.t] is something that knows how to respond to
@@ -183,7 +205,8 @@ module Rpc : sig
       exception. Instead, it is sent as an error to the caller of the RPC, i.e. the
       process that called [dispatch] or one of its alternatives.*)
   val implement
-    :  ('query, 'response) t
+    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Deferred.t)
     -> 'connection_state Implementation.t
 
@@ -197,7 +220,8 @@ module Rpc : sig
       [implement] also tries to do 1 when possible, but it is guaranteed to happen with
       [implement']. *)
   val implement'
-    :  ('query, 'response) t
+    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response)
     -> 'connection_state Implementation.t
 
@@ -297,7 +321,8 @@ module Rpc : sig
       | Delayed_response of unit Deferred.t
 
     val implement
-      :  (_, _) t
+      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      -> (_, _) t
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
@@ -307,7 +332,8 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement'
-      :  (_, _) t
+      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      -> (_, _) t
       -> ('connection_state
           -> Responder.t
           -> Bigstring.t
@@ -317,7 +343,8 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version
-      :  rpc_tag:string
+      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      -> rpc_tag:string
       -> version:int
       -> ('connection_state
           -> Responder.t
@@ -328,7 +355,8 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version'
-      :  rpc_tag:string
+      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      -> rpc_tag:string
       -> version:int
       -> ('connection_state
           -> Responder.t
@@ -411,7 +439,8 @@ module Pipe_rpc : sig
   (** The pipe returned by the implementation function will be closed automatically when
       either the connection to the client is closed or the client closes their pipe. *)
   val implement
-    :  ('query, 'response, 'error) t
+    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
@@ -642,7 +671,8 @@ module State_rpc : sig
   val bin_error : (_, _, _, 'error) t -> 'error Bin_prot.Type_class.t
 
   val implement
-    :  ('query, 'state, 'update, 'error) t
+    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
         -> ('state * 'update Pipe.Reader.t, 'error) Result.t Deferred.t)
@@ -683,7 +713,8 @@ module One_way : sig
   val bin_msg : 'msg t -> 'msg Bin_prot.Type_class.t
 
   val implement
-    :  'msg t
+    :  ?on_exception:On_exception.t (* default On_exception.close_connection *)
+    -> 'msg t
     -> ('connection_state -> 'msg -> unit)
     -> 'connection_state Implementation.t
 
@@ -702,7 +733,8 @@ module One_way : sig
 
   module Expert : sig
     val implement
-      :  _ t
+      :  ?on_exception:On_exception.t (* default On_exception.close_connection *)
+      -> _ t
       -> ('connection_state -> Bigstring.t -> pos:int -> len:int -> unit)
       -> 'connection_state Implementation.t
 

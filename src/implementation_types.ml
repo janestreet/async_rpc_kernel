@@ -8,6 +8,14 @@ open Protocol
 
 module Direct_stream_writer_id = Unique_id.Int63 ()
 
+module On_exception = struct
+  type t =
+    { callback : (exn -> unit) option [@sexp.omit_nil]
+    ; close_connection_if_no_return_value : bool
+    }
+  [@@deriving sexp_of]
+end
+
 module rec Implementation : sig
   module Expert : sig
     module Responder : sig
@@ -74,6 +82,7 @@ module rec Implementation : sig
     ; version : int
     ; f : 'connection_state F.t
     ; shapes : Sexp.t Lazy.t
+    ; on_exception : On_exception.t
     }
 end =
   Implementation

@@ -63,6 +63,7 @@ module Instance : sig
     -> query:Nat0.t Query.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
+    -> close_connection_monitor:Monitor.t
     -> unit Rpc_result.t Transport.Handler_result.t
 
   (* Flushes all open streaming responses *)

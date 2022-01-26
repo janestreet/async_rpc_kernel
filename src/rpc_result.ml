@@ -17,10 +17,15 @@ let bin_io_exn ~location exn =
   Error (Rpc_error.Bin_io_exn (sexp_of_located_error { location; exn }))
 ;;
 
-let try_with ?run ~location f =
+let try_with ?on_background_exception ?run ~location f =
   let x =
+    let rest =
+      match on_background_exception with
+      | None -> `Log
+      | Some callback -> `Call callback
+    in
     Monitor.try_with
-      ~rest:`Log
+      ~rest
       ~run:(Option.value run ~default:`Schedule)
       f
   in

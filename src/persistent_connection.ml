@@ -3,8 +3,6 @@ open! Async_kernel
 include Persistent_connection_kernel
 
 module Versioned_rpc = Make (struct
-    module Address = Host_and_port
-
     type t = Versioned_rpc.Connection_with_menu.t
 
     let rpc_connection = Versioned_rpc.Connection_with_menu.connection
@@ -14,8 +12,6 @@ module Versioned_rpc = Make (struct
   end)
 
 module Rpc = Make (struct
-    module Address = Host_and_port
-
     type t = Rpc.Connection.t
 
     let close t = Rpc.Connection.close t

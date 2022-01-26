@@ -4,6 +4,7 @@ open Async_kernel
 open Util
 module P = Protocol
 module Description = Description
+module On_exception = On_exception
 module Implementation = Implementation
 module Implementations = Implementations
 module Transport = Transport
@@ -89,19 +90,21 @@ module Rpc = struct
   let bin_response t = t.bin_response
   let shapes t = shapes [ "query", t.bin_query.shape; "response", t.bin_response.shape ]
 
-  let implement t f =
+  let implement ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
     ; shapes = lazy (shapes t)
+    ; on_exception
     }
   ;;
 
-  let implement' t f =
+  let implement' ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
     ; shapes = lazy (shapes t)
+    ; on_exception
     }
   ;;
 
@@ -241,35 +244,49 @@ module Rpc = struct
       | Replied
       | Delayed_response of unit Deferred.t
 
-    let implement t f =
+    let implement ?(on_exception = On_exception.continue) t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (f, Deferred)
       ; shapes = lazy (shapes t)
+      ; on_exception
       }
     ;;
 
-    let implement' t f =
+    let implement' ?(on_exception = On_exception.continue) t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (f, Blocking)
       ; shapes = lazy (shapes t)
+      ; on_exception
       }
     ;;
 
-    let implement_for_tag_and_version ~rpc_tag ~version f =
+    let implement_for_tag_and_version
+          ?(on_exception = On_exception.continue)
+          ~rpc_tag
+          ~version
+          f
+      =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Deferred)
       ; shapes = lazy (Sexp.Atom "Unknown")
+      ; on_exception
       }
     ;;
 
-    let implement_for_tag_and_version' ~rpc_tag ~version f =
+    let implement_for_tag_and_version'
+          ?(on_exception = On_exception.continue)
+          ~rpc_tag
+          ~version
+          f
+      =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Blocking)
       ; shapes = lazy (Sexp.Atom "Unknown")
+      ; on_exception
       }
     ;;
   end
@@ -295,11 +312,12 @@ module One_way = struct
   let description t = { Description.name = name t; version = version t }
   let msg_type_id t = t.msg_type_id
 
-  let implement t f =
+  let implement ?(on_exception = On_exception.close_connection) t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = One_way (t.bin_msg.reader, f)
     ; shapes = lazy (shapes t)
+    ; on_exception
     }
   ;;
 
@@ -330,11 +348,12 @@ module One_way = struct
   let dispatch_exn t conn query = Or_error.ok_exn (dispatch t conn query)
 
   module Expert = struct
-    let implement t f =
+    let implement ?(on_exception = On_exception.close_connection) t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = One_way_expert f
       ; shapes = lazy (shapes t)
+      ; on_exception
       }
     ;;
 
@@ -472,7 +491,7 @@ module Streaming_rpc = struct
       ]
   ;;
 
-  let implement_gen t impl =
+  let implement_gen t ?(on_exception = On_exception.continue) impl =
     let bin_init_writer =
       Initial_message.bin_writer_t
         t.bin_initial_response.writer
@@ -484,25 +503,26 @@ module Streaming_rpc = struct
         Streaming_rpc
           (t.bin_query.reader, bin_init_writer, t.bin_update_response.writer, impl)
     ; shapes = lazy (shapes t)
+    ; on_exception
     }
   ;;
 
-  let implement t f =
+  let implement ?on_exception t f =
     let f c query =
       match%map f c query with
       | Error err -> Error (make_initial_message (Error err))
       | Ok (initial, pipe) -> Ok (make_initial_message (Ok initial), pipe)
     in
-    implement_gen t (Pipe f)
+    implement_gen t ?on_exception (Pipe f)
   ;;
 
-  let implement_direct t f =
+  let implement_direct ?on_exception t f =
     let f c query writer =
       match%map f c query writer with
       | Error _ as x -> Error (make_initial_message x)
       | Ok _ as x -> Ok (make_initial_message x)
     in
-    implement_gen t (Direct f)
+    implement_gen ?on_exception t (Direct f)
   ;;
 
   let abort t conn id =
@@ -766,8 +786,8 @@ module Pipe_rpc = struct
   let bin_error t = t.Streaming_rpc.bin_error_response
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
-  let implement t f =
-    Streaming_rpc.implement t (fun a query ->
+  let implement ?on_exception t f =
+    Streaming_rpc.implement ?on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
   ;;

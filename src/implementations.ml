@@ -428,12 +428,25 @@ module Instance = struct
     ;;
   end
 
+  let maybe_dispatch_on_exception
+        (result : (_, Rpc_error.t) Result.t)
+        on_exception
+        ~close_connection_monitor
+    =
+    match result with
+    | Error (Uncaught_exn sexp) ->
+      On_exception.handle_exn on_exception ~close_connection_monitor (Exn.create_s sexp)
+    | Error _ | Ok _ -> ()
+  ;;
+
   let apply_implementation
         t
         implementation
         ~(query : Nat0.t P.Query.t)
         ~read_buffer
         ~read_buffer_pos_ref
+        ~close_connection_monitor
+        ~on_exception
     : _ Transport.Handler_result.t
     =
     let id = query.id in
@@ -455,8 +468,14 @@ module Instance = struct
             Continue
           with
           | exn ->
-            Stop
-              (Rpc_result.uncaught_exn exn ~location:"server-side one-way rpc computation")))
+            On_exception.handle_exn on_exception ~close_connection_monitor exn;
+            if on_exception.close_connection_if_no_return_value
+            then
+              Stop
+                (Rpc_result.uncaught_exn
+                   exn
+                   ~location:"server-side one-way rpc computation")
+            else Continue))
     | Implementation.F.One_way_expert f ->
       (try
          let len = (query.data :> int) in
@@ -465,10 +484,14 @@ module Instance = struct
          Continue
        with
        | exn ->
-         Stop
-           (Rpc_result.uncaught_exn
-              exn
-              ~location:"server-side one-way rpc expert computation"))
+         On_exception.handle_exn on_exception ~close_connection_monitor exn;
+         if on_exception.close_connection_if_no_return_value
+         then
+           Stop
+             (Rpc_result.uncaught_exn
+                exn
+                ~location:"server-side one-way rpc expert computation")
+         else Continue)
     | Implementation.F.Rpc (bin_query_reader, bin_response_writer, f, result_mode) ->
       let query_contents =
         bin_read_from_bigstring
@@ -480,35 +503,52 @@ module Instance = struct
       in
       (match result_mode with
        | Implementation.F.Blocking ->
-         let data =
-           try query_contents >>|~ f t.connection_state with
-           | exn ->
-             (* In the [Deferred] branch we use [Monitor.try_with], which includes
-                backtraces when it catches an exception. For consistency, we also get
-                backtraces here. *)
-             let backtrace = Backtrace.Exn.most_recent () in
-             let sexp =
-               [%sexp
-                 { location = "server-side blocking rpc computation"
-                 ; exn : exn
-                 ; backtrace : Backtrace.t
-                 }]
-             in
-             Error (Rpc_error.Uncaught_exn sexp)
-         in
-         write_response t id bin_response_writer data
+         (try
+            query_contents
+            >>|~ f t.connection_state
+            |> write_response t id bin_response_writer
+          with
+          | exn ->
+            (* In the [Deferred] branch we use [Monitor.try_with], which includes
+               backtraces when it catches an exception. For consistency, we also get
+               backtraces here. *)
+            let backtrace = Backtrace.Exn.most_recent () in
+            let sexp =
+              [%sexp
+                { location = "server-side blocking rpc computation"
+                ; exn : exn
+                ; backtrace : Backtrace.t
+                }]
+            in
+            write_response t id bin_response_writer (Error (Rpc_error.Uncaught_exn sexp));
+            On_exception.handle_exn on_exception ~close_connection_monitor exn)
        | Implementation.F.Deferred ->
          let data =
-           Rpc_result.try_with ~run:`Now ~location:"server-side rpc computation" (fun () ->
-             defer_result (query_contents >>|~ f t.connection_state))
+           (* We generally try to write a response before handling [on_exception] so if we
+              are closing the connection we still actually send the response back. When we
+              pass [on_exception.callback] here, we are making it possible for raised
+              exceptions not to be written back to the client (e.g. if the implementation
+              raises both asynchronously and synchronously). This would be hard to handle
+              in a more principled way. *)
+           Rpc_result.try_with
+             ?on_background_exception:on_exception.callback
+             ~run:`Now
+             ~location:"server-side rpc computation"
+             (fun () -> defer_result (query_contents >>|~ f t.connection_state))
          in
          (* In the common case that the implementation returns a value immediately, we will
             write the response immediately as well (this is also why the above [try_with]
             has [~run:`Now]).  This can be a big performance win for servers that get many
             queries in a single Async cycle. *)
          (match Deferred.peek data with
-          | None -> data >>> write_response t id bin_response_writer
-          | Some data -> write_response t id bin_response_writer data));
+          | None ->
+            data
+            >>> fun data ->
+            write_response t id bin_response_writer data;
+            maybe_dispatch_on_exception data on_exception ~close_connection_monitor
+          | Some data ->
+            write_response t id bin_response_writer data;
+            maybe_dispatch_on_exception data on_exception ~close_connection_monitor));
       Continue
     | Implementation.F.Rpc_expert (f, result_mode) ->
       let responder = Implementation.Expert.Responder.create query.id t.writer in
@@ -516,32 +556,43 @@ module Instance = struct
         (* We need the [Monitor.try_with] even for the blocking mode as the implementation
            might return [Delayed_reponse], so we don't bother optimizing the blocking
            mode. *)
-        Monitor.try_with
-          ~rest:`Log
-          ~run:`Now
-          (fun () ->
-             let len = (query.data :> int) in
-             let result =
-               f t.connection_state responder read_buffer ~pos:!read_buffer_pos_ref ~len
-             in
-             match result_mode with
-             | Implementation.F.Deferred -> result
-             | Implementation.F.Blocking -> Deferred.return result)
+        let rest =
+          match on_exception.callback with
+          | None ->
+            `Log
+          | Some callback -> `Call callback
+        in
+        Monitor.try_with ~rest ~run:`Now (fun () ->
+          let len = (query.data :> int) in
+          let result =
+            f t.connection_state responder read_buffer ~pos:!read_buffer_pos_ref ~len
+          in
+          match result_mode with
+          | Implementation.F.Deferred -> result
+          | Implementation.F.Blocking -> Deferred.return result)
       in
-      let handle_exn exn =
+      let handle_exn ~is_uncaught_exn exn =
         let result =
           Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
         in
-        if responder.responded
-        then result
-        else (
-          write_response t id bin_writer_unit result;
-          Ok ())
+        let result =
+          if responder.responded
+          then result
+          else (
+            write_response t id bin_writer_unit result;
+            Ok ())
+        in
+        if is_uncaught_exn
+        then On_exception.handle_exn on_exception ~close_connection_monitor exn;
+        result
       in
       let check_responded () =
         if responder.responded
         then Ok ()
-        else handle_exn (Failure "Expert implementation did not reply")
+        else
+          handle_exn
+            ~is_uncaught_exn:false
+            (Failure "Expert implementation did not reply")
       in
       let d =
         let open Deferred_immediate.Let_syntax in
@@ -564,7 +615,7 @@ module Instance = struct
                    ~connection_close_started:t.connection_close_started
               |> ok_exn);
             Ok ())
-        | Error exn -> handle_exn exn
+        | Error exn -> handle_exn ~is_uncaught_exn:true exn
       in
       (match Deferred.peek d with
        | None ->
@@ -637,9 +688,17 @@ module Instance = struct
          in
          let run_impl impl split_ok handle_ok =
            Rpc_result.try_with
+             ?on_background_exception:on_exception.callback
              (fun () -> defer_result (data >>|~ impl))
              ~location:"server-side pipe_rpc computation"
            >>> function
+           | Error (Uncaught_exn sexp as err) ->
+             Hashtbl.remove t.open_streaming_responses id;
+             write_response t id bin_init_writer (Error err);
+             On_exception.handle_exn
+               on_exception
+               ~close_connection_monitor
+               (Exn.create_s sexp)
            | Error err ->
              Hashtbl.remove t.open_streaming_responses id;
              write_response t id bin_init_writer (Error err)
@@ -721,6 +780,7 @@ module Instance = struct
         ~(query : Nat0.t P.Query.t)
         ~read_buffer
         ~read_buffer_pos_ref
+        ~close_connection_monitor
     =
     let { implementations; on_unknown_rpc } = t.implementations in
     let description : Description.t =
@@ -728,12 +788,26 @@ module Instance = struct
     in
     match t.last_dispatched_implementation with
     | Some (last_desc, implementation) when Description.equal last_desc description ->
-      apply_implementation t implementation.f ~query ~read_buffer ~read_buffer_pos_ref
+      apply_implementation
+        t
+        implementation.f
+        ~query
+        ~read_buffer
+        ~read_buffer_pos_ref
+        ~close_connection_monitor
+        ~on_exception:implementation.on_exception
     | None | Some _ ->
       (match Hashtbl.find implementations description with
        | Some implementation ->
          t.last_dispatched_implementation <- Some (description, implementation);
-         apply_implementation t implementation.f ~query ~read_buffer ~read_buffer_pos_ref
+         apply_implementation
+           t
+           implementation.f
+           ~on_exception:implementation.on_exception
+           ~query
+           ~read_buffer
+           ~read_buffer_pos_ref
+           ~close_connection_monitor
        | None ->
          (match on_unknown_rpc with
           | `Expert impl ->
@@ -756,10 +830,22 @@ module Instance = struct
             handle_unknown_rpc on_unknown_rpc error t query))
   ;;
 
-  let handle_query (T t) ~query ~read_buffer ~read_buffer_pos_ref =
+  let handle_query
+        (T t)
+        ~query
+        ~read_buffer
+        ~read_buffer_pos_ref
+        ~close_connection_monitor
+    =
     if t.stopped || Writer.is_closed t.writer
     then Transport.Handler_result.Stop (Ok ())
-    else handle_query_internal t ~query ~read_buffer ~read_buffer_pos_ref
+    else
+      handle_query_internal
+        t
+        ~query
+        ~read_buffer
+        ~read_buffer_pos_ref
+        ~close_connection_monitor
   ;;
 end
 

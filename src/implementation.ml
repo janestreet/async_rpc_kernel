@@ -98,8 +98,10 @@ type nonrec 'connection_state t = 'connection_state t =
   ; version : int
   ; f : 'connection_state F.t
   ; shapes : Sexp.t Lazy.t
+  ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 let description t = { Description.name = Rpc_tag.to_string t.tag; version = t.version }
 let lift t ~f = { t with f = F.lift ~f t.f }
+let update_on_exception t ~f = { t with on_exception = f t.on_exception }

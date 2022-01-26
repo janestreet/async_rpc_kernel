@@ -77,8 +77,10 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
   ; version : int
   ; f : 'connection_state F.t
   ; shapes : Sexp.t Lazy.t
+  ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 val description : _ t -> Description.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
+val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t

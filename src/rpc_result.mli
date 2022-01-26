@@ -7,7 +7,8 @@ val uncaught_exn : location:string -> exn -> 'a t
 val bin_io_exn : location:string -> exn -> 'a t
 
 val try_with
-  :  ?run:[ `Now | `Schedule ]
+  :  ?on_background_exception:(exn -> unit)
+  -> ?run:[ `Now | `Schedule ]
   -> location:string
   -> (unit -> 'a t Deferred.t)
   -> 'a t Deferred.t

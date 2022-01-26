@@ -185,7 +185,12 @@ let handle_response t (response : _ P.Response.t) ~read_buffer ~read_buffer_pos_
            | Unknown_query_id _ -> Stop (Error e))))
 ;;
 
-let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
+let handle_msg
+      t
+      (msg : _ P.Message.t)
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~close_connection_monitor
   : _ Transport.Handler_result.t
   =
   match msg with
@@ -197,6 +202,7 @@ let handle_msg t (msg : _ P.Message.t) ~read_buffer ~read_buffer_pos_ref
     let instance = Set_once.get_exn t.implementations_instance [%here] in
     Implementations.Instance.handle_query
       instance
+      ~close_connection_monitor
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
@@ -266,11 +272,18 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
   close_finished t
 ;;
 
-let on_message t =
+let on_message t ~close_connection_monitor =
   let f buf ~pos ~len:_ : _ Transport.Handler_result.t =
     let pos_ref = ref pos in
     let nat0_msg = P.Message.bin_read_nat0_t buf ~pos_ref in
-    match handle_msg t nat0_msg ~read_buffer:buf ~read_buffer_pos_ref:pos_ref with
+    match
+      handle_msg
+        t
+        nat0_msg
+        ~read_buffer:buf
+        ~read_buffer_pos_ref:pos_ref
+        ~close_connection_monitor
+    with
     | Continue -> Continue
     | Wait _ as res -> res
     | Stop result ->
@@ -362,6 +375,12 @@ let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exn
       ~connection_state:(connection_state t)
   in
   Set_once.set_exn t.implementations_instance [%here] instance;
+  let close_connection_monitor = Monitor.create ~name:"RPC close connection monitor" () in
+  Monitor.detach_and_iter_errors close_connection_monitor ~f:(fun exn ->
+    let reason =
+      Info.create_s [%message "Uncaught exception in implementation" (exn : Exn.t)]
+    in
+    don't_wait_for (close ~reason t));
   let monitor = Monitor.create ~name:"RPC connection loop" () in
   let reason name exn =
     exn, Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name)
@@ -377,7 +396,7 @@ let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exn
     schedule_heartbeats t;
     Reader.read_forever
       t.reader
-      ~on_message:(Staged.unstage (on_message t))
+      ~on_message:(Staged.unstage (on_message t ~close_connection_monitor))
       ~on_end_of_batch:(fun () ->
         t.last_seen_alive <- Synchronous_time_source.now t.time_source)
     >>> function
