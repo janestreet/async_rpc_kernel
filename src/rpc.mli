@@ -421,9 +421,15 @@ module Pipe_rpc : sig
           messages on the connection if any pipe gets saturated, not just ones relating
           to that pipe.
 
+        - This includes RPC heartbeats. If the pipe consumer takes too long to
+          process items this will cause the RPC connection to closed with a
+          "No heartbeats received" error.
+
         - A server that doesn't pay attention to pushback on its end will accumulate
           elements on its side of the connection, rather than on the client's side,
-          meaning a slow client can make the server run out of memory. *)
+          meaning a slow client can make the server run out of memory.
+
+    *)
     -> name:string
     -> version:int
     -> bin_query:'query Bin_prot.Type_class.t

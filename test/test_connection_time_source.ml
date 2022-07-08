@@ -33,15 +33,13 @@ let establish_connection transport time_source description =
   Deferred.upon conn (fun conn ->
     let conn = Result.ok_exn conn in
     let () =
-      Deferred.upon
-        (Connection.close_reason conn ~on_close:`started)
-        (fun reason ->
-           print_s
-             [%message
-               "connection closed"
-                 ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-                 (description : Info.t)
-                 (reason : Info.t)])
+      Deferred.upon (Connection.close_reason conn ~on_close:`started) (fun reason ->
+        print_s
+          [%message
+            "connection closed"
+              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
+              (description : Info.t)
+              (reason : Info.t)])
     in
     let () =
       Connection.add_heartbeat_callback conn (fun () ->

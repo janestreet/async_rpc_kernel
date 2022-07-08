@@ -5,18 +5,6 @@ module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer
 
-module Header : sig
-  type t [@@deriving bin_type_class]
-
-  val v1 : t
-  val negotiate : us:t -> peer:t -> int Or_error.t
-end = struct
-  include P.Header
-
-  let negotiate = negotiate ~allow_legacy_peer:true
-  let v1 = Protocol_version_header.create_exn ~protocol:Rpc ~supported_versions:[ 1 ]
-end
-
 module Handshake_error = struct
   module T = struct
     type t =
@@ -35,6 +23,25 @@ module Handshake_error = struct
   exception Handshake_error of (t * Info.t) [@@deriving sexp]
 
   let to_exn ~connection_description t = Handshake_error (t, connection_description)
+end
+
+module Header : sig
+  type t [@@deriving bin_type_class]
+
+  val v1 : t
+  val negotiate : peer:t -> (int, Handshake_error.t) result
+end = struct
+  include P.Header
+
+  let supported_versions = [ 1 ]
+  let v1 = Protocol_version_header.create_exn ~protocol:Rpc ~supported_versions
+
+  let negotiate ~peer =
+    match negotiate ~allow_legacy_peer:true ~us:v1 ~peer with
+    | Error e -> Error (Handshake_error.Negotiation_failed e)
+    | Ok i when List.mem supported_versions i ~equal:Int.( = ) -> Ok i
+    | Ok i -> Error (Handshake_error.Negotiated_unexpected_version i)
+  ;;
 end
 
 module Heartbeat_config = struct
@@ -89,6 +96,7 @@ type t =
   ; implementations_instance : Implementations.Instance.t Set_once.t
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
+  ; negotiated_protocol_version : int Set_once.t
   }
 [@@deriving sexp_of]
 
@@ -441,11 +449,7 @@ let do_handshake t ~handshake_timeout =
        Error (Reading_header_failed (Error.of_exn exn))
      | `Result (Ok (Error `Eof)) -> Error Eof
      | `Result (Ok (Error `Closed)) -> Error Transport_closed
-     | `Result (Ok (Ok peer)) ->
-       (match Header.negotiate ~us:Header.v1 ~peer with
-        | Error e -> Error (Negotiation_failed e)
-        | Ok 1 -> Ok ()
-        | Ok i -> Error (Negotiated_unexpected_version i)))
+     | `Result (Ok (Ok peer)) -> Header.negotiate ~peer)
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
@@ -477,13 +481,15 @@ let create
     ; implementations_instance = Set_once.create ()
     ; time_source
     ; heartbeat_event = Set_once.create ()
+    ; negotiated_protocol_version = Set_once.create ()
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
     don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
   match%map do_handshake t ~handshake_timeout with
-  | Ok () ->
+  | Ok negotiated_protocol_version ->
+    Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version;
     run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns;
     Ok t
   | Error error ->
@@ -522,8 +528,7 @@ let with_close
     handle_handshake_error e
   | Ok t ->
     Monitor.protect
-      ~run:
-        `Schedule
+      ~run:`Schedule
       ~rest:`Log
       ~finally:(fun () ->
         close t ~reason:(Info.of_string "Rpc.Connection.with_close finished"))
