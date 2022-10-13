@@ -87,6 +87,22 @@ module Menu : sig
   (** Requests an rpc version menu from an rpc connection. *)
   val request : Connection.t -> t Or_error.t Deferred.t
 
+  module With_shapes : sig
+    (** A directory of supported rpc names, versions, and query/response shapes. *)
+    type t = (Description.t * Rpc_shapes.t) list
+
+    (** [add impls] extends a list of rpc implementations with two additional rpcs:
+        - One that serves a [Menu.t] that can be requested with [Menu.request]
+        - One that serves a [Menu.With_shapes.t] that can be requested with
+          [Menu.With_shapes.request].
+
+        (If you use [Menu.With_shapes.add], you never need to call [Menu.add]) *)
+    val add : 's Implementation.t list -> 's Implementation.t list
+
+    (** Requests an rpc version menu with shapes from an rpc connection. *)
+    val request : Connection.t -> t Or_error.t Deferred.t
+  end
+
   (** Finds what rpcs are supported. *)
   val supported_rpcs : t -> Description.t list
 

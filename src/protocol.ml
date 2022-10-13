@@ -14,6 +14,11 @@ module Unused_query_id : sig
 end = struct
   type t = Query_id.t [@@deriving bin_io, sexp_of]
 
+  let%expect_test _ =
+    print_endline [%bin_digest: t];
+    [%expect {| 2b528f4b22f08e28876ffe0239315ac2 |}]
+  ;;
+
   let t = Query_id.create ()
 end
 
@@ -53,6 +58,11 @@ end
 
 module Rpc_result = struct
   type 'a t = ('a, Rpc_error.t) Core.Result.t [@@deriving bin_io, sexp_of]
+
+  let%expect_test _ =
+    print_endline [%bin_digest: unit t];
+    [%expect {| 58734a63a5c83c1b7cbfc3fedfa3ae82 |}]
+  ;;
 end
 
 module Header = Protocol_version_header
@@ -66,6 +76,11 @@ module Query = struct
     }
   [@@deriving bin_io, sexp_of]
 
+  let%expect_test _ =
+    print_endline [%bin_digest: unit needs_length];
+    [%expect {| be5888691d73427b3ac8ea300c169422 |}]
+  ;;
+
   type 'a t = 'a needs_length [@@deriving bin_read]
 end
 
@@ -75,6 +90,11 @@ module Response = struct
     ; data : 'a Rpc_result.t
     }
   [@@deriving bin_io, sexp_of]
+
+  let%expect_test _ =
+    print_endline [%bin_digest: unit needs_length];
+    [%expect {| a22a76f192b3a4ec1c37117c6bb252f5 |}]
+  ;;
 
   type 'a t = 'a needs_length [@@deriving bin_read]
 end
@@ -86,6 +106,11 @@ module Stream_query = struct
     ]
   [@@deriving bin_io]
 
+  let%expect_test _ =
+    print_endline [%bin_digest: unit needs_length];
+    [%expect {| 2c37868761971c78cc355d43f0854860 |}]
+  ;;
+
   type 'a t = 'a needs_length [@@deriving bin_read]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end
@@ -96,6 +121,11 @@ module Stream_initial_message = struct
     ; initial : ('response, 'error) Core.Result.t
     }
   [@@deriving bin_io, sexp_of]
+
+  let%expect_test _ =
+    print_endline [%bin_digest: (unit, unit) t];
+    [%expect {| 46f231ddb7fa59da9c27759d50ae01a9 |}]
+  ;;
 end
 
 module Stream_response_data = struct
@@ -104,6 +134,11 @@ module Stream_response_data = struct
     | `Eof
     ]
   [@@deriving bin_io]
+
+  let%expect_test _ =
+    print_endline [%bin_digest: unit needs_length];
+    [%expect {| c1dbcdcfe2b12e797ec64f0d74df1811 |}]
+  ;;
 
   type 'a t = 'a needs_length [@@deriving bin_read]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
@@ -115,6 +150,11 @@ module Message = struct
     | Query of 'a Query.needs_length
     | Response of 'a Response.needs_length
   [@@deriving bin_io, sexp_of]
+
+  let%expect_test _ =
+    print_endline [%bin_digest: unit needs_length];
+    [%expect {| 14965b0db9844e6b376151dd890808e8 |}]
+  ;;
 
   type 'a t = 'a needs_length [@@deriving bin_read, sexp_of]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]

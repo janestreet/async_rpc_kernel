@@ -24,6 +24,7 @@ module Reader = struct
   let sexp_of_t (T ((module M), t)) : Sexp.t = M.sexp_of_t t
   let close (T ((module M), t)) : unit Deferred.t = M.close t
   let is_closed (T ((module M), t)) : bool = M.is_closed t
+  let bytes_read (T ((module M), t)) : Int63.t = M.bytes_read t
 
   let read_forever (T ((module M), t)) ~on_message ~on_end_of_batch : _ Deferred.t =
     M.read_forever t ~on_message ~on_end_of_batch
@@ -71,6 +72,7 @@ module Writer = struct
   let is_closed (T { impl = (module M); t; _ }) : bool = M.is_closed t
   let monitor (T { impl = (module M); t; _ }) : Monitor.t = M.monitor t
   let bytes_to_write (T { impl = (module M); t; _ }) : int = M.bytes_to_write t
+  let bytes_written (T { impl = (module M); t; _ }) : Int63.t = M.bytes_written t
   let flushed (T { impl = (module M); t; _ }) : unit Deferred.t = M.flushed t
 
   let ready_to_write (T { impl = (module M); t; _ }) : unit Deferred.t =

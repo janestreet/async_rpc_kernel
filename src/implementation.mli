@@ -39,6 +39,15 @@ module F : sig
          -> 'update Implementation_types.Direct_stream_writer.t
          -> ('init, 'init) Result.t Deferred.t)
 
+  type ('connection_state, 'query, 'init, 'update) streaming_rpc =
+    ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
+    { bin_query_reader : 'query Bin_prot.Type_class.reader
+    ; bin_init_writer : 'init Bin_prot.Type_class.writer
+    ; bin_update_writer : 'update Bin_prot.Type_class.writer
+    (* 'init can be an error or an initial state *)
+    ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
+    }
+
   type 'connection_state t = 'connection_state F.t =
     | One_way :
         'msg Bin_prot.Type_class.reader * ('connection_state -> 'msg -> unit)
@@ -62,11 +71,7 @@ module F : sig
         * (Expert.implementation_result, 'result) result_mode
         -> 'connection_state t
     | Streaming_rpc :
-        'query Bin_prot.Type_class.reader
-    (* 'init can be an error or an initial state *)
-        * 'init Bin_prot.Type_class.writer
-        * 'update Bin_prot.Type_class.writer
-        * ('connection_state, 'query, 'init, 'update) streaming_impl
+        ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
 
   val lift : 'a t -> f:('b -> 'a) -> 'b t
@@ -76,11 +81,12 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
-  ; shapes : Sexp.t Lazy.t
+  ; shapes : Rpc_shapes.t Lazy.t
   ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 val description : _ t -> Description.t
+val shapes : _ t -> Rpc_shapes.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
 val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t

@@ -19,6 +19,7 @@ module type Reader = sig
 
   val close : t -> unit Deferred.t
   val is_closed : t -> bool
+  val bytes_read : t -> Int63.t
 
   (** Start reading incoming messages and pass them to [on_message], until it returns
       [Stop _].
@@ -53,6 +54,7 @@ module type Writer = sig
   val is_closed : t -> bool
   val monitor : t -> Monitor.t
   val bytes_to_write : t -> int
+  val bytes_written : t -> Int63.t
 
   (** Becomes determined when it is no longer possible to send message using this writer,
       for instance when the writer is closed or the consumer leaves.

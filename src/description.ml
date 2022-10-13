@@ -6,7 +6,12 @@ module Stable = struct
       { name : string
       ; version : int
       }
-    [@@deriving bin_io, compare, hash, sexp]
+    [@@deriving bin_io, equal, compare, hash, sexp]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: t];
+      [%expect {| 4521f44dbc6098c0afc2770cc84552b1 |}]
+    ;;
   end
 end
 
@@ -16,7 +21,7 @@ include Hashable.Make (Stable.V1)
 
 let summarize ts =
   List.map ts ~f:(fun { name; version } -> name, version)
-  |> String.Map.of_alist_fold ~init:Int.Set.empty ~f:Int.Set.add
+  |> String.Map.of_alist_fold ~init:Int.Set.empty ~f:Core.Set.add
 ;;
 
 let%expect_test _ =

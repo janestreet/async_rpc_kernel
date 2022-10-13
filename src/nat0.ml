@@ -1,6 +1,11 @@
 type t = Bin_prot.Nat0.t
 [@@deriving bin_shape ~basetype:"899e2f4a-490a-11e6-b68f-bbd62472516c"]
 
+let%expect_test _ =
+  print_endline [%bin_digest: t];
+  [%expect {| 595f2a60f11816b29a72ddab17002b56 |}]
+;;
+
 let bin_t = Bin_prot.Type_class.bin_nat0
 let bin_size_t = Bin_prot.Size.bin_size_nat0
 let bin_writer_t = Bin_prot.Type_class.bin_writer_nat0

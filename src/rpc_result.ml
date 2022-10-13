@@ -3,6 +3,11 @@ open Async_kernel
 
 type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
 
+let%expect_test _ =
+  print_endline [%bin_digest: unit t];
+  [%expect {| 58734a63a5c83c1b7cbfc3fedfa3ae82 |}]
+;;
+
 type located_error =
   { location : string
   ; exn : Exn.t

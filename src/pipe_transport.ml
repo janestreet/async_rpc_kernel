@@ -33,10 +33,13 @@ module Pipe_and_buffer = struct
   type 'a t =
     { pipe : 'a Pipe.Reader.t
     ; buffer : Bigbuffer.t
+    ; mutable bytes_read : Int63.t
     }
   [@@deriving sexp_of]
 
-  let create pipe = { pipe; buffer = Bigbuffer.create Header.length }
+  let create pipe =
+    { pipe; buffer = Bigbuffer.create Header.length; bytes_read = Int63.zero }
+  ;;
 end
 
 module Pipe_reader (Data : DATA) = struct
@@ -48,6 +51,7 @@ module Pipe_reader (Data : DATA) = struct
   ;;
 
   let is_closed (t : t) = Pipe.is_closed t.pipe
+  let bytes_read (t : t) = t.bytes_read
 
   let read_forever (t : t) ~on_message ~on_end_of_batch : (_, _) Deferred.Result.t =
     let buffer = t.buffer in
@@ -86,6 +90,7 @@ module Pipe_reader (Data : DATA) = struct
         let total_len = Header.length + payload_len in
         if length >= total_len
         then (
+          t.bytes_read <- Int63.(t.bytes_read + of_int payload_len);
           match on_message data ~pos:(pos + Header.length) ~len:payload_len with
           | Handler_result.Stop x ->
             let pos = pos + total_len in
@@ -165,10 +170,11 @@ module Pipe_and_monitor = struct
   type 'a t =
     { pipe : 'a Pipe.Writer.t
     ; monitor : Monitor.t
+    ; mutable bytes_written : Int63.t
     }
   [@@deriving sexp_of]
 
-  let create pipe = { pipe; monitor = Monitor.create () }
+  let create pipe = { pipe; monitor = Monitor.create (); bytes_written = Int63.zero }
 end
 
 (* We don't perform any buffering here.
@@ -186,6 +192,7 @@ module Pipe_writer (Data : DATA) = struct
 
   (* Because we don't maintain any buffer, there are no pending writes *)
   let bytes_to_write (_ : t) = 0
+  let bytes_written (t : t) = t.bytes_written
   let stopped (t : t) = Pipe.closed t.pipe
 
   (* We consider that a message is flushed as soon as it reaches the underlining
@@ -198,10 +205,16 @@ module Pipe_writer (Data : DATA) = struct
     if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed
   ;;
 
+  let incr_bytes_written (t : t) num_bytes =
+    t.bytes_written <- Int63.(t.bytes_written + of_int num_bytes)
+  ;;
+
   let send_bin_prot t writer x =
     check_closed t (fun () ->
       let buf = Bin_prot.Utils.bin_dump ~header:true writer x in
-      Pipe.write_without_pushback t.pipe (Data.of_bigstring buf);
+      let data = Data.of_bigstring buf in
+      incr_bytes_written t (Data.length data);
+      Pipe.write_without_pushback t.pipe data;
       sent_result ())
   ;;
 
@@ -220,7 +233,9 @@ module Pipe_writer (Data : DATA) = struct
       Header.unsafe_set_payload_length data ~pos:0 (data_size + payload_size);
       let dst_pos = writer.write data ~pos:Header.length x in
       Bigstring.blit ~src:buf ~src_pos:pos ~dst:data ~dst_pos ~len:payload_size;
-      Pipe.write_without_pushback t.pipe (Data.of_bigstring data);
+      let data = Data.of_bigstring data in
+      incr_bytes_written t (Data.length data);
+      Pipe.write_without_pushback t.pipe data;
       sent_result ())
   ;;
 

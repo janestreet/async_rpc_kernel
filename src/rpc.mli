@@ -25,7 +25,7 @@ module Description : sig
     { name : string
     ; version : int
     }
-  [@@deriving compare, hash, sexp_of]
+  [@@deriving compare, equal, hash, sexp_of]
 
   include Comparable.S_plain with type t := t
   include Hashable.S_plain with type t := t
@@ -34,7 +34,7 @@ module Description : sig
 
   module Stable : sig
     module V1 : sig
-      type nonrec t = t [@@deriving compare, sexp, bin_io, hash]
+      type nonrec t = t [@@deriving compare, equal, sexp, bin_io, hash]
     end
   end
 end
@@ -71,6 +71,7 @@ module Implementation : sig
   type 'connection_state t [@@deriving sexp_of]
 
   val description : _ t -> Description.t
+  val shapes : _ t -> Rpc_shapes.t
 
   (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a
       ['b t] context.  We can do this as long as we can map our state into the state
@@ -404,10 +405,11 @@ module Pipe_rpc : sig
 
   val create
     :  ?client_pushes_back:unit
-    (** If the connection is backed up, the server stops consuming elements from the
-        pipe. Servers should pay attention to the pipe's pushback, otherwise they risk
-        running out of memory if they fill the pipe much faster than the transport can
-        handle, or if the client pushes back as discussed next.
+    (** If the connection is backed up, the rpc server library stops consuming elements
+        from the pipe being filled by [implement]'s caller. Servers should pay attention
+        to the pipe's pushback, otherwise they risk running out of memory if they fill the
+        pipe much faster than the transport can handle, or if the client pushes back as
+        discussed next.
 
         If [client_pushes_back] is set, the client side of the connection will stop
         reading elements from the underlying file descriptor when the client's pipe has

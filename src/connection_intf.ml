@@ -107,9 +107,17 @@ module type S = sig
       internally upon errors or timeouts. *)
   val is_closed : t -> bool
 
-  (** [bytes_to_write] and [flushed] just call the similarly named functions on the
+  (** [bytes_to_write] and [flushed] just call the similarly named function on the
       [Transport.Writer.t] within a connection. *)
   val bytes_to_write : t -> int
+
+  (** [bytes_written] just calls the similarly named functions on the [Transport.Writer.t]
+      within a connection. *)
+  val bytes_written : t -> Int63.t
+
+  (** [bytes_read] just calls the similarly named function on the [Transport.Reader.t]
+      within a connection. *)
+  val bytes_read : t -> Int63.t
 
   val flushed : t -> unit Deferred.t
 

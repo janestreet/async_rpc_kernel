@@ -37,6 +37,15 @@ module F = struct
          -> 'update Implementation_types.Direct_stream_writer.t
          -> ('init, 'init) Result.t Deferred.t)
 
+  type ('connection_state, 'query, 'init, 'update) streaming_rpc =
+    ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
+    { bin_query_reader : 'query Bin_prot.Type_class.reader
+    ; bin_init_writer : 'init Bin_prot.Type_class.writer
+    ; bin_update_writer : 'update Bin_prot.Type_class.writer
+    (* 'init can be an error or an initial state *)
+    ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
+    }
+
   type 'connection_state t = 'connection_state F.t =
     | One_way :
         'msg Bin_prot.Type_class.reader * ('connection_state -> 'msg -> unit)
@@ -60,11 +69,7 @@ module F = struct
         * (Expert.implementation_result, 'result) result_mode
         -> 'connection_state t
     | Streaming_rpc :
-        'query Bin_prot.Type_class.reader
-    (* 'init can be an error or an initial state *)
-        * 'init Bin_prot.Type_class.writer
-        * 'update Bin_prot.Type_class.writer
-        * ('connection_state, 'query, 'init, 'update) streaming_impl
+        ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
 
   let sexp_of_t _ = function
@@ -83,13 +88,13 @@ module F = struct
     | Rpc_expert (impl, result_mode) ->
       Rpc_expert
         ((fun state resp buf ~pos ~len -> impl (f state) resp buf ~pos ~len), result_mode)
-    | Streaming_rpc (bin_q, bin_i, bin_u, impl) ->
+    | Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl } ->
       let impl =
         match impl with
         | Pipe impl -> Pipe (fun state q -> impl (f state) q)
         | Direct impl -> Direct (fun state q w -> impl (f state) q w)
       in
-      Streaming_rpc (bin_q, bin_i, bin_u, impl)
+      Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
   ;;
 end
 
@@ -97,11 +102,12 @@ type nonrec 'connection_state t = 'connection_state t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
-  ; shapes : Sexp.t Lazy.t
+  ; shapes : Rpc_shapes.t Lazy.t
   ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 let description t = { Description.name = Rpc_tag.to_string t.tag; version = t.version }
+let shapes t = force t.shapes
 let lift t ~f = { t with f = F.lift ~f t.f }
 let update_on_exception t ~f = { t with on_exception = f t.on_exception }

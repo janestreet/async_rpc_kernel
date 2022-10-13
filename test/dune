@@ -1,4 +1,4 @@
 (library (name async_rpc_kernel_test)
  (libraries core async_kernel async_rpc_kernel expect_test_helpers_async
-  expect_test_helpers_core)
+  expect_test_helpers_core protocol_version_header)
  (preprocess (pps ppx_jane)))

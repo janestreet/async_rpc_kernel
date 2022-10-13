@@ -1,4 +1,4 @@
 (library (name async_rpc_kernel) (public_name async_rpc_kernel)
  (preprocess (pps ppx_jane))
- (libraries async_kernel core async_kernel.persistent_connection_kernel
-  protocol_version_header))
+ (libraries async_kernel core async_kernel.eager_deferred
+  async_kernel.persistent_connection_kernel protocol_version_header))

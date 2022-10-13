@@ -48,13 +48,6 @@ module Rpc_common = struct
   ;;
 end
 
-let shapes lst =
-  Sexp.List
-    (List.map lst ~f:(fun (name, shape) ->
-       [%message
-         "" ~_:(name : string) ~_:(Bin_prot.Shape.eval_to_digest_string shape : string)]))
-;;
-
 module Rpc = struct
   type ('query, 'response) t =
     { tag : P.Rpc_tag.t
@@ -88,7 +81,10 @@ module Rpc = struct
   let response_type_id t = t.response_type_id
   let bin_query t = t.bin_query
   let bin_response t = t.bin_response
-  let shapes t = shapes [ "query", t.bin_query.shape; "response", t.bin_response.shape ]
+
+  let shapes t =
+    Rpc_shapes.Rpc { query = t.bin_query.shape; response = t.bin_response.shape }
+  ;;
 
   let implement ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
@@ -271,7 +267,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Deferred)
-      ; shapes = lazy (Sexp.Atom "Unknown")
+      ; shapes = lazy Rpc_shapes.Unknown
       ; on_exception
       }
     ;;
@@ -285,7 +281,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (f, Blocking)
-      ; shapes = lazy (Sexp.Atom "Unknown")
+      ; shapes = lazy Rpc_shapes.Unknown
       ; on_exception
       }
     ;;
@@ -308,7 +304,7 @@ module One_way = struct
     { tag = P.Rpc_tag.of_string name; version; bin_msg; msg_type_id }
   ;;
 
-  let shapes t = shapes [ "msg", t.bin_msg.shape ]
+  let shapes t = Rpc_shapes.One_way { msg = t.bin_msg.shape }
   let description t = { Description.name = name t; version = version t }
   let msg_type_id t = t.msg_type_id
 
@@ -402,6 +398,11 @@ module Pipe_close_reason = struct
     | Error of Error.t
   [@@deriving bin_io, compare, sexp]
 
+  let%expect_test _ =
+    print_endline [%bin_digest: t];
+    [%expect {| 748c8bf4502d0978d007bf7f96a7ef7f |}]
+  ;;
+
   module Stable = struct
     module V1 = struct
       type nonrec t = t =
@@ -409,6 +410,11 @@ module Pipe_close_reason = struct
         | Closed_remotely
         | Error of Error.Stable.V2.t
       [@@deriving bin_io, compare, sexp]
+
+      let%expect_test _ =
+        print_endline [%bin_digest: t];
+        [%expect {| 748c8bf4502d0978d007bf7f96a7ef7f |}]
+      ;;
     end
   end
 end
@@ -483,12 +489,12 @@ module Streaming_rpc = struct
   ;;
 
   let shapes t =
-    shapes
-      [ "query", t.bin_query.shape
-      ; "initial-response", t.bin_initial_response.shape
-      ; "update-response", t.bin_update_response.shape
-      ; "error", t.bin_error_response.shape
-      ]
+    Rpc_shapes.Streaming_rpc
+      { query = t.bin_query.shape
+      ; initial_response = t.bin_initial_response.shape
+      ; update_response = t.bin_update_response.shape
+      ; error = t.bin_error_response.shape
+      }
   ;;
 
   let implement_gen t ?(on_exception = On_exception.continue) impl =
@@ -501,7 +507,11 @@ module Streaming_rpc = struct
     ; version = t.version
     ; f =
         Streaming_rpc
-          (t.bin_query.reader, bin_init_writer, t.bin_update_response.writer, impl)
+          { bin_query_reader = t.bin_query.reader
+          ; bin_init_writer
+          ; bin_update_writer = t.bin_update_response.writer
+          ; impl
+          }
     ; shapes = lazy (shapes t)
     ; on_exception
     }

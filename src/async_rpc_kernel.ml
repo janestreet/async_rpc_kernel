@@ -4,6 +4,7 @@ module Persistent_connection = Persistent_connection
 module Pipe_transport = Pipe_transport
 module Rpc_error = Rpc_error
 module Rpc_result = Rpc_result
+module Rpc_shapes = Rpc_shapes
 
 module Async_rpc_kernel_stable = struct
   module Rpc = Rpc.Stable

@@ -1,5 +1,5 @@
 open Core
-open Poly
+open! Poly
 open Async
 
 let max_message_size = 16 lsl 20
@@ -11,9 +11,9 @@ let config =
     ()
 ;;
 
-let rpc =
+let basic_rpc name =
   Rpc.Pipe_rpc.create
-    ~name:"test"
+    ~name
     ~version:42
     ~bin_query:[%bin_type_class: unit]
     ~bin_response:[%bin_type_class: int * int]
@@ -21,9 +21,9 @@ let rpc =
     ()
 ;;
 
-let rpc_big =
+let big_rpc name =
   Rpc.Pipe_rpc.create
-    ~name:"test-big"
+    ~name
     ~version:42
     ~bin_query:[%bin_type_class: unit]
     ~bin_response:[%bin_type_class: int list]
@@ -31,7 +31,10 @@ let rpc_big =
     ()
 ;;
 
-let make rpc =
+let rpc_direct = basic_rpc "test-direct"
+let rpc_direct_big = big_rpc "test-direct-big"
+
+let make_direct rpc =
   let pipe_reader, pipe_writer = Pipe.create () in
   let impl =
     Rpc.Pipe_rpc.implement_direct rpc (fun () () writer ->
@@ -45,8 +48,8 @@ let make rpc =
     | `Ok x -> x )
 ;;
 
-let implementation, next_direct_writer = make rpc
-let implementation_big, next_direct_writer_big = make rpc_big
+let implementation, next_direct_writer = make_direct rpc_direct
+let implementation_big, next_direct_writer_big = make_direct rpc_direct_big
 
 let implementations =
   Rpc.Implementations.create_exn
@@ -87,10 +90,10 @@ let new_direct_writer rpc next_direct_writer =
     direct_writer)
 ;;
 
-let direct_writer = new_direct_writer rpc next_direct_writer
+let direct_writer = new_direct_writer rpc_direct next_direct_writer
 
 let direct_writers_big =
-  Array.init 100 ~f:(fun _ -> new_direct_writer rpc_big next_direct_writer_big)
+  Array.init 100 ~f:(fun _ -> new_direct_writer rpc_direct_big next_direct_writer_big)
 ;;
 
 let group1 = Rpc.Pipe_rpc.Direct_stream_writer.Group.create ()
@@ -173,4 +176,90 @@ let%bench ("iter direct write (big)" [@indexed n = [ 1; 10; 100 ]]) =
 let%bench_fun ("direct write to group (big)" [@indexed n = [ 1; 10; 100 ]]) =
   let group = List.Assoc.find_exn groups ~equal:Int.equal n in
   fun () -> Rpc.Pipe_rpc.Direct_stream_writer.Group.write_without_pushback group big_data
+;;
+
+let server_handle_connection transport implementations =
+  match%bind
+    Async_rpc_kernel.Rpc.Connection.create
+      ~implementations
+      ~connection_state:(fun (_ : Rpc.Connection.t) -> ())
+      transport
+  with
+  | Ok connection ->
+    let%map () = Async_rpc_kernel.Rpc.Connection.close_finished connection in
+    ()
+  | Error _handshake_error ->
+    let%map () = Async_rpc_kernel.Rpc.Transport.close transport in
+    ()
+;;
+
+let create_connection implementations =
+  let to_server_reader, to_server_writer = Pipe.create () in
+  let to_client_reader, to_client_writer = Pipe.create () in
+  let one_transport =
+    Async_rpc_kernel.Pipe_transport.create Async_rpc_kernel.Pipe_transport.Kind.string
+  in
+  let client_end = one_transport to_client_reader to_server_writer in
+  let server_end = one_transport to_server_reader to_client_writer in
+  don't_wait_for (server_handle_connection server_end implementations);
+  let%map client_conn =
+    Async_rpc_kernel.Rpc.Connection.create
+      ?implementations:None
+      ~connection_state:(fun (_ : Rpc.Connection.t) -> ())
+      client_end
+    >>| Result.ok_exn
+  in
+  client_conn
+;;
+
+let make_with_pipe rpc ~write =
+  let impl =
+    Rpc.Pipe_rpc.implement rpc (fun () () ->
+      let pipe_reader, pipe_writer = Pipe.create () in
+      write pipe_writer;
+      Pipe.close pipe_writer;
+      return (Ok pipe_reader))
+  in
+  impl
+;;
+
+let rpc_pipe = basic_rpc "test-pipe"
+let rpc_pipe_big = big_rpc "test-pipe-big"
+
+let pipe_setup_conn rpc ~message_data ~num_messages =
+  Thread_safe.block_on_async_exn (fun () ->
+    let impl =
+      make_with_pipe rpc ~write:(fun pipe_writer ->
+        for _ = 1 to num_messages do
+          Pipe.write_without_pushback pipe_writer message_data
+        done)
+    in
+    let implementations =
+      Rpc.Implementations.create_exn ~implementations:[ impl ] ~on_unknown_rpc:`Raise
+    in
+    let%map client_conn = create_connection implementations in
+    client_conn)
+;;
+
+let read_messages (type a) (rpc : (unit, a, unit) Rpc.Pipe_rpc.t) connection ~num_messages
+  =
+  Thread_safe.block_on_async_exn (fun () ->
+    let%bind reader, (_ : Rpc.Pipe_rpc.Metadata.t) =
+      Rpc.Pipe_rpc.dispatch_exn rpc connection ()
+    in
+    let%map (_ : [ `Eof | `Exactly of a Queue.t | `Fewer of a Queue.t ]) =
+      Pipe.read_exactly reader ~num_values:num_messages
+    in
+    ())
+;;
+
+let%bench_fun ("end-to-end Pipe write" [@indexed num_messages = [ 5; 500; 50_000 ]]) =
+  let client_conn = pipe_setup_conn rpc_pipe ~num_messages ~message_data:data in
+  fun () -> read_messages rpc_pipe client_conn ~num_messages
+;;
+
+let%bench_fun ("end-to-end Pipe write (big)" [@indexed num_messages = [ 5; 500; 50_000 ]])
+  =
+  let client_conn = pipe_setup_conn rpc_pipe_big ~num_messages ~message_data:big_data in
+  fun () -> read_messages rpc_pipe_big client_conn ~num_messages
 ;;

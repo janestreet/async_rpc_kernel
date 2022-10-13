@@ -21,26 +21,6 @@ let defer_result : 'a 'b. ('a Deferred.t, 'b) Result.t -> ('a, 'b) Result.t Defe
        | Some d -> return (Ok d))
 ;;
 
-module Deferred_immediate = Monad.Make (struct
-    type 'a t = 'a Deferred.t
-
-    let return = return
-
-    let bind d ~f =
-      match Deferred.peek d with
-      | None -> d >>= f
-      | Some x -> f x
-    ;;
-
-    let map d ~f =
-      match Deferred.peek d with
-      | None -> d >>| f
-      | Some x -> return (f x)
-    ;;
-
-    let map = `Custom map
-  end)
-
 module Responder = Implementation.Expert.Responder
 
 type 'connection_state on_unknown_rpc =
@@ -126,12 +106,12 @@ module Instance = struct
       send_write_error t id ([%sexp_of: unit Transport.Send_result.t] r)
   ;;
 
-  let write_message t ~id bin_writer x =
+  let write_message t bin_writer x ~id =
     if not t.stopped
     then Writer.send_bin_prot t.writer bin_writer x |> handle_send_result t id
   ;;
 
-  let write_message_expert t ~id bin_writer x ~buf ~pos ~len =
+  let write_message_expert t bin_writer x ~buf ~pos ~len ~id =
     if not t.stopped
     then
       Writer.send_bin_prot_and_bigstring t.writer bin_writer x ~buf ~pos ~len
@@ -145,26 +125,15 @@ module Instance = struct
     write_message t ~id bin_writer (Response { id; data })
   ;;
 
-  module Cached_stream_writer : sig
-    type instance
-    type 'a t = 'a Implementation_types.Cached_stream_writer.t
+  module Cached_bin_writer : sig
+    type 'a t = 'a Implementation_types.Cached_bin_writer.t
 
     val create : id:P.Query_id.t -> bin_writer:'a Bin_prot.Type_class.writer -> 'a t
-    val write : 'a t -> instance -> P.Query_id.t -> 'a -> unit
-
-    val write_expert
-      :  'a t
-      -> instance
-      -> P.Query_id.t
-      -> buf:Bigstring.t
-      -> pos:int
-      -> len:int
-      -> unit
-
-    val write_string : 'a t -> instance -> P.Query_id.t -> string -> unit
-  end
-  with type instance := t = struct
-    type 'a t = 'a Implementation_types.Cached_stream_writer.t =
+    val prep_write : 'a t -> 'a -> ('a t * 'a) Bin_prot.Type_class.writer
+    val prep_write_expert : 'a t -> len:int -> 'a t Bin_prot.Type_class.writer
+    val prep_write_string : 'a t -> string -> ('a t * string) Bin_prot.Type_class.writer
+  end = struct
+    type 'a t = 'a Implementation_types.Cached_bin_writer.t =
       { header_prefix : string (* Bin_protted constant prefix of the message *)
       ; (* Length of the user data part. We set this field when sending a message. This
            relies on the fact that the message is serialized immediately (which is the
@@ -293,21 +262,19 @@ module Instance = struct
       { size = bin_size_message_as_string; write = bin_write_message_as_string }
     ;;
 
-    (* [write] and [write_string] both allocate 3 words for the tuples. [write_expert]
-       does not allocate. *)
-    let write t (T instance) id data =
+    let prep_write t data =
       t.data_len <- Nat0.of_int_exn (t.bin_writer.size data);
-      write_message instance ~id bin_writer_message (t, data)
+      bin_writer_message
     ;;
 
-    let write_string t (T instance) id str =
+    let prep_write_string t str =
       t.data_len <- Nat0.of_int_exn (String.length str);
-      write_message instance ~id bin_writer_message_as_string (t, str)
+      bin_writer_message_as_string
     ;;
 
-    let write_expert t (T instance) id ~buf ~pos ~len =
+    let prep_write_expert t ~len =
       t.data_len <- Nat0.of_int_exn len;
-      write_message_expert instance ~id bin_writer_nat0_header t ~buf ~pos ~len
+      bin_writer_nat0_header
     ;;
   end
 
@@ -322,7 +289,7 @@ module Instance = struct
       ; closed : unit Ivar.t
       ; instance : Instance.t
       ; query_id : P.Query_id.t
-      ; stream_writer : 'a Cached_stream_writer.t
+      ; stream_writer : 'a Cached_bin_writer.t
       ; groups : 'a group_entry Bag.t
       }
 
@@ -345,16 +312,38 @@ module Instance = struct
       write_response instance query_id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof)
     ;;
 
-    let write_message { instance; stream_writer; query_id; _ } x =
-      Cached_stream_writer.write stream_writer instance query_id x
+    (* [write_message_string] and [write_message] both allocate 3 words for the tuples.
+       [write_message_expert] does not allocate. *)
+
+    let write_message_string t x =
+      let bin_writer_message_as_string =
+        Cached_bin_writer.prep_write_string t.stream_writer x
+      in
+      let (T instance) = t.instance in
+      write_message
+        instance
+        ~id:t.query_id
+        bin_writer_message_as_string
+        (t.stream_writer, x)
     ;;
 
-    let write_message_string { instance; stream_writer; query_id; _ } x =
-      Cached_stream_writer.write_string stream_writer instance query_id x
+    let write_message t x =
+      let bin_writer_message = Cached_bin_writer.prep_write t.stream_writer x in
+      let (T instance) = t.instance in
+      write_message instance ~id:t.query_id bin_writer_message (t.stream_writer, x)
     ;;
 
-    let write_message_expert { instance; stream_writer; query_id; _ } ~buf ~pos ~len =
-      Cached_stream_writer.write_expert stream_writer instance query_id ~buf ~pos ~len
+    let write_message_expert t ~buf ~pos ~len =
+      let bin_writer_message = Cached_bin_writer.prep_write_expert t.stream_writer ~len in
+      let (T instance) = t.instance in
+      write_message_expert
+        instance
+        ~id:t.query_id
+        bin_writer_message
+        t.stream_writer
+        ~buf
+        ~pos
+        ~len
     ;;
 
     let close_without_removing_from_instance t =
@@ -437,6 +426,91 @@ module Instance = struct
     | Error (Uncaught_exn sexp) ->
       On_exception.handle_exn on_exception ~close_connection_monitor (Exn.create_s sexp)
     | Error _ | Ok _ -> ()
+  ;;
+
+  let apply_streaming_implementation
+        t
+        { Implementation.F.bin_query_reader; bin_init_writer; bin_update_writer; impl }
+        ~len
+        ~read_buffer
+        ~read_buffer_pos_ref
+        ~id
+        ~(on_exception : On_exception.t)
+        ~close_connection_monitor
+    =
+    let data =
+      bin_read_from_bigstring
+        bin_query_reader
+        read_buffer
+        ~pos_ref:read_buffer_pos_ref
+        ~len
+        ~location:"streaming_rpc server-side query un-bin-io'ing"
+    in
+    let (T instance) = t.packed_self in
+    let stream_writer = Cached_bin_writer.create ~id ~bin_writer:bin_update_writer in
+    let impl_with_state =
+      match impl with
+      | Pipe f -> `Pipe f
+      | Direct f ->
+        let writer : _ Direct_stream_writer.t =
+          { id = Direct_stream_writer.Id.create ()
+          ; state = Not_started (Queue.create ())
+          ; closed = Ivar.create ()
+          ; instance = t.packed_self
+          ; query_id = id
+          ; groups = Bag.create ()
+          ; stream_writer
+          }
+        in
+        Hashtbl.set t.open_streaming_responses ~key:id ~data:(Direct writer);
+        `Direct (f, writer)
+    in
+    let run_impl impl split_ok handle_ok =
+      Rpc_result.try_with
+        ?on_background_exception:on_exception.callback
+        (fun () -> defer_result (data >>|~ impl))
+        ~location:"server-side pipe_rpc computation"
+      >>> function
+      | Error (Uncaught_exn sexp as err) ->
+        Hashtbl.remove t.open_streaming_responses id;
+        write_response t id bin_init_writer (Error err);
+        On_exception.handle_exn on_exception ~close_connection_monitor (Exn.create_s sexp)
+      | Error err ->
+        Hashtbl.remove t.open_streaming_responses id;
+        write_response t id bin_init_writer (Error err)
+      | Ok (Error err) ->
+        Hashtbl.remove t.open_streaming_responses id;
+        write_response t id bin_init_writer (Ok err)
+      | Ok (Ok ok) ->
+        let initial, rest = split_ok ok in
+        write_response t id bin_init_writer (Ok initial);
+        handle_ok rest
+    in
+    match impl_with_state with
+    | `Pipe f ->
+      run_impl
+        (fun data -> f t.connection_state data)
+        Fn.id
+        (fun pipe_r ->
+           Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
+           don't_wait_for
+             (Writer.transfer t.writer pipe_r (fun data ->
+                let bin_writer_message =
+                  Cached_bin_writer.prep_write stream_writer data
+                in
+                write_message instance ~id bin_writer_message (stream_writer, data)));
+           Pipe.closed pipe_r
+           >>> fun () ->
+           Pipe.upstream_flushed pipe_r
+           >>> function
+           | `Ok | `Reader_closed ->
+             write_response t id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof);
+             Hashtbl.remove t.open_streaming_responses id)
+    | `Direct (f, writer) ->
+      run_impl
+        (fun data -> f t.connection_state data writer)
+        (fun x -> x, ())
+        (fun () -> Direct_stream_writer.start writer)
   ;;
 
   let apply_implementation
@@ -595,7 +669,7 @@ module Instance = struct
             (Failure "Expert implementation did not reply")
       in
       let d =
-        let open Deferred_immediate.Let_syntax in
+        let open Eager_deferred.Let_syntax in
         match%map d with
         | Ok result ->
           let d =
@@ -632,8 +706,7 @@ module Instance = struct
          (match result with
           | Ok () -> Continue
           | Error _ -> Stop result))
-    | Implementation.F.Streaming_rpc
-        (bin_query_reader, bin_init_writer, bin_update_writer, impl) ->
+    | Implementation.F.Streaming_rpc streaming_rpc ->
       let stream_query =
         bin_read_from_bigstring
           P.Stream_query.bin_reader_nat0_t
@@ -658,82 +731,15 @@ module Instance = struct
            | Pipe pipe -> Pipe.close_read pipe
            | Direct w -> Direct_stream_writer.close w)
        | Ok (`Query len) ->
-         let data =
-           bin_read_from_bigstring
-             bin_query_reader
-             read_buffer
-             ~pos_ref:read_buffer_pos_ref
-             ~len
-             ~location:"streaming_rpc server-side query un-bin-io'ing"
-         in
-         let stream_writer =
-           Cached_stream_writer.create ~id ~bin_writer:bin_update_writer
-         in
-         let impl_with_state =
-           match impl with
-           | Pipe f -> `Pipe f
-           | Direct f ->
-             let writer : _ Direct_stream_writer.t =
-               { id = Direct_stream_writer.Id.create ()
-               ; state = Not_started (Queue.create ())
-               ; closed = Ivar.create ()
-               ; instance = t.packed_self
-               ; query_id = id
-               ; groups = Bag.create ()
-               ; stream_writer
-               }
-             in
-             Hashtbl.set t.open_streaming_responses ~key:query.id ~data:(Direct writer);
-             `Direct (f, writer)
-         in
-         let run_impl impl split_ok handle_ok =
-           Rpc_result.try_with
-             ?on_background_exception:on_exception.callback
-             (fun () -> defer_result (data >>|~ impl))
-             ~location:"server-side pipe_rpc computation"
-           >>> function
-           | Error (Uncaught_exn sexp as err) ->
-             Hashtbl.remove t.open_streaming_responses id;
-             write_response t id bin_init_writer (Error err);
-             On_exception.handle_exn
-               on_exception
-               ~close_connection_monitor
-               (Exn.create_s sexp)
-           | Error err ->
-             Hashtbl.remove t.open_streaming_responses id;
-             write_response t id bin_init_writer (Error err)
-           | Ok (Error err) ->
-             Hashtbl.remove t.open_streaming_responses id;
-             write_response t id bin_init_writer (Ok err)
-           | Ok (Ok ok) ->
-             let initial, rest = split_ok ok in
-             write_response t id bin_init_writer (Ok initial);
-             handle_ok rest
-         in
-         (match impl_with_state with
-          | `Pipe f ->
-            run_impl
-              (fun data -> f t.connection_state data)
-              Fn.id
-              (fun pipe_r ->
-                 Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
-                 don't_wait_for
-                   (Writer.transfer
-                      t.writer
-                      pipe_r
-                      (Cached_stream_writer.write stream_writer t.packed_self id));
-                 Pipe.closed pipe_r
-                 >>> fun () ->
-                 Pipe.upstream_flushed pipe_r
-                 >>> function
-                 | `Ok | `Reader_closed ->
-                   write_response t id P.Stream_response_data.bin_writer_nat0_t (Ok `Eof);
-                   Hashtbl.remove t.open_streaming_responses id)
-          | `Direct (f, writer) ->
-            run_impl
-              (fun data -> f t.connection_state data writer)
-              (fun x -> x, ())
-              (fun () -> Direct_stream_writer.start writer)));
+         apply_streaming_implementation
+           t
+           streaming_rpc
+           ~len
+           ~read_buffer
+           ~read_buffer_pos_ref
+           ~id
+           ~on_exception
+           ~close_connection_monitor);
       Continue
   ;;
 

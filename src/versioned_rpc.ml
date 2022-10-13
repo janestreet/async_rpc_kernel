@@ -281,7 +281,7 @@ module Callee_converts = struct
       ;;
 
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module type Version_shared = sig
         type query [@@deriving bin_io]
@@ -444,7 +444,7 @@ module Callee_converts = struct
       ;;
 
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module type Version_shared = sig
         type query [@@deriving bin_io]
@@ -640,7 +640,18 @@ module Menu = struct
       let version = 1
 
       type query = unit [@@deriving bin_io]
+
+      let%expect_test _ =
+        print_endline [%bin_digest: query];
+        [%expect {| 86ba5df747eec837f0b391dd49f33f9e |}]
+      ;;
+
       type response = (string * int) list [@@deriving bin_io]
+
+      let%expect_test _ =
+        print_endline [%bin_digest: response];
+        [%expect {| 4c1e50c93b38c2ad0554cbd929bef3ac |}]
+      ;;
 
       let model_of_query q = q
 
@@ -665,8 +676,8 @@ module Menu = struct
 
   let supported_rpcs t =
     let open List.Let_syntax in
-    let%bind name, versions = String.Table.to_alist t in
-    let%map version = Int.Set.to_list versions in
+    let%bind name, versions = Hashtbl.to_alist t in
+    let%map version = Set.to_list versions in
     { Description.name; version }
   ;;
 
@@ -687,6 +698,59 @@ module Menu = struct
     List.map descriptions ~f:(fun { Description.name; version } -> name, version)
     |> of_entries
   ;;
+
+  module With_shapes = struct
+    module Model = struct
+      let name = "__Versioned_rpc.Shape_menu"
+
+      type query = unit
+      type response = (Description.t * Rpc_shapes.t) list
+    end
+
+    include Callee_converts.Rpc.Make (Model)
+
+    module V1 = struct
+      module T = struct
+        let version = 1
+
+        type query = unit [@@deriving bin_io]
+
+        let%expect_test _ =
+          print_endline [%bin_digest: query];
+          [%expect {| 86ba5df747eec837f0b391dd49f33f9e |}]
+        ;;
+
+        type response = (Description.Stable.V1.t * Rpc_shapes.Stable.V1.t) list
+        [@@deriving bin_io]
+
+        let%expect_test _ =
+          print_endline [%bin_digest: response];
+          [%expect {| b4bdc01b7ead907e6d0d3f3d89700f1b |}]
+        ;;
+
+        let model_of_query = Fn.id
+        let response_of_model = Fn.id
+      end
+
+      include T
+      include Register (T)
+    end
+
+    module Current_version = V1
+
+    type t = (Description.t * Rpc_shapes.t) list
+
+    let add impls =
+      let shape_menu =
+        List.map impls ~f:(fun impl ->
+          Implementation.description impl, Implementation.shapes impl)
+      in
+      let shape_menu_impls = implement_multi (fun _ ~version:_ () -> return shape_menu) in
+      add impls @ shape_menu_impls
+    ;;
+
+    let request conn = Rpc.dispatch Current_version.rpc conn ()
+  end
 end
 
 module Connection_with_menu = struct
@@ -815,7 +879,7 @@ module Caller_converts = struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       let dispatch_multi conn_with_menu query =
         Dispatch.Async.with_version_menu
@@ -930,7 +994,7 @@ module Caller_converts = struct
       let name = Model.name
       let registry : (dispatcher * Any.t) Int.Table.t = Int.Table.create ~size:1 ()
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       let dispatch_iter_multi conn_with_menu query ~f =
         Dispatch.Async.with_version_menu
@@ -1122,7 +1186,7 @@ module Caller_converts = struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       let dispatch_multi conn_with_menu query =
         Dispatch.Async.with_version_menu
@@ -1236,7 +1300,7 @@ module Caller_converts = struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
       let rpcs () = List.map (Hashtbl.data registry) ~f:(fun (_, rpc) -> rpc)
-      let versions () = Int.Set.of_list (Int.Table.keys registry)
+      let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       let dispatch_multi conn_with_menu msg =
         Dispatch.Direct.with_version_menu

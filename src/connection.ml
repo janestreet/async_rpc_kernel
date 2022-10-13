@@ -51,6 +51,11 @@ module Heartbeat_config = struct
     }
   [@@deriving sexp, bin_io, fields]
 
+  let%expect_test _ =
+    print_endline [%bin_digest: t];
+    [%expect {| 74a1f475bfb2eed5a509ba71cd7891d2 |}]
+  ;;
+
   let create
         ?(timeout = Time_ns.Span.of_sec 30.)
         ?(send_every = Time_ns.Span.of_sec 10.)
@@ -112,6 +117,8 @@ let writer t =
 ;;
 
 let bytes_to_write t = Writer.bytes_to_write t.writer
+let bytes_written t = Writer.bytes_written t.writer
+let bytes_read t = Reader.bytes_read t.reader
 let flushed t = Writer.flushed t.writer
 
 let handle_send_result : t -> 'a Transport.Send_result.t -> 'a =
