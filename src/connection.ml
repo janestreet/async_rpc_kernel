@@ -251,10 +251,7 @@ let last_seen_alive t = t.last_seen_alive
 let abort_heartbeating t =
   Option.iter (Set_once.get t.heartbeat_event) ~f:(fun event ->
     match Synchronous_time_source.Event.abort t.time_source event with
-    | Ok | Previously_unscheduled -> ()
-    | Currently_happening ->
-      Synchronous_time_source.run_after t.time_source Time_ns.Span.zero (fun () ->
-        Synchronous_time_source.Event.abort_exn t.time_source event))
+    | Ok | Previously_unscheduled -> ())
 ;;
 
 let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
