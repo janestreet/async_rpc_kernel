@@ -26,22 +26,111 @@ module Handshake_error = struct
 end
 
 module Header : sig
-  type t [@@deriving bin_type_class]
+  type t [@@deriving bin_io, sexp_of]
 
   val v1 : t
-  val negotiate : peer:t -> (int, Handshake_error.t) result
+  val v2 : t
+  val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
 
-  let supported_versions = [ 1 ]
-  let v1 = Protocol_version_header.create_exn ~protocol:Rpc ~supported_versions
-
-  let negotiate ~peer =
-    match negotiate ~allow_legacy_peer:true ~us:v1 ~peer with
-    | Error e -> Error (Handshake_error.Negotiation_failed e)
-    | Ok i when List.mem supported_versions i ~equal:Int.( = ) -> Ok i
-    | Ok i -> Error (Handshake_error.Negotiated_unexpected_version i)
+  let create ~supported_versions =
+    Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
+
+  let v2 = create ~supported_versions:[ 1; 2 ]
+  let v1 = create ~supported_versions:[ 1 ]
+
+  let negotiate ~us ~peer =
+    match negotiate ~allow_legacy_peer:true ~us ~peer with
+    | Error e -> Error (Handshake_error.Negotiation_failed e)
+    | Ok i -> Ok i
+  ;;
+end
+
+module Protocol_writer : sig
+  type t [@@deriving sexp_of]
+
+  val sexp_of_writer : t -> Sexp.t
+  val create_before_negotiation : Writer.t -> t
+  val set_negotiated_protocol_version : t -> int -> unit
+
+  val send_query
+    :  t
+    -> 'query P.Query.t
+    -> bin_writer_query:'query Bin_prot.Type_class.writer
+    -> unit Transport.Send_result.t
+
+  val send_expert_query
+    :  t
+    -> unit P.Query.t
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> send_bin_prot_and_bigstring:
+         (Writer.t
+          -> P.Message.nat0_t Bin_prot.Type_class.writer
+          -> P.Message.nat0_t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> 'result Transport.Send_result.t)
+    -> 'result Transport.Send_result.t
+
+  val send_heartbeat : t -> unit Transport.Send_result.t
+  val can_send : t -> bool
+  val bytes_to_write : t -> int
+  val bytes_written : t -> Int63.t
+  val flushed : t -> unit Deferred.t
+  val stopped : t -> unit Deferred.t
+  val close : t -> unit Deferred.t
+end = struct
+  type t =
+    { negotiated_protocol_version : int Set_once.t
+    ; writer : Writer.t
+    }
+  [@@deriving sexp_of]
+
+  let sexp_of_writer t = [%sexp_of: Writer.t] t.writer
+
+  let create_before_negotiation writer =
+    { negotiated_protocol_version = Set_once.create (); writer }
+  ;;
+
+  let set_negotiated_protocol_version t negotiated_protocol_version =
+    Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version
+  ;;
+
+  let query_message t query : _ P.Message.t =
+    match Set_once.get_exn t.negotiated_protocol_version [%here] with
+    | 1 -> Query_v1 (P.Query.to_v1 query)
+    | _ -> Query query
+  ;;
+
+  let send_query t query ~bin_writer_query =
+    let message = query_message t query in
+    Writer.send_bin_prot
+      t.writer
+      (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
+      message
+  ;;
+
+  let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
+    let header = query_message t { query with data = Nat0.of_int_exn len } in
+    send_bin_prot_and_bigstring t.writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len
+  ;;
+
+  let send_heartbeat t =
+    Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+  ;;
+
+  let of_writer f t = f t.writer
+  let can_send = of_writer Writer.can_send
+  let bytes_to_write = of_writer Writer.bytes_to_write
+  let bytes_written = of_writer Writer.bytes_written
+  let flushed = of_writer Writer.flushed
+  let stopped = of_writer Writer.stopped
+  let close = of_writer Writer.close
 end
 
 module Heartbeat_config = struct
@@ -90,8 +179,9 @@ type t =
   ; heartbeat_config : Heartbeat_config.Runtime.t
   ; mutable heartbeat_callbacks : (unit -> unit) array
   ; mutable last_seen_alive : Time_ns.t
+  ; max_metadata_size : Byte_units.t
   ; reader : Reader.t
-  ; writer : Writer.t
+  ; writer : Protocol_writer.t
   ; open_queries : (P.Query_id.t, (response_handler[@sexp.opaque])) Hashtbl.t
   ; close_started : Info.t Ivar.t
   ; close_finished : unit Ivar.t
@@ -106,20 +196,23 @@ type t =
 [@@deriving sexp_of]
 
 let sexp_of_t_hum_writer t =
-  [%sexp { description : Info.t = t.description; writer : Writer.t = t.writer }]
+  [%sexp
+    { description : Info.t = t.description; writer : Protocol_writer.writer = t.writer }]
 ;;
 
 let description t = t.description
 let is_closed t = Ivar.is_full t.close_started
 
 let writer t =
-  if is_closed t || not (Writer.can_send t.writer) then Error `Closed else Ok t.writer
+  if is_closed t || not (Protocol_writer.can_send t.writer)
+  then Error `Closed
+  else Ok t.writer
 ;;
 
-let bytes_to_write t = Writer.bytes_to_write t.writer
-let bytes_written t = Writer.bytes_written t.writer
+let bytes_to_write t = Protocol_writer.bytes_to_write t.writer
+let bytes_written t = Protocol_writer.bytes_written t.writer
 let bytes_read t = Reader.bytes_read t.reader
-let flushed t = Writer.flushed t.writer
+let flushed t = Protocol_writer.flushed t.writer
 
 let handle_send_result : t -> 'a Transport.Send_result.t -> 'a =
   fun t r ->
@@ -137,32 +230,51 @@ let handle_send_result : t -> 'a Transport.Send_result.t -> 'a =
       , { reason = (r : _ Transport.Send_result.t); connection = (t : t_hum_writer) }]
 ;;
 
-let dispatch t ~response_handler ~bin_writer_query ~query =
+let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
   match writer t with
   | Error `Closed as r -> r
   | Ok writer ->
+    let query =
+      match query.metadata with
+      | Some metadata ->
+        { query with
+          metadata =
+            Some (String.prefix metadata (Byte_units.bytes_int_exn t.max_metadata_size))
+        }
+      | None -> query
+    in
     Option.iter response_handler ~f:(fun response_handler ->
-      Hashtbl.set t.open_queries ~key:query.P.Query.id ~data:response_handler);
-    Writer.send_bin_prot
-      writer
-      (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
-      (Query query)
-    |> handle_send_result t;
+      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
+    Protocol_writer.send_query writer query ~bin_writer_query |> handle_send_result t;
     Ok ()
 ;;
 
-let make_dispatch_bigstring do_send t ~tag ~version buf ~pos ~len ~response_handler =
+let make_dispatch_bigstring
+      do_send
+      ?metadata
+      t
+      ~tag
+      ~version
+      buf
+      ~pos
+      ~len
+      ~response_handler
+  =
   match writer t with
   | Error `Closed -> Error `Closed
   | Ok writer ->
     let id = P.Query_id.create () in
-    let header : Nat0.t P.Message.t =
-      Query { tag; version; id; data = Nat0.of_int_exn len }
-    in
+    let query : unit P.Query.t = { tag; version; id; metadata; data = () } in
     Option.iter response_handler ~f:(fun response_handler ->
       Hashtbl.set t.open_queries ~key:id ~data:response_handler);
     let result =
-      do_send writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len
+      Protocol_writer.send_expert_query
+        writer
+        query
+        ~buf
+        ~pos
+        ~len
+        ~send_bin_prot_and_bigstring:do_send
       |> handle_send_result t
     in
     Ok result
@@ -221,6 +333,15 @@ let handle_msg
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
+  | Query_v1 query ->
+    let instance = Set_once.get_exn t.implementations_instance [%here] in
+    let query = P.Query.of_v1 query in
+    Implementations.Instance.handle_query
+      instance
+      ~close_connection_monitor
+      ~query
+      ~read_buffer
+      ~read_buffer_pos_ref
 ;;
 
 let close_reason t ~on_close =
@@ -271,7 +392,7 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
          let%map () =
            Deferred.any_unit
              [ flushed
-             ; Writer.stopped t.writer
+             ; Protocol_writer.stopped t.writer
              ; Time_source.after
                  (Time_source.of_synchronous t.time_source)
                  streaming_responses_flush_timeout
@@ -279,7 +400,7 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
          in
          Implementations.Instance.stop instance))
     >>> fun () ->
-    Writer.close t.writer
+    Protocol_writer.close t.writer
     >>> fun () -> Reader.close t.reader >>> fun () -> Ivar.fill t.close_finished ());
   close_finished t
 ;;
@@ -333,9 +454,7 @@ let heartbeat_now t =
   else (
     match writer t with
     | Error `Closed -> ()
-    | Ok writer ->
-      Writer.send_bin_prot writer P.Message.bin_writer_nat0_t Heartbeat
-      |> handle_send_result t)
+    | Ok writer -> Protocol_writer.send_heartbeat writer |> handle_send_result t)
 ;;
 
 let default_handshake_timeout = Time_ns.Span.of_sec 30.
@@ -377,11 +496,19 @@ let schedule_heartbeats t =
   Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on
 ;;
 
-let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns =
+let run_after_handshake
+      t
+      writer
+      ~negotiated_protocol_version
+      ~implementations
+      ~connection_state
+      ~writer_monitor_exns
+  =
+  Protocol_writer.set_negotiated_protocol_version t.writer negotiated_protocol_version;
   let instance =
     Implementations.instantiate
       implementations
-      ~writer:t.writer
+      ~writer
       ~connection_description:t.description
       ~connection_close_started:(Ivar.read t.close_started)
       ~connection_state:(connection_state t)
@@ -422,11 +549,11 @@ let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exn
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
-let do_handshake t ~handshake_timeout =
-  match writer t with
-  | Error `Closed -> return (Error Handshake_error.Transport_closed)
-  | Ok writer ->
-    Writer.send_bin_prot writer Header.bin_t.writer Header.v1 |> handle_send_result t;
+let do_handshake t writer ~handshake_timeout ~header =
+  if not (Writer.can_send writer)
+  then return (Error Handshake_error.Transport_closed)
+  else (
+    Writer.send_bin_prot writer Header.bin_t.writer header |> handle_send_result t;
     (* If we use [max_connections] in the server, then this read may just hang until the
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
@@ -436,33 +563,44 @@ let do_handshake t ~handshake_timeout =
         ~run:`Now
         (fun () -> Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
-    (match%map
-       Time_source.with_timeout
-         (Time_source.of_synchronous t.time_source)
-         handshake_timeout
-         result
-     with
-     | `Timeout ->
-       (* There's a pending read, the reader is basically useless now, so we clean it
-          up. *)
-       don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
-       Error Handshake_error.Timeout
-     | `Result (Error exn) ->
-       let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
-       don't_wait_for (close t ~reason);
-       Error (Reading_header_failed (Error.of_exn exn))
-     | `Result (Ok (Error `Eof)) -> Error Eof
-     | `Result (Ok (Error `Closed)) -> Error Transport_closed
-     | `Result (Ok (Ok peer)) -> Header.negotiate ~peer)
+    match%map
+      Time_source.with_timeout
+        (Time_source.of_synchronous t.time_source)
+        handshake_timeout
+        result
+    with
+    | `Timeout ->
+      (* There's a pending read, the reader is basically useless now, so we clean it
+         up. *)
+      don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
+      Error Handshake_error.Timeout
+    | `Result (Error exn) ->
+      let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
+      don't_wait_for (close t ~reason);
+      Error (Reading_header_failed (Error.of_exn exn))
+    | `Result (Ok (Error `Eof)) -> Error Eof
+    | `Result (Ok (Error `Closed)) -> Error Transport_closed
+    | `Result (Ok (Ok peer)) -> Header.negotiate ~us:header ~peer)
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
+let default_handshake_header = Header.v2
+
+let handshake_header_override_key =
+  Univ_map.Key.create ~name:"async rpc handshake header override" [%sexp_of: Header.t]
+;;
+
+let get_handshake_header () =
+  Async_kernel_scheduler.find_local handshake_header_override_key
+  |> Option.value ~default:default_handshake_header
+;;
 
 let create
       ?implementations
       ~connection_state
       ?(handshake_timeout = default_handshake_timeout)
       ?(heartbeat_config = Heartbeat_config.create ())
+      ?(max_metadata_size = Byte_units.of_kilobytes 1.)
       ?(description = Info.of_string "<created-directly>")
       ?(time_source = Synchronous_time_source.wall_clock ())
       ({ reader; writer } : Transport.t)
@@ -477,8 +615,9 @@ let create
     ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
     ; heartbeat_callbacks = [||]
     ; last_seen_alive = Synchronous_time_source.now time_source
+    ; max_metadata_size
     ; reader
-    ; writer
+    ; writer = Protocol_writer.create_before_negotiation writer
     ; open_queries = Hashtbl.Poly.create ~size:10 ()
     ; close_started = Ivar.create ()
     ; close_finished = Ivar.create ()
@@ -491,10 +630,16 @@ let create
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
     don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
-  match%map do_handshake t ~handshake_timeout with
+  let header = get_handshake_header () in
+  match%map do_handshake t writer ~handshake_timeout ~header with
   | Ok negotiated_protocol_version ->
-    Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version;
-    run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns;
+    run_after_handshake
+      t
+      writer
+      ~negotiated_protocol_version
+      ~implementations
+      ~connection_state
+      ~writer_monitor_exns;
     Ok t
   | Error error ->
     Error (Handshake_error.to_exn ~connection_description:description error)
@@ -590,5 +735,13 @@ module Client_implementations = struct
 
   let null () =
     { connection_state = (fun _ -> ()); implementations = Implementations.null () }
+  ;;
+end
+
+module For_testing = struct
+  module Header = Header
+
+  let with_async_execution_context ~context ~f =
+    Async_kernel_scheduler.with_local handshake_header_override_key (Some context) ~f
   ;;
 end

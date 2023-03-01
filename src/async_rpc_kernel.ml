@@ -6,6 +6,10 @@ module Rpc_error = Rpc_error
 module Rpc_result = Rpc_result
 module Rpc_shapes = Rpc_shapes
 
+module Rpc_metadata :
+  module type of Rpc_metadata with module Private := Rpc_metadata.Private =
+  Rpc_metadata
+
 module Async_rpc_kernel_stable = struct
   module Rpc = Rpc.Stable
 end

@@ -26,7 +26,8 @@ val dispatch
   -> (unit, [ `Closed ]) Result.t
 
 val dispatch_bigstring
-  :  t
+  :  ?metadata:Rpc_metadata.t
+  -> t
   -> tag:Rpc_tag.t
   -> version:int
   -> Bigstring.t
@@ -36,7 +37,8 @@ val dispatch_bigstring
   -> (unit, [ `Closed ]) Result.t
 
 val schedule_dispatch_bigstring
-  :  t
+  :  ?metadata:Rpc_metadata.t
+  -> t
   -> tag:Rpc_tag.t
   -> version:int
   -> Bigstring.t
@@ -46,3 +48,14 @@ val schedule_dispatch_bigstring
   -> (unit Deferred.t, [ `Closed ]) Result.t
 
 val default_handshake_timeout : Time_ns.Span.t
+
+module For_testing : sig
+  module Header : sig
+    type t [@@deriving bin_io]
+
+    val v1 : t
+    val v2 : t
+  end
+
+  val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a
+end

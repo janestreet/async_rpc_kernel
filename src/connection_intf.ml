@@ -41,6 +41,12 @@ module type S = sig
       Rpc connection use compatible settings for timeout and send frequency. Otherwise,
       your Rpc connections might close unexpectedly.
 
+      [max_metadata_size] will limit how many bytes of metadata this peer can send along
+      with each query. It defaults to 1k. User-provided metadata exceeding that size will
+      be truncated.
+      WARNING: setting this value too high allows this connection to send large amounts of
+      data to the callee, unnoticed, which can severely degrade performance.
+
       [description] can be used to give some extra information about the connection, which
       will then show up in error messages and the connection's sexp. If you have lots of
       connections in your program, this can be useful for distinguishing them.
@@ -52,6 +58,7 @@ module type S = sig
     -> connection_state:(t -> 's)
     -> ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
+    -> ?max_metadata_size:Byte_units.t
     -> ?description:Info.t
     -> ?time_source:Synchronous_time_source.t
     -> Transport.t

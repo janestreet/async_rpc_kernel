@@ -87,6 +87,9 @@ module Menu : sig
   (** Requests an rpc version menu from an rpc connection. *)
   val request : Connection.t -> t Or_error.t Deferred.t
 
+  (** Like [request] but returns an Rpc_result.t rather than an Or_error.t *)
+  val request' : Connection.t -> t Rpc_result.t Deferred.t
+
   module With_shapes : sig
     (** A directory of supported rpc names, versions, and query/response shapes. *)
     type t = (Description.t * Rpc_shapes.t) list

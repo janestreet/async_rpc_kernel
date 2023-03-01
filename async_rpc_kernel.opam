@@ -17,6 +17,7 @@ depends: [
   "protocol_version_header"
   "dune"                    {>= "2.0.0"}
 ]
+available: arch != "arm32" & arch != "x86_32"
 synopsis: "Platform-independent core of Async RPC library"
 description: "
 Part of Jane Street's Core library

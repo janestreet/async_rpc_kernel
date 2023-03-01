@@ -513,7 +513,7 @@ module Instance = struct
         (fun () -> Direct_stream_writer.start writer)
   ;;
 
-  let apply_implementation
+  let apply_implementation'
         t
         implementation
         ~(query : Nat0.t P.Query.t)
@@ -743,6 +743,26 @@ module Instance = struct
       Continue
   ;;
 
+  let apply_implementation
+        t
+        implementation
+        ~(query : Nat0.t P.Query.t)
+        ~read_buffer
+        ~read_buffer_pos_ref
+        ~close_connection_monitor
+        ~on_exception
+    : _ Transport.Handler_result.t
+    =
+    apply_implementation'
+      t
+      implementation
+      ~query
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~close_connection_monitor
+      ~on_exception
+  ;;
+
   let flush (T t) =
     assert (not t.stopped);
     let producers_flushed =
@@ -817,7 +837,9 @@ module Instance = struct
        | None ->
          (match on_unknown_rpc with
           | `Expert impl ->
-            let { P.Query.tag; version; id; data = len } = query in
+            let { P.Query.tag; version; id; metadata = (_ : string option); data = len } =
+              query
+            in
             let d =
               let responder = Responder.create id t.writer in
               impl
@@ -838,7 +860,7 @@ module Instance = struct
 
   let handle_query
         (T t)
-        ~query
+        ~(query : Nat0.t P.Query.t)
         ~read_buffer
         ~read_buffer_pos_ref
         ~close_connection_monitor
@@ -846,12 +868,13 @@ module Instance = struct
     if t.stopped || Writer.is_closed t.writer
     then Transport.Handler_result.Stop (Ok ())
     else
-      handle_query_internal
-        t
-        ~query
-        ~read_buffer
-        ~read_buffer_pos_ref
-        ~close_connection_monitor
+      Rpc_metadata.Private.with_metadata query.metadata ~f:(fun () ->
+        handle_query_internal
+          t
+          ~query
+          ~read_buffer
+          ~read_buffer_pos_ref
+          ~close_connection_monitor)
   ;;
 end
 

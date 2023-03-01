@@ -689,10 +689,13 @@ module Menu = struct
     Hashtbl.map ~f:Int.Set.of_list (String.Table.of_alist_multi entries)
   ;;
 
-  let request conn =
-    let%map result = Rpc.dispatch Current_version.rpc conn () in
+  let aux_request dispatch conn =
+    let%map result = dispatch Current_version.rpc conn () in
     Result.map result ~f:of_entries
   ;;
+
+  let request conn = aux_request Rpc.dispatch conn
+  let request' conn = aux_request Rpc.dispatch' conn
 
   let create descriptions =
     List.map descriptions ~f:(fun { Description.name; version } -> name, version)
