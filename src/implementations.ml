@@ -75,7 +75,8 @@ module Instance = struct
     ; connection_state : 'a
     ; connection_description : Info.t
     ; connection_close_started : Info.t Deferred.t
-    ; mutable last_dispatched_implementation :
+    ; mutable
+      last_dispatched_implementation :
         (Description.t * ('a Implementation.t[@sexp.opaque])) option
     (* [packed_self] is here so we can essentially pack an unpacked instance without doing
        any additional allocation. *)
@@ -428,6 +429,13 @@ module Instance = struct
     | Error _ | Ok _ -> ()
   ;;
 
+  let authorization_failure_result error ~rpc_kind =
+    let exn = Error.to_exn error in
+    Rpc_result.uncaught_exn
+      exn
+      ~location:[%string "server-side %{rpc_kind} authorization"]
+  ;;
+
   let apply_streaming_implementation
         t
         { Implementation.F.bin_query_reader; bin_init_writer; bin_update_writer; impl }
@@ -466,25 +474,37 @@ module Instance = struct
         `Direct (f, writer)
     in
     let run_impl impl split_ok handle_ok =
-      Rpc_result.try_with
-        ?on_background_exception:on_exception.callback
-        (fun () -> defer_result (data >>|~ impl))
-        ~location:"server-side pipe_rpc computation"
-      >>> function
-      | Error (Uncaught_exn sexp as err) ->
-        Hashtbl.remove t.open_streaming_responses id;
-        write_response t id bin_init_writer (Error err);
-        On_exception.handle_exn on_exception ~close_connection_monitor (Exn.create_s sexp)
-      | Error err ->
-        Hashtbl.remove t.open_streaming_responses id;
-        write_response t id bin_init_writer (Error err)
-      | Ok (Error err) ->
-        Hashtbl.remove t.open_streaming_responses id;
-        write_response t id bin_init_writer (Ok err)
-      | Ok (Ok ok) ->
-        let initial, rest = split_ok ok in
-        write_response t id bin_init_writer (Ok initial);
-        handle_ok rest
+      let result =
+        Rpc_result.try_with
+          ?on_background_exception:on_exception.callback
+          (fun () -> defer_result (data >>|~ impl))
+          ~location:"server-side pipe_rpc computation"
+      in
+      Eager_deferred.upon result (function
+        | Error (Rpc_error.Uncaught_exn sexp as err) ->
+          Hashtbl.remove t.open_streaming_responses id;
+          write_response t id bin_init_writer (Error err);
+          On_exception.handle_exn
+            on_exception
+            ~close_connection_monitor
+            (Exn.create_s sexp)
+        | Error err ->
+          Hashtbl.remove t.open_streaming_responses id;
+          write_response t id bin_init_writer (Error err)
+        | Ok (Or_not_authorized.Not_authorized error) ->
+          Hashtbl.remove t.open_streaming_responses id;
+          write_response
+            t
+            id
+            bin_init_writer
+            (authorization_failure_result error ~rpc_kind:"pipe_rpc")
+        | Ok (Authorized (Error error)) ->
+          Hashtbl.remove t.open_streaming_responses id;
+          write_response t id bin_init_writer (Ok error)
+        | Ok (Authorized (Ok ok)) ->
+          let initial, rest = split_ok ok in
+          write_response t id bin_init_writer (Ok initial);
+          handle_ok rest)
     in
     match impl_with_state with
     | `Pipe f ->
@@ -495,9 +515,7 @@ module Instance = struct
            Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
            don't_wait_for
              (Writer.transfer t.writer pipe_r (fun data ->
-                let bin_writer_message =
-                  Cached_bin_writer.prep_write stream_writer data
-                in
+                let bin_writer_message = Cached_bin_writer.prep_write stream_writer data in
                 write_message instance ~id bin_writer_message (stream_writer, data)));
            Pipe.closed pipe_r
            >>> fun () ->
@@ -538,7 +556,12 @@ module Instance = struct
        | Error _ as err -> Stop err
        | Ok q ->
          (try
-            f t.connection_state q;
+            (* We don't close connections on unauthorized RPCs. Since there is no way to
+               communicate failure back to the sender in one-way rpcs, we do nothing. The
+               deferred (and any deferred exceptions) are dropped here as a consequence of
+               [lift_deferred] existing for one-way rpcs. We use [Eager_deferred] so in
+               the non-blocking cases this will still run synchronously. *)
+            let (_ : _ Or_not_authorized.t Deferred.t) = f t.connection_state q in
             Continue
           with
           | exn ->
@@ -553,7 +576,9 @@ module Instance = struct
     | Implementation.F.One_way_expert f ->
       (try
          let len = (query.data :> int) in
-         f t.connection_state read_buffer ~pos:!read_buffer_pos_ref ~len;
+         let (_ : _ Or_not_authorized.t Deferred.t) =
+           f t.connection_state read_buffer ~pos:!read_buffer_pos_ref ~len
+         in
          read_buffer_pos_ref := !read_buffer_pos_ref + len;
          Continue
        with
@@ -575,11 +600,15 @@ module Instance = struct
           ~len:query.data
           ~location:"server-side rpc query un-bin-io'ing"
       in
+      let or_not_authorized_to_rpc_result = function
+        | Or_not_authorized.Authorized result -> Ok result
+        | Not_authorized error -> authorization_failure_result error ~rpc_kind:"rpc"
+      in
       (match result_mode with
        | Implementation.F.Blocking ->
          (try
-            query_contents
-            >>|~ f t.connection_state
+            Result.bind query_contents ~f:(fun query ->
+              f t.connection_state query |> or_not_authorized_to_rpc_result)
             |> write_response t id bin_response_writer
           with
           | exn ->
@@ -608,7 +637,13 @@ module Instance = struct
              ?on_background_exception:on_exception.callback
              ~run:`Now
              ~location:"server-side rpc computation"
-             (fun () -> defer_result (query_contents >>|~ f t.connection_state))
+             (fun () ->
+                match query_contents with
+                | Error err -> Deferred.return (Error err)
+                | Ok query ->
+                  Eager_deferred.map
+                    (f t.connection_state query)
+                    ~f:or_not_authorized_to_rpc_result)
          in
          (* In the common case that the implementation returns a value immediately, we will
             write the response immediately as well (this is also why the above [try_with]
@@ -645,10 +680,10 @@ module Instance = struct
           | Implementation.F.Deferred -> result
           | Implementation.F.Blocking -> Deferred.return result)
       in
-      let handle_exn ~is_uncaught_exn exn =
-        let result =
-          Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
-        in
+      let computation_failure_result exn =
+        Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
+      in
+      let handle_exn result =
         let result =
           if responder.responded
           then result
@@ -656,8 +691,6 @@ module Instance = struct
             write_response t id bin_writer_unit result;
             Ok ())
         in
-        if is_uncaught_exn
-        then On_exception.handle_exn on_exception ~close_connection_monitor exn;
         result
       in
       let check_responded () =
@@ -665,13 +698,12 @@ module Instance = struct
         then Ok ()
         else
           handle_exn
-            ~is_uncaught_exn:false
-            (Failure "Expert implementation did not reply")
+            (computation_failure_result (Failure "Expert implementation did not reply"))
       in
       let d =
         let open Eager_deferred.Let_syntax in
         match%map d with
-        | Ok result ->
+        | Ok (Authorized result) ->
           let d =
             match result with
             | Replied -> Deferred.unit
@@ -689,7 +721,12 @@ module Instance = struct
                    ~connection_close_started:t.connection_close_started
               |> ok_exn);
             Ok ())
-        | Error exn -> handle_exn ~is_uncaught_exn:true exn
+        | Ok (Not_authorized error) ->
+          handle_exn (authorization_failure_result error ~rpc_kind:"rpc expert")
+        | Error exn ->
+          let result = handle_exn (computation_failure_result exn) in
+          On_exception.handle_exn on_exception ~close_connection_monitor exn;
+          result
       in
       (match Deferred.peek d with
        | None ->
@@ -893,11 +930,7 @@ let create ~implementations:i's ~on_unknown_rpc =
     | `Duplicate -> Hash_set.add dups description);
   if not (Hash_set.is_empty dups)
   then Error (`Duplicate_implementations (Hash_set.to_list dups))
-  else
-    Ok
-      { implementations
-      ; on_unknown_rpc = (on_unknown_rpc :> _ on_unknown_rpc_with_expert)
-      }
+  else Ok { implementations; on_unknown_rpc :> _ on_unknown_rpc_with_expert }
 ;;
 
 let instantiate

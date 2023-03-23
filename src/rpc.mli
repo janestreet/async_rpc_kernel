@@ -74,10 +74,26 @@ module Implementation : sig
   val shapes : _ t -> Rpc_shapes.t
 
   (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a
-      ['b t] context.  We can do this as long as we can map our state into the state
-      expected by the original implementer. *)
+      ['b t] context. We can do this as long as we can map our state into the state
+      expected by the original implementer.
+
+      Note [f] is called on every RPC rather than once on the initial connection state. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
+  (** Similar to [lift], but useful if you want to do asynchronous work to map connection
+      state. Like [lift], [f] will be called on every RPC. This can make RPC
+      implementations less efficient if they were previously relying on functions like
+      [Rpc.implement'] to avoid extra async work to send responses. This can also allow
+      blocking implementations to run in a different order from the order that queries
+      arrive on a connection.
+
+      Additionally, async exceptions raised by [One_way] RPCs do not currently respect
+      [on_exception] and will unconditionally close the connection. [lift_deferred] can
+      turn synchronous exceptions in [One_way] implementations into asynchronous ones,
+      triggering this behaviour. *)
+  val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
+
+  val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
   val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
 end
 
@@ -90,6 +106,7 @@ module Implementations : sig
   (** a server that can handle no queries *)
   val null : unit -> 'connection_state t
 
+  (** Calls [Implementation.lift] on all implementations in [t]. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
   type 'connection_state on_unknown_rpc =
@@ -459,9 +476,10 @@ module Pipe_rpc : sig
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
-  (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc]
-      query. *)
+  (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] or
+      {!State_rpc} query. *)
   module Direct_stream_writer : sig
+
     type 'a t
 
     (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
@@ -688,11 +706,20 @@ module State_rpc : sig
   val bin_error : (_, _, _, 'error) t -> 'error Bin_prot.Type_class.t
 
   val implement
-    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
         -> ('state * 'update Pipe.Reader.t, 'error) Result.t Deferred.t)
+    -> 'connection_state Implementation.t
+
+  val implement_direct
+    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    -> ('query, 'state, 'update, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> 'update Pipe_rpc.Direct_stream_writer.t
+        -> ('state, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
   val dispatch

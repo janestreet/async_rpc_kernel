@@ -188,8 +188,7 @@ module Callee_converts = struct
               log_version version;
               match Result.try_with (fun () -> Version_i.model_of_query q) with
               | Error exn ->
-                Error.raise
-                  (failed_conversion (`Query, `Rpc name, `Version version, exn))
+                Error.raise (failed_conversion (`Query, `Rpc name, `Version version, exn))
               | Ok q ->
                 let%map r = f s ~version q in
                 (match Result.try_with (fun () -> Version_i.response_of_model r) with
@@ -919,8 +918,7 @@ module Caller_converts = struct
                 match Result.try_with (fun () -> Version_i.model_of_response mq r) with
                 | Ok r -> Ok r
                 | Error exn ->
-                  Error
-                    (failed_conversion (`Response, `Rpc name, `Version version, exn)))
+                  Error (failed_conversion (`Response, `Rpc name, `Version version, exn)))
           in
           match Hashtbl.find registry version with
           | None -> Hashtbl.set registry ~key:version ~data:(dispatch, Any.Rpc rpc)

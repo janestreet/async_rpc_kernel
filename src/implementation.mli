@@ -24,20 +24,20 @@ end
 
 module F : sig
   type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
-    | Blocking : ('a, 'a) result_mode
-    | Deferred : ('a, 'a Deferred.t) result_mode
+    | Blocking : ('a, 'a Or_not_authorized.t) result_mode
+    | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
 
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
     ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
-         -> ('init * 'update Pipe.Reader.t, 'init) Result.t Deferred.t)
+         -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t Deferred.t)
     | Direct of
         ('connection_state
          -> 'query
          -> 'update Implementation_types.Direct_stream_writer.t
-         -> ('init, 'init) Result.t Deferred.t)
+         -> ('init, 'init) Result.t Or_not_authorized.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
     ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
@@ -50,10 +50,15 @@ module F : sig
 
   type 'connection_state t = 'connection_state F.t =
     | One_way :
-        'msg Bin_prot.Type_class.reader * ('connection_state -> 'msg -> unit)
+        'msg Bin_prot.Type_class.reader
+        * ('connection_state -> 'msg -> unit Or_not_authorized.t Deferred.t)
         -> 'connection_state t
     | One_way_expert :
-        ('connection_state -> Bigstring.t -> pos:int -> len:int -> unit)
+        ('connection_state
+         -> Bigstring.t
+         -> pos:int
+         -> len:int
+         -> unit Or_not_authorized.t Deferred.t)
         -> 'connection_state t
     | Rpc :
         'query Bin_prot.Type_class.reader
@@ -74,7 +79,8 @@ module F : sig
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
 
-  val lift : 'a t -> f:('b -> 'a) -> 'b t
+  val lift : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
+  val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 end
 
 type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
@@ -89,4 +95,6 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
 val description : _ t -> Description.t
 val shapes : _ t -> Rpc_shapes.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
+val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
+val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
 val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
