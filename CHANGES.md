@@ -1,3 +1,14 @@
+## Release v0.16.0
+
+- Incremented the protocol version of `Async_rpc`
+- Dispatched RPCs may now have an associated `Rpc_metadata.t` with general information about the dispatch, separate from the query.
+- `Implementations` now supports the concept of describing the Rpcs via an `Rpc_shapes.t` consisting of `Bin_prot.Shape.t`s
+- Authorization is now exposed as a first-class concept in `Async_rpc`
+- Added `lift_deferred`, a version of `Implementations.lift` allowing asynchronous work
+- Add support for `Direct_stream_writer` to `State_rpc`
+
+## Old pre-v0.15 changelogs (very likely stale and incomplete)
+
 ## v0.10
 
 - Exposed function `Rpc.dispatch'`, which is like `dispatch` but returns an
