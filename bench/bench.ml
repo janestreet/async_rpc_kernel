@@ -118,10 +118,7 @@ let () =
   Unix.close devnull
 ;;
 
-(* [stop_inlining] makes sure the compiler knows nothing about [data] *)
-external stop_inlining : 'a -> 'a = "async_rpc_kernel_bench_identity"
-
-let data = stop_inlining (42, 0x1234_5678)
+let data = Base.Sys.opaque_identity (42, 0x1234_5678)
 let bin_writer_int_int = [%bin_writer: int * int]
 let buf = Bigstring.create 8192
 
@@ -141,7 +138,7 @@ let%bench "direct write expert" =
     = `Ok)
 ;;
 
-let big_data = stop_inlining (List.init 1000 ~f:(fun x -> x * 1000))
+let big_data = Base.Sys.opaque_identity (List.init 1000 ~f:(fun x -> x * 1000))
 let bin_writer_int_list = [%bin_writer: int list]
 
 let%bench "direct write (big)" =
@@ -178,7 +175,19 @@ let%bench_fun ("direct write to group (big)" [@indexed n = [ 1; 10; 100 ]]) =
   fun () -> Rpc.Pipe_rpc.Direct_stream_writer.Group.write_without_pushback group big_data
 ;;
 
-let server_handle_connection transport implementations =
+let add_tracing_subscriber connection =
+  let _subscriber =
+    Bus.subscribe_exn
+      (Async_rpc_kernel.Async_rpc_kernel_private.Connection.events connection)
+      [%here]
+      ~f:(fun event ->
+        let (_ : _) = Base.Sys.opaque_identity event in
+        ())
+  in
+  ()
+;;
+
+let server_handle_connection ?(with_tracing_subscriber = false) transport implementations =
   match%bind
     Async_rpc_kernel.Rpc.Connection.create
       ~implementations
@@ -186,6 +195,7 @@ let server_handle_connection transport implementations =
       transport
   with
   | Ok connection ->
+    if with_tracing_subscriber then add_tracing_subscriber connection;
     let%map () = Async_rpc_kernel.Rpc.Connection.close_finished connection in
     ()
   | Error _handshake_error ->
@@ -193,7 +203,7 @@ let server_handle_connection transport implementations =
     ()
 ;;
 
-let create_connection implementations =
+let create_connection ?with_tracing_subscriber implementations =
   let to_server_reader, to_server_writer = Pipe.create () in
   let to_client_reader, to_client_writer = Pipe.create () in
   let one_transport =
@@ -201,7 +211,8 @@ let create_connection implementations =
   in
   let client_end = one_transport to_client_reader to_server_writer in
   let server_end = one_transport to_server_reader to_client_writer in
-  don't_wait_for (server_handle_connection server_end implementations);
+  don't_wait_for
+    (server_handle_connection server_end implementations ?with_tracing_subscriber);
   let%map client_conn =
     Async_rpc_kernel.Rpc.Connection.create
       ?implementations:None
@@ -226,7 +237,7 @@ let make_with_pipe rpc ~write =
 let rpc_pipe = basic_rpc "test-pipe"
 let rpc_pipe_big = big_rpc "test-pipe-big"
 
-let pipe_setup_conn rpc ~message_data ~num_messages =
+let pipe_setup_conn ?(with_tracing_subscriber = false) rpc ~message_data ~num_messages =
   Thread_safe.block_on_async_exn (fun () ->
     let impl =
       make_with_pipe rpc ~write:(fun pipe_writer ->
@@ -237,7 +248,8 @@ let pipe_setup_conn rpc ~message_data ~num_messages =
     let implementations =
       Rpc.Implementations.create_exn ~implementations:[ impl ] ~on_unknown_rpc:`Raise
     in
-    let%map client_conn = create_connection implementations in
+    let%map client_conn = create_connection implementations ~with_tracing_subscriber in
+    if with_tracing_subscriber then add_tracing_subscriber client_conn;
     client_conn)
 ;;
 
@@ -253,8 +265,27 @@ let read_messages (type a) (rpc : (unit, a, unit) Rpc.Pipe_rpc.t) connection ~nu
     ())
 ;;
 
-let%bench_fun ("end-to-end Pipe write" [@indexed num_messages = [ 5; 500; 50_000 ]]) =
+let%bench_fun ("end-to-end Pipe write (small)" [@indexed
+                 num_messages = [ 5; 500; 50_000 ]])
+  =
   let client_conn = pipe_setup_conn rpc_pipe ~num_messages ~message_data:data in
+  fun () -> read_messages rpc_pipe client_conn ~num_messages
+;;
+
+let%bench_fun ("end-to-end Pipe write with tracing subscriber (small)" [@indexed
+                 num_messages
+                 = [ 5
+                   ; 500
+                   ; 50_000
+                   ]])
+  =
+  let client_conn =
+    pipe_setup_conn
+      rpc_pipe
+      ~with_tracing_subscriber:true
+      ~num_messages
+      ~message_data:data
+  in
   fun () -> read_messages rpc_pipe client_conn ~num_messages
 ;;
 

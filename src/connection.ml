@@ -59,7 +59,7 @@ module Protocol_writer : sig
     :  t
     -> 'query P.Query.t
     -> bin_writer_query:'query Bin_prot.Type_class.writer
-    -> unit Transport.Send_result.t
+    -> (unit Transport.Send_result.t[@local])
 
   val send_expert_query
     :  t
@@ -74,10 +74,10 @@ module Protocol_writer : sig
           -> buf:Bigstring.t
           -> pos:int
           -> len:int
-          -> 'result Transport.Send_result.t)
-    -> 'result Transport.Send_result.t
+          -> ('result Transport.Send_result.t[@local]))
+    -> ('result Transport.Send_result.t[@local])
 
-  val send_heartbeat : t -> unit Transport.Send_result.t
+  val send_heartbeat : t -> (unit Transport.Send_result.t[@local])
   val can_send : t -> bool
   val bytes_to_write : t -> int
   val bytes_written : t -> Int63.t
@@ -109,19 +109,28 @@ end = struct
 
   let send_query t query ~bin_writer_query =
     let message = query_message t query in
-    Writer.send_bin_prot
-      t.writer
-      (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_query))
-      message
+    
+      (Writer.send_bin_prot
+         t.writer
+         (P.Message.bin_writer_needs_length
+            (Writer_with_length.of_writer bin_writer_query))
+         message)
   ;;
 
   let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
     let header = query_message t { query with data = Nat0.of_int_exn len } in
-    send_bin_prot_and_bigstring t.writer P.Message.bin_writer_nat0_t header ~buf ~pos ~len
+    
+      (send_bin_prot_and_bigstring
+         t.writer
+         P.Message.bin_writer_nat0_t
+         header
+         ~buf
+         ~pos
+         ~len)
   ;;
 
   let send_heartbeat t =
-    Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat
+     (Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat)
   ;;
 
   let of_writer f t = f t.writer
@@ -192,6 +201,9 @@ type t =
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
   ; negotiated_protocol_version : int Set_once.t
+  ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
+  (* responses to queries are written by the implementations instance. Other events are
+     written by this module. *)
   }
 [@@deriving sexp_of]
 
@@ -213,21 +225,64 @@ let bytes_to_write t = Protocol_writer.bytes_to_write t.writer
 let bytes_written t = Protocol_writer.bytes_written t.writer
 let bytes_read t = Reader.bytes_read t.reader
 let flushed t = Protocol_writer.flushed t.writer
+let events t = (t.events :> _ Bus.Read_only.t)
 
-let handle_send_result : t -> 'a Transport.Send_result.t -> 'a =
-  fun t r ->
+let write_event t (event [@ocaml.local]) =
+  if not (Bus.is_closed t.events) then Bus.write_local t.events event
+;;
+
+let handle_send_result :
+  'a.
+  t
+  -> ('a Transport.Send_result.t[@local])
+  -> rpc:(Description.t[@ocaml.local])
+  -> id:(P.Query_id.t[@ocaml.local])
+  -> 'a
+  =
+  fun t r ~rpc ~id ->
+  let id = (id :> Int63.t) in
   match r with
-  | Sent x -> x
+  | Sent { result = x; bytes } ->
+    write_event t { event = Sent Query; rpc = Some rpc; id; payload_bytes = bytes };
+    x
   | Closed ->
+    write_event
+      t
+      { event = Failed_to_send (Query, Closed); rpc = Some rpc; id; payload_bytes = 0 };
     (* All of the places we call [handle_send_result] check whether [t] is closed
        (usually via the [writer] function above). This checks whether [t.writer] is
        closed, which should not happen unless [t] is closed. *)
+    failwiths ~here:[%here] "RPC connection got closed writer" t sexp_of_t_hum_writer
+  | Message_too_big err as r ->
+    write_event
+      t
+      { event = Failed_to_send (Query, Too_large)
+      ; rpc = Some rpc
+      ; id
+      ; payload_bytes = err.size
+      };
+    let r = [%globalize: unit Transport.Send_result.t] r in
+    raise_s
+      [%sexp
+        "Message cannot be sent"
+      , { reason = (r : _ Transport.Send_result.t); connection = (t : t_hum_writer) }]
+;;
+
+(* Used for heartbeats and protocol negotiation *)
+let handle_special_send_result t ((result : unit Transport.Send_result.t) [@local]) =
+  match result with
+  | Sent { result = (); bytes = (_ : int) } -> ()
+  | Closed ->
     failwiths ~here:[%here] "RPC connection got closed writer" t sexp_of_t_hum_writer
   | Message_too_big _ ->
     raise_s
       [%sexp
         "Message cannot be sent"
-      , { reason = (r : _ Transport.Send_result.t); connection = (t : t_hum_writer) }]
+      , { reason =
+            ([%globalize: unit Transport.Send_result.t] result
+             : unit Transport.Send_result.t)
+        ; connection = (t : t_hum_writer)
+        }]
 ;;
 
 let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
@@ -245,7 +300,11 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
     in
     Option.iter response_handler ~f:(fun response_handler ->
       Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
-    Protocol_writer.send_query writer query ~bin_writer_query |> handle_send_result t;
+    Protocol_writer.send_query writer query ~bin_writer_query
+    |> handle_send_result
+         t
+         ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+         ~id:query.id;
     Ok ()
 ;;
 
@@ -275,7 +334,7 @@ let make_dispatch_bigstring
         ~pos
         ~len
         ~send_bin_prot_and_bigstring:do_send
-      |> handle_send_result t
+      |> handle_send_result t ~rpc:{ name = P.Rpc_tag.to_string tag; version } ~id
     in
     Ok result
 ;;
@@ -286,19 +345,47 @@ let schedule_dispatch_bigstring =
   make_dispatch_bigstring Writer.send_bin_prot_and_bigstring_non_copying
 ;;
 
-let handle_response t (response : _ P.Response.t) ~read_buffer ~read_buffer_pos_ref
+let handle_response
+      t
+      (response : Nat0.t P.Response.t)
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~protocol_message_len
   : _ Transport.Handler_result.t
   =
   match Hashtbl.find t.open_queries response.id with
   | None -> Stop (Error (Rpc_error.Unknown_query_id response.id))
   | Some response_handler ->
+    let payload_bytes =
+      protocol_message_len
+      +
+      match response.data with
+      | Ok x -> (x :> int)
+      | Error _ -> 0
+    in
+    let response_event kind ~payload_bytes =
+      write_event
+        t
+        { Tracing_event.event = Received (Response kind)
+        ; rpc = None
+        ; id = (response.id :> Int63.t)
+        ; payload_bytes
+        };
+      ()
+    in
     (match response_handler response ~read_buffer ~read_buffer_pos_ref with
-     | `keep -> Continue
-     | `wait wait -> Wait wait
+     | `keep ->
+       response_event Partial_response ~payload_bytes;
+       Continue
+     | `wait wait ->
+       response_event Partial_response ~payload_bytes;
+       Wait wait
      | `remove_and_wait wait ->
+       response_event Response_finished ~payload_bytes;
        Hashtbl.remove t.open_queries response.id;
        Wait wait
      | `remove removal_circumstances ->
+       response_event Response_finished ~payload_bytes;
        Hashtbl.remove t.open_queries response.id;
        (match removal_circumstances with
         | Ok () -> Continue
@@ -318,15 +405,24 @@ let handle_msg
       ~read_buffer
       ~read_buffer_pos_ref
       ~close_connection_monitor
+      ~protocol_message_len
   : _ Transport.Handler_result.t
   =
   match msg with
   | Heartbeat ->
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
     Continue
-  | Response response -> handle_response t response ~read_buffer ~read_buffer_pos_ref
+  | Response response ->
+    handle_response t response ~read_buffer ~read_buffer_pos_ref ~protocol_message_len
   | Query query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
+    write_event
+      t
+      { event = Received Query
+      ; rpc = Some { name = P.Rpc_tag.to_string query.tag; version = query.version }
+      ; id = (query.id :> Int63.t)
+      ; payload_bytes = protocol_message_len + (query.data :> int)
+      };
     Implementations.Instance.handle_query
       instance
       ~close_connection_monitor
@@ -335,6 +431,13 @@ let handle_msg
       ~read_buffer_pos_ref
   | Query_v1 query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
+    write_event
+      t
+      { event = Received Query
+      ; rpc = Some { name = P.Rpc_tag.to_string query.tag; version = query.version }
+      ; id = (query.id :> Int63.t)
+      ; payload_bytes = protocol_message_len + (query.data :> int)
+      };
     let query = P.Query.of_v1 query in
     Implementations.Instance.handle_query
       instance
@@ -379,7 +482,7 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
   if not (is_closed t)
   then (
     abort_heartbeating t;
-    Ivar.fill t.close_started reason;
+    Ivar.fill_exn t.close_started reason;
     (match Set_once.get t.implementations_instance with
      | None -> Deferred.unit
      | Some instance ->
@@ -401,7 +504,7 @@ let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reas
          Implementations.Instance.stop instance))
     >>> fun () ->
     Protocol_writer.close t.writer
-    >>> fun () -> Reader.close t.reader >>> fun () -> Ivar.fill t.close_finished ());
+    >>> fun () -> Reader.close t.reader >>> fun () -> Ivar.fill_exn t.close_finished ());
   close_finished t
 ;;
 
@@ -416,6 +519,7 @@ let on_message t ~close_connection_monitor =
         ~read_buffer:buf
         ~read_buffer_pos_ref:pos_ref
         ~close_connection_monitor
+        ~protocol_message_len:(!pos_ref - pos)
     with
     | Continue -> Continue
     | Wait _ as res -> res
@@ -454,7 +558,9 @@ let heartbeat_now t =
   else (
     match writer t with
     | Error `Closed -> ()
-    | Ok writer -> Protocol_writer.send_heartbeat writer |> handle_send_result t)
+    | Ok writer ->
+      Protocol_writer.send_heartbeat writer |> handle_special_send_result t;
+      ())
 ;;
 
 let default_handshake_timeout = Time_ns.Span.of_sec 30.
@@ -509,6 +615,7 @@ let run_after_handshake
     Implementations.instantiate
       implementations
       ~writer
+      ~events:t.events
       ~connection_description:t.description
       ~connection_close_started:(Ivar.read t.close_started)
       ~connection_state:(connection_state t)
@@ -553,7 +660,7 @@ let do_handshake t writer ~handshake_timeout ~header =
   if not (Writer.can_send writer)
   then return (Error Handshake_error.Transport_closed)
   else (
-    Writer.send_bin_prot writer Header.bin_t.writer header |> handle_send_result t;
+    Writer.send_bin_prot writer Header.bin_t.writer header |> handle_special_send_result t;
     (* If we use [max_connections] in the server, then this read may just hang until the
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
@@ -625,11 +732,18 @@ let create
     ; time_source
     ; heartbeat_event = Set_once.create ()
     ; negotiated_protocol_version = Set_once.create ()
+    ; events =
+        Bus.create_exn
+          [%here]
+          Arity1_local
+          ~on_subscription_after_first_write:Allow
+          ~on_callback_raise:Error.raise
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
     don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
+  upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
   let header = get_handshake_header () in
   match%map do_handshake t writer ~handshake_timeout ~header with
   | Ok negotiated_protocol_version ->

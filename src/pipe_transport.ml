@@ -199,10 +199,10 @@ module Pipe_writer (Data : DATA) = struct
      transport. *)
   let flushed (_ : t) = Deferred.unit
   let ready_to_write = flushed
-  let sent_result x : _ Send_result.t = Sent x
+  let sent_result x ~bytes : _ Send_result.t =  (Sent { result = x; bytes })
 
-  let check_closed (t : t) f =
-    if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed
+  let check_closed (t : t) (f [@local]) =
+     (if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed)
   ;;
 
   let incr_bytes_written (t : t) num_bytes =
@@ -210,12 +210,15 @@ module Pipe_writer (Data : DATA) = struct
   ;;
 
   let send_bin_prot t writer x =
-    check_closed t (fun () ->
-      let buf = Bin_prot.Utils.bin_dump ~header:true writer x in
-      let data = Data.of_bigstring buf in
-      incr_bytes_written t (Data.length data);
-      Pipe.write_without_pushback t.pipe data;
-      sent_result ())
+    
+      (check_closed t (fun () ->
+         
+           (let buf = Bin_prot.Utils.bin_dump ~header:true writer x in
+            let data = Data.of_bigstring buf in
+            let len = Data.length data in
+            incr_bytes_written t len;
+            Pipe.write_without_pushback t.pipe data;
+            sent_result () ~bytes:(len - Header.length))))
   ;;
 
   let send_bin_prot_and_bigstring
@@ -226,23 +229,27 @@ module Pipe_writer (Data : DATA) = struct
         ~pos
         ~len:payload_size
     =
-    check_closed t (fun () ->
-      (* Write the size header manually and concatenate the two *)
-      let data_size = writer.size x in
-      let data = Bigstring.create (data_size + Header.length + payload_size) in
-      Header.unsafe_set_payload_length data ~pos:0 (data_size + payload_size);
-      let dst_pos = writer.write data ~pos:Header.length x in
-      Bigstring.blit ~src:buf ~src_pos:pos ~dst:data ~dst_pos ~len:payload_size;
-      let data = Data.of_bigstring data in
-      incr_bytes_written t (Data.length data);
-      Pipe.write_without_pushback t.pipe data;
-      sent_result ())
+    
+      (check_closed t (fun () ->
+         
+           ((* Write the size header manually and concatenate the two *)
+             let data_size = writer.size x in
+             let data = Bigstring.create (data_size + Header.length + payload_size) in
+             Header.unsafe_set_payload_length data ~pos:0 (data_size + payload_size);
+             let dst_pos = writer.write data ~pos:Header.length x in
+             Bigstring.blit ~src:buf ~src_pos:pos ~dst:data ~dst_pos ~len:payload_size;
+             let data = Data.of_bigstring data in
+             let len = Data.length data in
+             incr_bytes_written t len;
+             Pipe.write_without_pushback t.pipe data;
+             sent_result () ~bytes:(len - Header.length))))
   ;;
 
   let send_bin_prot_and_bigstring_non_copying t writer x ~buf ~pos ~len =
-    match send_bin_prot_and_bigstring t writer x ~buf ~pos ~len with
-    | Sent () -> sent_result Deferred.unit
-    | (Closed | Message_too_big _) as r -> r
+    
+      (match send_bin_prot_and_bigstring t writer x ~buf ~pos ~len with
+       | Sent { result = (); bytes } -> sent_result Deferred.unit ~bytes
+       | (Closed | Message_too_big _) as r -> r)
   ;;
 end
 

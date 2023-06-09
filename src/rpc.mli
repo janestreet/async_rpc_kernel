@@ -22,7 +22,7 @@ open! Async_kernel
 
 module Description : sig
   type t = Description.t =
-    { name : string
+    { name : string [@global]
     ; version : int
     }
   [@@deriving compare, equal, hash, sexp_of]
@@ -197,7 +197,7 @@ module Implementations : sig
 end
 
 module Transport = Transport
-module Connection : Connection_intf.S
+module Connection : Connection_intf.S with type t = Connection.t
 
 module Rpc : sig
   type ('query, 'response) t

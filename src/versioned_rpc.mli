@@ -145,15 +145,15 @@ end
 module Caller_converts : sig
   module Rpc : sig
     (* signature for rpc dispatchers *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type query
       type response
 
       (** Multi-version dispatch. *)
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> query
-        -> response Or_error.t Deferred.t
+        : (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
+            opt_with_metadata
 
       (** All rpcs supported by [dispatch_multi]. *)
       val rpcs : unit -> Any.t list
@@ -164,6 +164,11 @@ module Caller_converts : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
         single RPC versioned dispatch function [dispatch_multi] in terms of that model and
@@ -212,6 +217,44 @@ module Caller_converts : sig
       end
 
       include S with type query := Model.query with type response := Model.response
+    end
+
+    (** Identical to [Make], except that [dispatch_multi] carries an optional [?metadata]
+        argument, to be used for telemetry. *)
+    module Make' (Model : sig
+        val name : string (* the name of the Rpc's being unified in the model *)
+
+        type query
+        type response
+      end) : sig
+      (** Adds a new version to the set of versions available via [dispatch_multi]. *)
+      module Register (Version_i : sig
+          val version : int
+
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
+
+          val query_of_model : Model.query -> query
+          val model_of_response : response -> Model.response
+        end) : sig
+        val rpc : (Version_i.query, Version_i.response) Rpc.t
+      end
+
+      (** A variant of [Register] in which the query is made available when transforming
+          the response *)
+      module Register' (Version_i : sig
+          val version : int
+
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
+
+          val query_of_model : Model.query -> query
+          val model_of_response : Model.query -> response -> Model.response
+        end) : sig
+        val rpc : (Version_i.query, Version_i.response) Rpc.t
+      end
+
+      include S' with type query := Model.query with type response := Model.response
     end
   end
 
@@ -432,11 +475,13 @@ module Caller_converts : sig
 
   module One_way : sig
     (** signature for rpc dispatchers *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type msg
 
       (** multi-version dispatch *)
-      val dispatch_multi : Connection_with_menu.t -> msg -> unit Or_error.t
+      val dispatch_multi
+        : (Connection_with_menu.t -> msg -> unit Or_error.t) opt_with_metadata
 
       (** All rpcs supported by [dispatch_multi] *)
       val rpcs : unit -> Any.t list
@@ -447,6 +492,11 @@ module Caller_converts : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     (** Given a model of the types involved in a family of RPCs, this functor provides a
         single RPC versioned dispatch function [dispatch_multi] in terms of that model and
@@ -478,6 +528,27 @@ module Caller_converts : sig
       end
 
       include S with type msg := Model.msg
+    end
+
+    (** Identical to [Make], except that [dispatch_multi] carries an optional [?metadata]
+        argument, to be used for telemetry. *)
+    module Make' (Model : sig
+        val name : string (* the name of the Rpc's being unified in the model *)
+
+        type msg
+      end) : sig
+      (** add a new version to the set of versions available via [dispatch_multi]. *)
+      module Register (Version_i : sig
+          val version : int
+
+          type msg [@@deriving bin_io]
+
+          val msg_of_model : Model.msg -> msg
+        end) : sig
+        val rpc : Version_i.msg One_way.t
+      end
+
+      include S' with type msg := Model.msg
     end
   end
 end
@@ -867,7 +938,8 @@ module Both_convert : sig
                    `->-- Q3 -->---- Q.callee --> R.callee ---->-- R3 -->-´
       v}
     *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type caller_query
       type caller_response
       type callee_query
@@ -875,9 +947,10 @@ module Both_convert : sig
 
       (** multi-version dispatch *)
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> caller_query
-        -> caller_response Or_error.t Deferred.t
+        : (Connection_with_menu.t
+           -> caller_query
+           -> caller_response Or_error.t Deferred.t)
+            opt_with_metadata
 
       (** implement multiple versions at once *)
       val implement_multi
@@ -893,6 +966,11 @@ module Both_convert : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
 
     module Make (Model : sig
@@ -926,6 +1004,43 @@ module Both_convert : sig
 
       include
         S
+        with type caller_query := Caller.query
+        with type caller_response := Caller.response
+        with type callee_query := Callee.query
+        with type callee_response := Callee.response
+    end
+
+    module Make' (Model : sig
+        val name : string
+
+        module Caller : sig
+          type query
+          type response
+        end
+
+        module Callee : sig
+          type query
+          type response
+        end
+      end) : sig
+      open Model
+
+      module Register (Version : sig
+          val version : int
+
+          type query [@@deriving bin_io]
+          type response [@@deriving bin_io]
+
+          val query_of_caller_model : Caller.query -> query
+          val callee_model_of_query : query -> Callee.query
+          val response_of_callee_model : Callee.response -> response
+          val caller_model_of_response : response -> Caller.response
+        end) : sig
+        val rpc : (Version.query, Version.response) Rpc.t
+      end
+
+      include
+        S'
         with type caller_query := Caller.query
         with type caller_response := Caller.response
         with type callee_query := Callee.query
@@ -1231,12 +1346,14 @@ module Both_convert : sig
                    `->-- M3 -->---- M.callee --> unit
       v}
     *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type caller_msg
       type callee_msg
 
       (** multi-version dispatch *)
-      val dispatch_multi : Connection_with_menu.t -> caller_msg -> unit Or_error.t
+      val dispatch_multi
+        : (Connection_with_menu.t -> caller_msg -> unit Or_error.t) opt_with_metadata
 
       (** implement multiple versions at once *)
       val implement_multi
@@ -1253,6 +1370,11 @@ module Both_convert : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make (Model : sig
         val name : string
@@ -1279,6 +1401,33 @@ module Both_convert : sig
       end
 
       include S with type caller_msg := Caller.msg with type callee_msg := Callee.msg
+    end
+
+    module Make' (Model : sig
+        val name : string
+
+        module Caller : sig
+          type msg
+        end
+
+        module Callee : sig
+          type msg
+        end
+      end) : sig
+      open Model
+
+      module Register (Version : sig
+          val version : int
+
+          type msg [@@deriving bin_io]
+
+          val msg_of_caller_model : Caller.msg -> msg
+          val callee_model_of_msg : msg -> Callee.msg
+        end) : sig
+        val rpc : Version.msg One_way.t
+      end
+
+      include S' with type caller_msg := Caller.msg with type callee_msg := Callee.msg
     end
   end
 end

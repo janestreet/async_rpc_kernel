@@ -80,6 +80,7 @@ val instantiate
   -> connection_close_started:Info.t Deferred.t
   -> connection_state:'a
   -> writer:Transport.Writer.t
+  -> events:((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
   -> Instance.t
 
 val create_exn

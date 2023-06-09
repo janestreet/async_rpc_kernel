@@ -5,6 +5,7 @@ module Pipe_transport = Pipe_transport
 module Rpc_error = Rpc_error
 module Rpc_result = Rpc_result
 module Rpc_shapes = Rpc_shapes
+module Tracing_event = Tracing_event
 module Or_not_authorized = Or_not_authorized
 
 module Rpc_metadata :
@@ -16,7 +17,9 @@ module Async_rpc_kernel_stable = struct
 end
 
 module Async_rpc_kernel_private = struct
-  module Connection = Connection
+  module Connection : Connection_intf.S_private with type t = Rpc.Connection.t =
+    Connection
+
   module Protocol = Protocol
   module Transport = Transport
 

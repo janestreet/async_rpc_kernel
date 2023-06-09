@@ -93,7 +93,7 @@ let dispatch_expert ~sender ~payload =
   let buf = Bin_prot.Utils.bin_dump writer payload in
   let wait_for_response = Ivar.create () in
   let handle_response _buf ~pos:_ ~len:_ =
-    Ivar.fill wait_for_response ();
+    Ivar.fill_exn wait_for_response ();
     return ()
   in
   match

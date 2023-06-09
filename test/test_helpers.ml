@@ -112,7 +112,7 @@ let with_rpc_server_connection ~server_header ~client_header ~f =
         ~implementations:
           (Rpc.Implementations.create_exn ~implementations ~on_unknown_rpc:`Raise)
         ~initial_connection_state:(fun _ conn ->
-          Ivar.fill receiver_ivar conn;
+          Ivar.fill_exn receiver_ivar conn;
           ())
         ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
         ())

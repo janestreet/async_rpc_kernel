@@ -3,7 +3,7 @@
 open! Core
 
 type t =
-  { name : string
+  { name : string [@global]
   ; version : int
   }
 [@@deriving bin_io, equal, compare, hash, sexp_of]

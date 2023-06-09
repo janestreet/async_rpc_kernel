@@ -45,7 +45,7 @@ module Rpc_common = struct
          ~response_handler:(Some (f response_ivar))
      with
      | Ok () -> ()
-     | Error _ as e -> Ivar.fill response_ivar e);
+     | Error _ as e -> Ivar.fill_exn response_ivar e);
     Ivar.read response_ivar
   ;;
 end
@@ -141,7 +141,7 @@ module Rpc = struct
           ~len
           ~location:"client-side rpc response un-bin-io'ing"
       in
-      Ivar.fill ivar response;
+      Ivar.fill_exn ivar response;
       `remove (Ok ())
     in
     let query_id = P.Query_id.create () in
@@ -190,22 +190,22 @@ module Rpc = struct
       =
       let response_handler : Connection.response_handler =
         fun response ~read_buffer ~read_buffer_pos_ref ->
-          match response.data with
-          | Error e ->
-            handle_error
-              (Error.t_of_sexp
-                 (Rpc_error.sexp_of_t
-                    ~get_connection_close_reason:(fun () ->
-                      [%sexp
-                        (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-                         : Info.t option)])
-                    e));
-            `remove (Ok ())
-          | Ok len ->
-            let len = (len : Nat0.t :> int) in
-            let d = handle_response read_buffer ~pos:!read_buffer_pos_ref ~len in
-            read_buffer_pos_ref := !read_buffer_pos_ref + len;
-            if Deferred.is_determined d then `remove (Ok ()) else `remove_and_wait d
+        match response.data with
+        | Error e ->
+          handle_error
+            (Error.t_of_sexp
+               (Rpc_error.sexp_of_t
+                  ~get_connection_close_reason:(fun () ->
+                    [%sexp
+                      (Deferred.peek (Connection.close_reason ~on_close:`started conn)
+                       : Info.t option)])
+                  e));
+          `remove (Ok ())
+        | Ok len ->
+          let len = (len : Nat0.t :> int) in
+          let d = handle_response read_buffer ~pos:!read_buffer_pos_ref ~len in
+          read_buffer_pos_ref := !read_buffer_pos_ref + len;
+          if Deferred.is_determined d then `remove (Ok ()) else `remove_and_wait d
       in
       do_dispatch
         ?metadata
@@ -726,7 +726,7 @@ module Streaming_rpc = struct
            errors we get in the [Writing_updates_to_pipe] case indicate more serious
            problems.) Instead, we just put errors in [ivar]. *)
         let error err =
-          Ivar.fill initial_handler.ivar (Error err);
+          Ivar.fill_exn initial_handler.ivar (Error err);
           `remove (Ok ())
         in
         (match response.data with
@@ -747,11 +747,11 @@ module Streaming_rpc = struct
             | Ok initial_msg ->
               (match initial_msg.initial with
                | Error err ->
-                 Ivar.fill initial_handler.ivar (Ok (Error err));
+                 Ivar.fill_exn initial_handler.ivar (Ok (Error err));
                  `remove (Ok ())
                | Ok initial ->
                  let extra, handler = initial_handler.make_update_handler () in
-                 Ivar.fill
+                 Ivar.fill_exn
                    initial_handler.ivar
                    (Ok (Ok (initial_handler.query_id, initial, extra)));
                  state.state

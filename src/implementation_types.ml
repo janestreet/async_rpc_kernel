@@ -134,6 +134,7 @@ and Implementations : sig
     type 'a unpacked =
       { implementations : 'a implementations
       ; writer : Transport.Writer.t
+      ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
       ; open_streaming_responses : (Query_id.t, streaming_response) Hashtbl.t
       ; mutable stopped : bool
       ; connection_state : 'a
@@ -171,6 +172,7 @@ and Direct_stream_writer : sig
     ; closed : unit Ivar.t
     ; instance : Implementations.Instance.t
     ; query_id : Query_id.t
+    ; rpc : Description.t
     ; stream_writer : 'a Cached_bin_writer.t
     ; groups : 'a group_entry Bag.t
     }
