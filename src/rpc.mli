@@ -294,7 +294,6 @@ module Rpc : sig
 
     (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
         the flushed [Deferred.t] is determined.
-
         The return value of [handle_response] has the same meaning as in the function
         argument of [Implementations.Expert.create]. *)
     val schedule_dispatch

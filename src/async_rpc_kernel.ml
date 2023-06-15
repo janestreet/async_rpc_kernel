@@ -22,6 +22,7 @@ module Async_rpc_kernel_private = struct
 
   module Protocol = Protocol
   module Transport = Transport
+  module Util = Util
 
   let default_handshake_timeout = Connection.default_handshake_timeout
 end

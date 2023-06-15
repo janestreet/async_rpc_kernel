@@ -31,13 +31,13 @@ let test_lift_on_all_rpc_dispatch ?expect_exception ~lift ~return_state () =
     in
     return ()
   in
-  Test_helpers.with_local_connection
+  Test_helpers.with_circular_connection
     ~lift_implementation:(fun implementation ->
       lift implementation ~f:(fun () ->
         Pipe.write_without_pushback writer ();
         return_state ()))
     ~header:Test_helpers.Header.v1
-    ~f:(fun conn ->
+    ~f:(fun conn (_ : Test_helpers.Tap.t) ->
       let%bind () = dispatch ~conn Rpc.Rpc.dispatch Test_helpers.rpc in
       let%bind () =
         (* Skip one-way RPC because exceptions close the connection. *)

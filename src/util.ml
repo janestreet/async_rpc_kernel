@@ -1,5 +1,16 @@
 open Core
 
+let dumper_for_message_length_errors = ref (fun (_buf : Bigstring.t) ~pos:(_ : int) -> "")
+
+let dump_and_message buf ~pos =
+  match
+    try !dumper_for_message_length_errors buf ~pos with
+    | exn -> sprintf "Tried to dump message but got exn %s" (Exn.to_string exn)
+  with
+  | "" -> ""
+  | s -> ". " ^ s
+;;
+
 (* utility function for bin-io'ing out of a Bigstring.t *)
 let bin_read_from_bigstring
       (bin_reader_t : _ Bin_prot.Type_class.reader)
@@ -20,9 +31,10 @@ let bin_read_from_bigstring
     if !pos_ref - init_pos + add_len <> (len :> int)
     then
       failwithf
-        "message length (%d) did not match expected length (%d)"
+        "message length (%d) did not match expected length (%d)%s"
         (!pos_ref - init_pos)
         (len : Nat0.t :> int)
+        (dump_and_message buf ~pos:init_pos)
         ();
     Ok data
   with

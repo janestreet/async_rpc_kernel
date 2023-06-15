@@ -2,94 +2,32 @@ open! Core
 open! Async
 
 module Payload = struct
-  let get_random_size () = Byte_units.of_bytes_int (10 * Random.int 20)
+  type t = int array [@@deriving bin_io]
+
+  let get_random_size () = Random.int 5
 
   let create () =
     let size = get_random_size () in
-    size
-    |> Byte_units.bytes_int_exn
-    |> Bigstring.init ~f:(fun (_ : int) -> Random.char ())
+    size |> Array.init ~f:(fun (_ : int) -> Random.int 1000)
   ;;
 end
 
-let bytes_read conn = conn |> Rpc.Connection.bytes_read |> Byte_units.of_bytes_int63
-let bytes_written conn = conn |> Rpc.Connection.bytes_written |> Byte_units.of_bytes_int63
+let print_header = Test_helpers.Tap.print_header
+let print_headers = Test_helpers.Tap.print_headers
+let print_messages tap = Test_helpers.Tap.print_messages tap [%bin_shape: Payload.t]
 
-let compare_bytes ~here a b =
-  Expect_test_helpers_core.require_compare_equal here (module Byte_units) a b
+let print_messages_bidirectional =
+  Test_helpers.Tap.print_messages_bidirectional [%bin_shape: Payload.t]
 ;;
 
-let expected_bytes conn ~expect_read ~expect_written ~here =
-  let expect_read = Byte_units.of_bytes_int expect_read in
-  let expect_written = Byte_units.of_bytes_int expect_written in
-  let bytes_read = bytes_read conn in
-  let bytes_written = bytes_written conn in
-  compare_bytes ~here expect_read bytes_read;
-  compare_bytes ~here expect_written bytes_written;
-  print_s [%message (bytes_read : Byte_units.t) (bytes_written : Byte_units.t)]
-;;
-
-let expected_bytes_rw conn ~expect ~here =
-  let expect = Byte_units.of_bytes_int expect in
-  let bytes_read = bytes_read conn in
-  let bytes_written = bytes_written conn in
-  compare_bytes ~here expect bytes_read;
-  compare_bytes ~here expect bytes_written;
-  print_s [%message (bytes_read : Byte_units.t) (bytes_written : Byte_units.t)]
-;;
-
-module Snapshot = struct
-  type t =
-    { bytes_read : Byte_units.t
-    ; bytes_written : Byte_units.t
-    }
-  [@@deriving sexp_of]
-
-  let of_connection conn =
-    let bytes_read = conn |> Rpc.Connection.bytes_read |> Byte_units.of_bytes_int63 in
-    let bytes_written =
-      conn |> Rpc.Connection.bytes_written |> Byte_units.of_bytes_int63
-    in
-    { bytes_read; bytes_written }
-  ;;
-
-  let print_diff tag prev next =
-    let bytes_written = Byte_units.(next.bytes_written - prev.bytes_written) in
-    let bytes_read = Byte_units.(next.bytes_read - prev.bytes_read) in
-    print_s [%message tag (bytes_written : Byte_units.t) (bytes_read : Byte_units.t)]
-  ;;
-end
-
-let measure_size ?header payload writer =
-  Bin_prot.Utils.bin_dump ?header writer payload |> Bigstring.length
-;;
-
-let dispatch_and_verify_equal_sender_and_receiver_bytes
-      ~here
-      ~sender
-      ~receiver
-      ~sender_snapshot
-      ~receiver_snapshot
-  =
+let dispatch ~client =
   let payload = Payload.create () in
-  let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.rpc sender payload in
-  let next_sender_snapshot = Snapshot.of_connection sender in
-  let next_receiver_snapshot = Snapshot.of_connection receiver in
-  compare_bytes
-    ~here
-    sender_snapshot.Snapshot.bytes_read
-    receiver_snapshot.Snapshot.bytes_written;
-  compare_bytes
-    ~here
-    sender_snapshot.Snapshot.bytes_written
-    receiver_snapshot.Snapshot.bytes_read;
-  Snapshot.print_diff "Sender" sender_snapshot next_sender_snapshot;
-  Snapshot.print_diff "Receiver" receiver_snapshot next_receiver_snapshot;
-  return (next_sender_snapshot, next_receiver_snapshot)
+  let%map _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc client payload in
+  ()
 ;;
 
-let dispatch_expert ~sender ~payload =
-  let writer = [%bin_writer: Bigstring.Stable.V1.t] in
+let dispatch_expert ~client ~payload =
+  let writer = [%bin_writer: int array] in
   let buf = Bin_prot.Utils.bin_dump writer payload in
   let wait_for_response = Ivar.create () in
   let handle_response _buf ~pos:_ ~len:_ =
@@ -98,9 +36,9 @@ let dispatch_expert ~sender ~payload =
   in
   match
     Rpc.Rpc.Expert.dispatch
-      sender
-      ~rpc_tag:Test_helpers.rpc_tag
-      ~version:Test_helpers.rpc_version
+      client
+      ~rpc_tag:(Rpc.Rpc.name Test_helpers.sort_rpc)
+      ~version:(Rpc.Rpc.version Test_helpers.sort_rpc)
       buf
       ~pos:0
       ~len:(Bigstring.length buf)
@@ -112,373 +50,824 @@ let dispatch_expert ~sender ~payload =
   | `Ok -> Ivar.read wait_for_response
 ;;
 
-let v2_handshake_overhead =
-  measure_size Test_helpers.Header.v2 [%bin_writer: Test_helpers.Header.t]
-;;
-
-let v1_handshake_overhead =
-  measure_size Test_helpers.Header.v1 [%bin_writer: Test_helpers.Header.t]
-;;
-
-let individual_rpc_overhead =
-  (* The overhead includes the tag, the query id, the version, empty metadata, and the
-     query construction, wrapped in the request/response records. *)
-  16
-;;
-
-let individual_legacy_rpc_overhead =
-  (* The overhead includes the tag, the query id, the version, and the query construction,
-     wrapped in the request/response records. *)
-  15
-;;
-
-let next_expected_bytes_v2 ~previous ~payload =
-  let payload = measure_size payload [%bin_writer: Bigstring.Stable.V1.t] in
-  let payload_length = Bin_prot.Size.bin_size_int payload in
-  previous
-  + (payload_length * 2)
-  + (payload * 2)
-  (* Twice for send and response *) + individual_rpc_overhead
-;;
-
-let next_expected_bytes_v1 ~previous ~payload =
-  let payload = measure_size payload [%bin_writer: Bigstring.Stable.V1.t] in
-  let payload_length = Bin_prot.Size.bin_size_int payload in
-  previous
-  + (payload_length * 2)
-  + (payload * 2)
-  (* Twice for send and response *) + individual_legacy_rpc_overhead
-;;
-
-let%expect_test "bytes_read and bytes_write match over local rpc" =
-  Test_helpers.with_local_connection
+let%expect_test "V2 local rpc" =
+  Test_helpers.with_circular_connection
     ~header:Test_helpers.Header.v2
-    ~f:(fun conn ->
-      let expect = v2_handshake_overhead in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {|((bytes_read 8B) (bytes_written 8B))|}];
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+      0800 0000 0000 0000    length= 8 (64-bit LE)
+      03                       body= List: 3 items
+      fd52 5043 00                   0: 4411474 (int)
+      01                             1: 1 (int)
+      02                             2: 2 (int) |}];
       let payload = Payload.create () in
-      let expect =
-        let first_heartbeat_overhead = 1 in
-        expect + first_heartbeat_overhead
-      in
-      let rpc = Test_helpers.rpc in
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
+      let rpc = Test_helpers.sort_rpc in
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 317B) (bytes_written 317B)) |}];
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        01                                    id= 1 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        01                                id= 1 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 625B) (bytes_written 625B)) |}];
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        02                                    id= 2 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        02                                id= 2 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 933B) (bytes_written 933B)) |}];
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        03                                    id= 3 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        03                                id= 3 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       return ())
     ()
 ;;
 
-let%expect_test "[legacy] bytes_read and bytes_write match over local rpc" =
-  Test_helpers.with_local_connection
+let%expect_test "V1 local rpc" =
+  Test_helpers.with_circular_connection
     ~header:Test_helpers.Header.v1
-    ~f:(fun conn ->
-      let expect = v1_handshake_overhead in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 7B)) |}];
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+      0700 0000 0000 0000    length= 7 (64-bit LE)
+      02                       body= List: 2 items
+      fd52 5043 00                   0: 4411474 (int)
+      01                             1: 1 (int) |}];
       let payload = Payload.create () in
-      let expect =
-        let first_heartbeat_overhead = 1 in
-        expect + first_heartbeat_overhead
-      in
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 315B) (bytes_written 315B)) |}];
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 622B) (bytes_written 622B)) |}];
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.rpc conn payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 929B) (bytes_written 929B)) |}];
+      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        04                                   id= 4 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        04                                id= 4 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        05                                   id= 5 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        05                                id= 5 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        06                                   id= 6 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        06                                id= 6 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       return ())
     ()
 ;;
 
-let%expect_test "[V1 -> V1] bytes read and written over local rpc match on both ends" =
+let%expect_test "[V1 -> V1] RPC connection" =
   Test_helpers.with_rpc_server_connection
     ~client_header:Test_helpers.Header.v1
     ~server_header:Test_helpers.Header.v1
-    ~f:(fun ~sender ~receiver ->
-      let expect = v1_handshake_overhead in
-      expected_bytes_rw sender ~expect ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 7B)) |}];
-      expected_bytes_rw receiver ~expect ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 7B)) |}];
-      let sender_snapshot = Snapshot.of_connection sender in
-      let receiver_snapshot = Snapshot.of_connection receiver in
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 159B) (bytes_read 150B))
-        (Receiver (bytes_written 150B) (bytes_read 159B)) |}];
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        ---   server -> client:   ---
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 64B) (bytes_read 55B))
-        (Receiver (bytes_written 55B) (bytes_read 64B)) |}];
-      let%bind _ =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        07                                   id= 7 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        07                                id= 7 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 114B) (bytes_read 105B))
-        (Receiver (bytes_written 105B) (bytes_read 114B)) |}];
+        ---   client -> server:   ---
+        1300 0000 0000 0000    length= 19 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        08                                   id= 8 (int)
+        0a                                 data= length= 10 (int)
+        03                                         body= Array: 3 items
+        fe6e 02                                          0: 622 (int)
+        fecb 00                                          1: 203 (int)
+        feb5 03                                          2: 949 (int)
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        02                       body= Response
+        08                                id= 8 (int)
+        00                              data= Ok
+        0a                                     length= 10 (int)
+        03                                       body= Array: 3 items
+        fecb 00                                        0: 203 (int)
+        fe6e 02                                        1: 622 (int)
+        feb5 03                                        2: 949 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        09                                   id= 9 (int)
+        06                                 data= length= 6 (int)
+        03                                         body= Array: 3 items
+        74                                               0: 116 (int)
+        37                                               1: 55 (int)
+        fe18 02                                          2: 536 (int)
+        ---   server -> client:   ---
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        02                       body= Response
+        09                                id= 9 (int)
+        00                              data= Ok
+        06                                     length= 6 (int)
+        03                                       body= Array: 3 items
+        37                                             0: 55 (int)
+        74                                             1: 116 (int)
+        fe18 02                                        2: 536 (int) |}];
       return ())
 ;;
 
-let%expect_test "[V2 -> V2] bytes read and written over local rpc match on both ends" =
+let%expect_test "[V2 -> V2] RPC connection" =
   Test_helpers.with_rpc_server_connection
     ~client_header:Test_helpers.Header.v2
     ~server_header:Test_helpers.Header.v2
-    ~f:(fun ~sender ~receiver ->
-      let expect = v2_handshake_overhead in
-      expected_bytes_rw sender ~expect ~here:[%here];
-      [%expect {| ((bytes_read 8B) (bytes_written 8B)) |}];
-      expected_bytes_rw receiver ~expect ~here:[%here];
-      [%expect {| ((bytes_read 8B) (bytes_written 8B)) |}];
-      let sender_snapshot = Snapshot.of_connection sender in
-      let receiver_snapshot = Snapshot.of_connection receiver in
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 160B) (bytes_read 150B))
-        (Receiver (bytes_written 150B) (bytes_read 160B)) |}];
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        ---   server -> client:   ---
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 65B) (bytes_read 55B))
-        (Receiver (bytes_written 55B) (bytes_read 65B)) |}];
-      let%bind _ =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        0a                                    id= 10 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        0a                                id= 10 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 115B) (bytes_read 105B))
-        (Receiver (bytes_written 105B) (bytes_read 115B)) |}];
+        ---   client -> server:   ---
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        0b                                    id= 11 (int)
+        00                              metadata= None
+        0a                                  data= length= 10 (int)
+        03                                          body= Array: 3 items
+        fe6e 02                                           0: 622 (int)
+        fecb 00                                           1: 203 (int)
+        feb5 03                                           2: 949 (int)
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        02                       body= Response
+        0b                                id= 11 (int)
+        00                              data= Ok
+        0a                                     length= 10 (int)
+        03                                       body= Array: 3 items
+        fecb 00                                        0: 203 (int)
+        fe6e 02                                        1: 622 (int)
+        feb5 03                                        2: 949 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        1000 0000 0000 0000    length= 16 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        0c                                    id= 12 (int)
+        00                              metadata= None
+        06                                  data= length= 6 (int)
+        03                                          body= Array: 3 items
+        74                                                0: 116 (int)
+        37                                                1: 55 (int)
+        fe18 02                                           2: 536 (int)
+        ---   server -> client:   ---
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        02                       body= Response
+        0c                                id= 12 (int)
+        00                              data= Ok
+        06                                     length= 6 (int)
+        03                                       body= Array: 3 items
+        37                                             0: 55 (int)
+        74                                             1: 116 (int)
+        fe18 02                                        2: 536 (int) |}];
       return ())
 ;;
 
 (* Compatibility tests *)
 
-let%expect_test "[V1 -> V2] bytes read and written over local rpc match on both ends" =
+let%expect_test "[V1 -> V2] RPC connection" =
   Test_helpers.with_rpc_server_connection
     ~client_header:Test_helpers.Header.v1
     ~server_header:Test_helpers.Header.v2
-    ~f:(fun ~sender ~receiver ->
-      expected_bytes
-        sender
-        ~expect_written:v1_handshake_overhead
-        ~expect_read:v2_handshake_overhead
-        ~here:[%here];
-      [%expect {| ((bytes_read 8B) (bytes_written 7B)) |}];
-      expected_bytes
-        receiver
-        ~expect_read:v1_handshake_overhead
-        ~expect_written:v2_handshake_overhead
-        ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 8B)) |}];
-      let sender_snapshot = Snapshot.of_connection sender in
-      let receiver_snapshot = Snapshot.of_connection receiver in
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 159B) (bytes_read 150B))
-        (Receiver (bytes_written 150B) (bytes_read 159B)) |}];
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        ---   server -> client:   ---
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 64B) (bytes_read 55B))
-        (Receiver (bytes_written 55B) (bytes_read 64B)) |}];
-      let%bind _ =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        0d                                   id= 13 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        0d                                id= 13 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 114B) (bytes_read 105B))
-        (Receiver (bytes_written 105B) (bytes_read 114B)) |}];
+        ---   client -> server:   ---
+        1300 0000 0000 0000    length= 19 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        0e                                   id= 14 (int)
+        0a                                 data= length= 10 (int)
+        03                                         body= Array: 3 items
+        fe6e 02                                          0: 622 (int)
+        fecb 00                                          1: 203 (int)
+        feb5 03                                          2: 949 (int)
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        02                       body= Response
+        0e                                id= 14 (int)
+        00                              data= Ok
+        0a                                     length= 10 (int)
+        03                                       body= Array: 3 items
+        fecb 00                                        0: 203 (int)
+        fe6e 02                                        1: 622 (int)
+        feb5 03                                        2: 949 (int) |}];
+      let%bind _ = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        0f                                   id= 15 (int)
+        06                                 data= length= 6 (int)
+        03                                         body= Array: 3 items
+        74                                               0: 116 (int)
+        37                                               1: 55 (int)
+        fe18 02                                          2: 536 (int)
+        ---   server -> client:   ---
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        02                       body= Response
+        0f                                id= 15 (int)
+        00                              data= Ok
+        06                                     length= 6 (int)
+        03                                       body= Array: 3 items
+        37                                             0: 55 (int)
+        74                                             1: 116 (int)
+        fe18 02                                        2: 536 (int) |}];
       return ())
 ;;
 
-let%expect_test "[V2 -> V1] bytes read and written over local rpc match on both ends" =
+let%expect_test "[V2 -> V1] RPC connection" =
   Test_helpers.with_rpc_server_connection
     ~client_header:Test_helpers.Header.v2
     ~server_header:Test_helpers.Header.v1
-    ~f:(fun ~sender ~receiver ->
-      expected_bytes
-        sender
-        ~expect_written:v2_handshake_overhead
-        ~expect_read:v1_handshake_overhead
-        ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 8B)) |}];
-      expected_bytes
-        receiver
-        ~expect_read:v2_handshake_overhead
-        ~expect_written:v1_handshake_overhead
-        ~here:[%here];
-      [%expect {| ((bytes_read 8B) (bytes_written 7B)) |}];
-      let sender_snapshot = Snapshot.of_connection sender in
-      let receiver_snapshot = Snapshot.of_connection receiver in
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 159B) (bytes_read 150B))
-        (Receiver (bytes_written 150B) (bytes_read 159B)) |}];
-      let%bind sender_snapshot, receiver_snapshot =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        ---   server -> client:   ---
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 64B) (bytes_read 55B))
-        (Receiver (bytes_written 55B) (bytes_read 64B)) |}];
-      let%bind _ =
-        dispatch_and_verify_equal_sender_and_receiver_bytes
-          ~here:[%here]
-          ~sender
-          ~receiver
-          ~sender_snapshot
-          ~receiver_snapshot
-      in
+        ---   client -> server:   ---
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        10                                   id= 16 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        10                                id= 16 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
-        (Sender (bytes_written 114B) (bytes_read 105B))
-        (Receiver (bytes_written 105B) (bytes_read 114B)) |}];
+        ---   client -> server:   ---
+        1300 0000 0000 0000    length= 19 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        11                                   id= 17 (int)
+        0a                                 data= length= 10 (int)
+        03                                         body= Array: 3 items
+        fe6e 02                                          0: 622 (int)
+        fecb 00                                          1: 203 (int)
+        feb5 03                                          2: 949 (int)
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        02                       body= Response
+        11                                id= 17 (int)
+        00                              data= Ok
+        0a                                     length= 10 (int)
+        03                                       body= Array: 3 items
+        fecb 00                                        0: 203 (int)
+        fe6e 02                                        1: 622 (int)
+        feb5 03                                        2: 949 (int) |}];
+      let%bind () = dispatch ~client in
+      print_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        12                                   id= 18 (int)
+        06                                 data= length= 6 (int)
+        03                                         body= Array: 3 items
+        74                                               0: 116 (int)
+        37                                               1: 55 (int)
+        fe18 02                                          2: 536 (int)
+        ---   server -> client:   ---
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        02                       body= Response
+        12                                id= 18 (int)
+        00                              data= Ok
+        06                                     length= 6 (int)
+        03                                       body= Array: 3 items
+        37                                             0: 55 (int)
+        74                                             1: 116 (int)
+        fe18 02                                        2: 536 (int) |}];
       return ())
 ;;
 
-let%expect_test "expert v2 sends expected # of bytes" =
-  Test_helpers.with_local_connection
+let%expect_test "expert v2 dispatch" =
+  Test_helpers.with_circular_connection
     ~header:Test_helpers.Header.v2
-    ~f:(fun conn ->
-      let expect = v2_handshake_overhead in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 8B) (bytes_written 8B)) |}];
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+      0800 0000 0000 0000    length= 8 (64-bit LE)
+      03                       body= List: 3 items
+      fd52 5043 00                   0: 4411474 (int)
+      01                             1: 1 (int)
+      02                             2: 2 (int) |}];
       let payload = Payload.create () in
-      let expect =
-        let first_heartbeat_overhead = 1 in
-        expect + first_heartbeat_overhead
-      in
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
-      let%bind _response = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 317B) (bytes_written 317B)) |}];
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
-      let%bind _response = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 625B) (bytes_written 625B)) |}];
-      let expect = next_expected_bytes_v2 ~previous:expect ~payload in
-      let%bind _response = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 933B) (bytes_written 933B)) |}];
+      let%bind _response = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        13                                    id= 19 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        13                                id= 19 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind _response = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        14                                    id= 20 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        14                                id= 20 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind _response = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                         tag= sort (4 bytes)
+        01                               version= 1 (int)
+        15                                    id= 21 (int)
+        00                              metadata= None
+        0b                                  data= length= 11 (int)
+        04                                          body= Array: 4 items
+        fe14 02                                           0: 532 (int)
+        44                                                1: 68 (int)
+        feea 01                                           2: 490 (int)
+        fed7 03                                           3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        15                                id= 21 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       return ())
     ()
 ;;
 
-let%expect_test "expert v1 sends expected # of bytes" =
-  Test_helpers.with_local_connection
+let%expect_test "expert v1 dispatch" =
+  Test_helpers.with_circular_connection
     ~header:Test_helpers.Header.v1
-    ~f:(fun conn ->
-      let expect = v1_handshake_overhead in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 7B) (bytes_written 7B)) |}];
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+      0700 0000 0000 0000    length= 7 (64-bit LE)
+      02                       body= List: 2 items
+      fd52 5043 00                   0: 4411474 (int)
+      01                             1: 1 (int) |}];
       let payload = Payload.create () in
-      let expect =
-        let first_heartbeat_overhead = 1 in
-        expect + first_heartbeat_overhead
-      in
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind (_ : unit) = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 315B) (bytes_written 315B)) |}];
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind (_ : unit) = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 622B) (bytes_written 622B)) |}];
-      let expect = next_expected_bytes_v1 ~previous:expect ~payload in
-      let%bind (_ : unit) = dispatch_expert ~sender:conn ~payload in
-      expected_bytes_rw conn ~expect ~here:[%here];
-      [%expect {| ((bytes_read 929B) (bytes_written 929B)) |}];
+      let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        16                                   id= 22 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        16                                id= 22 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        17                                   id= 23 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        17                                id= 23 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
+      let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
+      print_messages tap;
+      [%expect
+        {|
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        01                       body= Query_v1
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        18                                   id= 24 (int)
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe14 02                                          0: 532 (int)
+        44                                               1: 68 (int)
+        feea 01                                          2: 490 (int)
+        fed7 03                                          3: 983 (int)
+
+        0f00 0000 0000 0000    length= 15 (64-bit LE)
+        02                       body= Response
+        18                                id= 24 (int)
+        00                              data= Ok
+        0b                                     length= 11 (int)
+        04                                       body= Array: 4 items
+        44                                             0: 68 (int)
+        feea 01                                        1: 490 (int)
+        fe14 02                                        2: 532 (int)
+        fed7 03                                        3: 983 (int) |}];
       return ())
     ()
 ;;

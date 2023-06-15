@@ -8,3 +8,5 @@ val bin_read_from_bigstring
   -> len:Nat0.t
   -> location:string
   -> ('a, Protocol.Rpc_error.t) result
+
+val dumper_for_message_length_errors : (Bigstring.t -> pos:int -> string) ref

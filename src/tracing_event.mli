@@ -94,6 +94,8 @@ type t =
   (** Associated information for the RPC. This is [None] only for [Received (Response _)]
       events. *)
   ; id : Int63.t
+  (** A unique identifier per in-flight RPC, this can be used to tie together request
+      and response events. The client and server see the same id. *)
   ; payload_bytes : int
   (** The number of bytes for the message, except for the 8-byte length header before
       async-rpc messages. This includes the bytes specifying the rpc name/version or query

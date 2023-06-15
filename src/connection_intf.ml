@@ -89,7 +89,7 @@ module type S = sig
       will return the same deferred as the original call.
 
       Before closing the underlying transport's writer, [close] waits for all streaming
-      reponses to be [Pipe.upstream_flushed] with a timeout of
+      responses to be [Pipe.upstream_flushed] with a timeout of
       [streaming_responses_flush_timeout].
 
       The [reason] for closing the connection will be passed to callers of [close_reason].
