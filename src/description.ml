@@ -6,7 +6,7 @@ module Stable = struct
       { name : string [@global]
       ; version : int
       }
-    [@@deriving bin_io, equal, compare, hash, sexp]
+    [@@deriving bin_io, equal, compare, hash, sexp, globalize]
 
     let%expect_test _ =
       print_endline [%bin_digest: t];

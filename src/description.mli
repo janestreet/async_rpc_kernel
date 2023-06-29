@@ -6,7 +6,7 @@ type t =
   { name : string [@global]
   ; version : int
   }
-[@@deriving bin_io, equal, compare, hash, sexp_of]
+[@@deriving bin_io, equal, compare, hash, sexp_of, globalize]
 
 include Comparable.S with type t := t
 include Hashable.S with type t := t

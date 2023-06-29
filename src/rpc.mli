@@ -25,7 +25,7 @@ module Description : sig
     { name : string [@global]
     ; version : int
     }
-  [@@deriving compare, equal, hash, sexp_of]
+  [@@deriving compare, equal, hash, sexp_of, globalize]
 
   include Comparable.S_plain with type t := t
   include Hashable.S_plain with type t := t

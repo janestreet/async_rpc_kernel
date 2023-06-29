@@ -9,4 +9,4 @@ val bin_read_from_bigstring
   -> location:string
   -> ('a, Protocol.Rpc_error.t) result
 
-val dumper_for_message_length_errors : (Bigstring.t -> pos:int -> string) ref
+val dumper_for_deserialization_errors : (Bigstring.t -> pos:int -> string) ref
