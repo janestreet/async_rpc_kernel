@@ -94,6 +94,12 @@ module Implementation : sig
   val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 
   val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
+
+  val with_authorization_deferred
+    :  'a t
+    -> f:('b -> 'a Or_not_authorized.t Deferred.t)
+    -> 'b t
+
   val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
 end
 

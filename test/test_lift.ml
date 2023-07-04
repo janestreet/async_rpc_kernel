@@ -13,10 +13,14 @@ let test_lift_on_all_rpc_dispatch ?expect_exception ~lift ~return_state () =
     return result
   in
   let maybe_expect_error response =
-    Option.iter expect_exception ~f:(fun contains ->
+    match expect_exception with
+    | None ->
+      if Result.is_error response
+      then raise_s [%message "Expected Ok but got error" (response : _ Or_error.t)]
+    | Some contains ->
       let string = [%sexp_of: _ Or_error.t] response |> Sexp.to_string in
       assert (Result.is_error response);
-      assert (String.is_substring string ~substring:contains))
+      assert (String.is_substring string ~substring:contains)
   in
   let payload = Bigstring.of_string "test payload" in
   let dispatch ~conn dispatch rpc =
@@ -77,5 +81,50 @@ let%expect_test "Exception in [lift_deferred] returns error on [dispatch]." =
     ~expect_exception:"Exception!"
     ~lift:Rpc.Implementation.lift_deferred
     ~return_state:(fun () -> failwith "Exception!")
+    ()
+;;
+
+let%expect_test "deferred exception in [lift_deferred] returns error on [dispatch]." =
+  test_lift_on_all_rpc_dispatch
+    ~expect_exception:"Exception!"
+    ~lift:Rpc.Implementation.lift_deferred
+    ~return_state:(fun () ->
+      let%bind () = Scheduler.yield () in
+      failwith "Exception!")
+    ()
+;;
+
+let%expect_test "authorization runs on every rpc" =
+  test_lift_on_all_rpc_dispatch
+    ~lift:Rpc.Implementation.with_authorization
+    ~return_state:(fun () -> Async_rpc_kernel.Or_not_authorized.Authorized ())
+    ()
+;;
+
+let%expect_test "deferred authorization runs on every rpc" =
+  test_lift_on_all_rpc_dispatch
+    ~lift:Rpc.Implementation.with_authorization_deferred
+    ~return_state:(fun () ->
+      let%map () = Scheduler.yield () in
+      Async_rpc_kernel.Or_not_authorized.Authorized ())
+    ()
+;;
+
+let%expect_test "authorization rejection leads to rpc failures" =
+  test_lift_on_all_rpc_dispatch
+    ~expect_exception:"bad auth"
+    ~lift:Rpc.Implementation.with_authorization
+    ~return_state:(fun () ->
+      Async_rpc_kernel.Or_not_authorized.Not_authorized (Error.of_string "bad auth"))
+    ()
+;;
+
+let%expect_test "deferred authorization rejection leads to rpc failures" =
+  test_lift_on_all_rpc_dispatch
+    ~expect_exception:"bad auth"
+    ~lift:Rpc.Implementation.with_authorization_deferred
+    ~return_state:(fun () ->
+      let%map () = Scheduler.yield () in
+      Async_rpc_kernel.Or_not_authorized.Not_authorized (Error.of_string "bad auth"))
     ()
 ;;

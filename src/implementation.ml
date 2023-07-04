@@ -137,58 +137,50 @@ module F = struct
       Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
   ;;
 
-  let lift_deferred (type a b) (t : b t) ~(f : a -> b Deferred.t) : a t =
+  let lift_deferred (type a b) (t : b t) ~f:(lift : a -> b Or_not_authorized.t Deferred.t)
+    : a t
+    =
+    let lift_and_bind x ~f =
+      Eager_deferred.bind (lift x) ~f:(fun or_not_authorized ->
+        Or_not_authorized.bind_deferred or_not_authorized ~f)
+    in
     match t with
     | One_way (bin_msg, impl) ->
       One_way
-        ( bin_msg
-        , fun state str -> Eager_deferred.bind (f state) ~f:(fun state -> impl state str)
-        )
+        (bin_msg, fun state str -> lift_and_bind state ~f:(fun state -> impl state str))
     | One_way_expert impl ->
       One_way_expert
         (fun state buf ~pos ~len ->
-           Eager_deferred.bind (f state) ~f:(fun state -> impl state buf ~pos ~len))
+           lift_and_bind state ~f:(fun state -> impl state buf ~pos ~len))
     | Rpc (bin_query, bin_response, impl, Blocking) ->
       Rpc
         ( bin_query
         , bin_response
-        , (fun state q ->
-             let%map.Eager_deferred state = f state in
-             impl state q)
+        , (fun state q -> lift_and_bind state ~f:(fun state -> return (impl state q)))
         , Deferred )
     | Rpc (bin_query, bin_response, impl, Deferred) ->
       Rpc
         ( bin_query
         , bin_response
-        , (fun state q ->
-             let%bind.Eager_deferred state = f state in
-             impl state q)
+        , (fun state q -> lift_and_bind state ~f:(fun state -> impl state q))
         , Deferred )
     | Rpc_expert (impl, Deferred) ->
       Rpc_expert
         ( (fun state resp buf ~pos ~len ->
-            let%bind.Eager_deferred state = f state in
-            impl state resp buf ~pos ~len)
+            lift_and_bind state ~f:(fun state -> impl state resp buf ~pos ~len))
         , Deferred )
     | Rpc_expert (impl, Blocking) ->
       Rpc_expert
         ( (fun state resp buf ~pos ~len ->
-            let%map.Eager_deferred state = f state in
-            impl state resp buf ~pos ~len)
+            lift_and_bind state ~f:(fun state -> return (impl state resp buf ~pos ~len)))
         , Deferred )
     | Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl } ->
       let impl =
         match impl with
         | Pipe impl ->
-          Pipe
-            (fun state q ->
-               let%bind.Eager_deferred state = f state in
-               impl state q)
+          Pipe (fun state q -> lift_and_bind state ~f:(fun state -> impl state q))
         | Direct impl ->
-          Direct
-            (fun state q w ->
-               let%bind.Eager_deferred state = f state in
-               impl state q w)
+          Direct (fun state q w -> lift_and_bind state ~f:(fun state -> impl state q w))
       in
       Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
   ;;
@@ -211,5 +203,14 @@ let lift (type a b) (t : a t) ~(f : b -> a) : b t =
 ;;
 
 let with_authorization t ~f = { t with f = F.lift t.f ~f }
-let lift_deferred t ~f = { t with f = F.lift_deferred t.f ~f }
+
+let lift_deferred t ~f =
+  { t with
+    f =
+      F.lift_deferred t.f ~f:(fun b ->
+        Eager_deferred.map (f b) ~f:(fun x -> Or_not_authorized.Authorized x))
+  }
+;;
+
+let with_authorization_deferred t ~f = { t with f = F.lift_deferred t.f ~f }
 let update_on_exception t ~f = { t with on_exception = f t.on_exception }

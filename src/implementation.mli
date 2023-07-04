@@ -80,7 +80,7 @@ module F : sig
         -> 'connection_state t
 
   val lift : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
-  val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
+  val lift_deferred : 'a t -> f:('b -> 'a Or_not_authorized.t Deferred.t) -> 'b t
 end
 
 type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
@@ -97,4 +97,10 @@ val shapes : _ t -> Rpc_shapes.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
 val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
+
+val with_authorization_deferred
+  :  'a t
+  -> f:('b -> 'a Or_not_authorized.t Deferred.t)
+  -> 'b t
+
 val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
