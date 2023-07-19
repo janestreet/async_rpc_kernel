@@ -231,29 +231,33 @@ let write_event t (event [@ocaml.local]) =
   if not (Bus.is_closed t.events) then Bus.write_local t.events event
 ;;
 
+module Dispatch_error = struct
+  type t =
+    | Closed
+    | Message_too_big of Transport.Send_result.message_too_big
+  [@@deriving sexp_of]
+end
+
 let handle_send_result :
   'a.
   t
   -> ('a Transport.Send_result.t[@local])
   -> rpc:(Description.t[@ocaml.local])
   -> id:(P.Query_id.t[@ocaml.local])
-  -> 'a
+  -> ('a, Dispatch_error.t) Result.t
   =
   fun t r ~rpc ~id ->
   let id = (id :> Int63.t) in
   match r with
   | Sent { result = x; bytes } ->
     write_event t { event = Sent Query; rpc = Some rpc; id; payload_bytes = bytes };
-    x
+    Ok x
   | Closed ->
     write_event
       t
       { event = Failed_to_send (Query, Closed); rpc = Some rpc; id; payload_bytes = 0 };
-    (* All of the places we call [handle_send_result] check whether [t] is closed
-       (usually via the [writer] function above). This checks whether [t.writer] is
-       closed, which should not happen unless [t] is closed. *)
-    failwiths ~here:[%here] "RPC connection got closed writer" t sexp_of_t_hum_writer
-  | Message_too_big err as r ->
+    Error Dispatch_error.Closed
+  | Message_too_big err ->
     write_event
       t
       { event = Failed_to_send (Query, Too_large)
@@ -261,11 +265,9 @@ let handle_send_result :
       ; id
       ; payload_bytes = err.size
       };
-    let r = [%globalize: unit Transport.Send_result.t] r in
-    raise_s
-      [%sexp
-        "Message cannot be sent"
-      , { reason = (r : _ Transport.Send_result.t); connection = (t : t_hum_writer) }]
+    Error
+      (Dispatch_error.Message_too_big
+         ([%globalize: Transport.Send_result.message_too_big] err))
 ;;
 
 (* Used for heartbeats and protocol negotiation *)
@@ -285,9 +287,37 @@ let handle_special_send_result t ((result : unit Transport.Send_result.t) [@loca
         }]
 ;;
 
+let send_query_with_registered_response_handler
+      t
+      (query : 'query P.Query.t)
+      ~response_handler
+      ~send_query:
+      ((send_query : 'query P.Query.t -> ('response Transport.Send_result.t[@local])) [@local
+       ])
+  : ('response, Dispatch_error.t) Result.t
+  =
+  let registered_response_handler =
+    match response_handler with
+    | Some response_handler ->
+      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler;
+      true
+    | None -> false
+  in
+  let result =
+    send_query query
+    |> handle_send_result
+         t
+         ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+         ~id:query.id
+  in
+  if registered_response_handler && Result.is_error result
+  then Hashtbl.remove t.open_queries query.id;
+  result
+;;
+
 let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
   match writer t with
-  | Error `Closed as r -> r
+  | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
     let query =
       match query.metadata with
@@ -298,14 +328,14 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
         }
       | None -> query
     in
-    Option.iter response_handler ~f:(fun response_handler ->
-      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler);
-    Protocol_writer.send_query writer query ~bin_writer_query
-    |> handle_send_result
-         t
-         ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
-         ~id:query.id;
-    Ok ()
+    send_query_with_registered_response_handler
+      t
+      query
+      ~response_handler
+      ~send_query:
+        ( (fun query ->
+            (Protocol_writer.send_query writer query ~bin_writer_query)))
+    [@nontail]
 ;;
 
 let make_dispatch_bigstring
@@ -320,23 +350,24 @@ let make_dispatch_bigstring
       ~response_handler
   =
   match writer t with
-  | Error `Closed -> Error `Closed
+  | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
     let id = P.Query_id.create () in
     let query : unit P.Query.t = { tag; version; id; metadata; data = () } in
-    Option.iter response_handler ~f:(fun response_handler ->
-      Hashtbl.set t.open_queries ~key:id ~data:response_handler);
-    let result =
-      Protocol_writer.send_expert_query
-        writer
-        query
-        ~buf
-        ~pos
-        ~len
-        ~send_bin_prot_and_bigstring:do_send
-      |> handle_send_result t ~rpc:{ name = P.Rpc_tag.to_string tag; version } ~id
-    in
-    Ok result
+    send_query_with_registered_response_handler
+      t
+      query
+      ~response_handler
+      ~send_query:
+        ( (fun query ->
+           
+             (Protocol_writer.send_expert_query
+                writer
+                query
+                ~buf
+                ~pos
+                ~len
+                ~send_bin_prot_and_bigstring:do_send))) [@nontail]
 ;;
 
 let dispatch_bigstring = make_dispatch_bigstring Writer.send_bin_prot_and_bigstring

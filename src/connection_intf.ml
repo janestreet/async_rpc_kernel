@@ -190,12 +190,21 @@ module type S_private = sig
        | `remove_and_wait of unit Deferred.t
        ]
 
+  val sexp_of_t_hum_writer : t -> Sexp.t
+
+  module Dispatch_error : sig
+    type t =
+      | Closed
+      | Message_too_big of Transport.Send_result.message_too_big
+    [@@deriving sexp_of]
+  end
+
   val dispatch
     :  t
     -> response_handler:response_handler option
     -> bin_writer_query:'a Bin_prot.Type_class.writer
     -> query:'a Query.t
-    -> (unit, [ `Closed ]) Result.t
+    -> (unit, Dispatch_error.t) Result.t
 
   val dispatch_bigstring
     :  ?metadata:Rpc_metadata.t
@@ -206,7 +215,7 @@ module type S_private = sig
     -> pos:int
     -> len:int
     -> response_handler:response_handler option
-    -> (unit, [ `Closed ]) Result.t
+    -> (unit, Dispatch_error.t) Result.t
 
   val schedule_dispatch_bigstring
     :  ?metadata:Rpc_metadata.t
@@ -217,7 +226,7 @@ module type S_private = sig
     -> pos:int
     -> len:int
     -> response_handler:response_handler option
-    -> (unit Deferred.t, [ `Closed ]) Result.t
+    -> (unit Deferred.t, Dispatch_error.t) Result.t
 
   val default_handshake_timeout : Time_ns.Span.t
 

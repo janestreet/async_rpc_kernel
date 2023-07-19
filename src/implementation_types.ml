@@ -192,6 +192,8 @@ and Direct_stream_writer : sig
         mutable components : 'a direct_stream_writer Bag.t
       ; components_by_id : 'a component Id.Table.t
       ; buffer : Bigstring.t ref
+      ; mutable last_value_len : int
+      ; send_last_value_on_add : bool
       }
 
     and 'a component =

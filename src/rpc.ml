@@ -14,6 +14,33 @@ module Connection = Connection
 let ( >>=~ ) = Result.( >>= )
 let ( >>|~ ) = Result.( >>| )
 
+let message_too_big_message message_too_big ~connection =
+  [%sexp
+    "Message cannot be sent"
+  , { reason = (Message_too_big message_too_big : Connection.Dispatch_error.t)
+    ; connection : Connection.t_hum_writer
+    }]
+;;
+
+let handle_dispatch_bigstring_result_exn ~connection
+  : (unit, Connection.Dispatch_error.t) Result.t -> [ `Ok | `Connection_closed ]
+  = function
+    | Ok () -> `Ok
+    | Error Closed -> `Connection_closed
+    | Error (Message_too_big message_too_big) ->
+      raise_s (message_too_big_message ~connection message_too_big)
+;;
+
+let handle_schedule_dispatch_bigstring_result_exn ~connection
+  :  (unit Deferred.t, Connection.Dispatch_error.t) Result.t
+    -> [ `Flushed of unit Deferred.t | `Connection_closed ]
+  = function
+    | Ok d -> `Flushed d
+    | Error Closed -> `Connection_closed
+    | Error (Message_too_big message_too_big) ->
+      raise_s (message_too_big_message ~connection message_too_big)
+;;
+
 module Rpc_common = struct
   let dispatch_raw'
         ?metadata
@@ -27,8 +54,13 @@ module Rpc_common = struct
     =
     let query = { P.Query.tag; version; id = query_id; metadata; data = query } in
     match Connection.dispatch conn ~response_handler ~bin_writer_query ~query with
-    | Ok () -> Ok ()
-    | Error `Closed -> Error Rpc_error.Connection_closed
+    | Ok result -> Ok result
+    | Error Closed -> Error Rpc_error.Connection_closed
+    | Error (Message_too_big message_too_big) ->
+      Error
+        (
+          Rpc_error.Uncaught_exn
+            (message_too_big_message message_too_big ~connection:conn))
   ;;
 
   let dispatch_raw ?metadata conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
@@ -229,21 +261,18 @@ module Rpc = struct
           ~handle_response
           ~handle_error
       =
-      match
-        make_dispatch
-          Connection.dispatch_bigstring
-          ?metadata
-          conn
-          ~rpc_tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~handle_response
-          ~handle_error
-      with
-      | Ok () -> `Ok
-      | Error `Closed -> `Connection_closed
+      make_dispatch
+        Connection.dispatch_bigstring
+        ?metadata
+        conn
+        ~rpc_tag
+        ~version
+        buf
+        ~pos
+        ~len
+        ~handle_response
+        ~handle_error
+      |> handle_dispatch_bigstring_result_exn ~connection:conn
     ;;
 
     let schedule_dispatch
@@ -257,21 +286,18 @@ module Rpc = struct
           ~handle_response
           ~handle_error
       =
-      match
-        make_dispatch
-          Connection.schedule_dispatch_bigstring
-          ?metadata
-          conn
-          ~rpc_tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~handle_response
-          ~handle_error
-      with
-      | Ok d -> `Flushed d
-      | Error `Closed -> `Connection_closed
+      make_dispatch
+        Connection.schedule_dispatch_bigstring
+        ?metadata
+        conn
+        ~rpc_tag
+        ~version
+        buf
+        ~pos
+        ~len
+        ~handle_response
+        ~handle_error
+      |> handle_schedule_dispatch_bigstring_result_exn ~connection:conn
     ;;
 
     type implementation_result = Implementation.Expert.implementation_result =
@@ -419,19 +445,16 @@ module One_way = struct
           ~pos
           ~len
       =
-      match
-        Connection.dispatch_bigstring
-          ?metadata
-          conn
-          ~tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~response_handler:None
-      with
-      | Ok () -> `Ok
-      | Error `Closed -> `Connection_closed
+      Connection.dispatch_bigstring
+        ?metadata
+        conn
+        ~tag
+        ~version
+        buf
+        ~pos
+        ~len
+        ~response_handler:None
+      |> handle_dispatch_bigstring_result_exn ~connection:conn
     ;;
 
     let schedule_dispatch
@@ -442,19 +465,16 @@ module One_way = struct
           ~pos
           ~len
       =
-      match
-        Connection.schedule_dispatch_bigstring
-          ?metadata
-          conn
-          ~tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~response_handler:None
-      with
-      | Ok flushed -> `Flushed flushed
-      | Error `Closed -> `Connection_closed
+      Connection.schedule_dispatch_bigstring
+        ?metadata
+        conn
+        ~tag
+        ~version
+        buf
+        ~pos
+        ~len
+        ~response_handler:None
+      |> handle_schedule_dispatch_bigstring_result_exn ~connection:conn
     ;;
   end
 end
@@ -614,7 +634,7 @@ module Streaming_rpc = struct
          ~bin_writer_query:P.Stream_query.bin_writer_nat0_t
          ~query
          ~response_handler:None
-       : (unit, [ `Closed ]) Result.t)
+       : (unit, Connection.Dispatch_error.t) Result.t)
   ;;
 
   module Pipe_message = struct
@@ -902,6 +922,8 @@ module Pipe_rpc = struct
         { mutable components : 'a direct_stream_writer Bag.t
         ; components_by_id : 'a component Id.Table.t
         ; buffer : Bigstring.t ref
+        ; mutable last_value_len : int
+        ; send_last_value_on_add : bool
         }
 
       and 'a component = 'a T.Group.component =
@@ -909,13 +931,18 @@ module Pipe_rpc = struct
         ; group_element_in_writer : 'a T.group_entry Bag.Elt.t
         }
 
-      let create ?buffer () =
+      let create ?buffer ?(send_last_value_on_add = false) () =
         let buffer =
           match buffer with
           | None -> Buffer.create ()
           | Some b -> b
         in
-        { components = Bag.create (); components_by_id = Id.Table.create (); buffer }
+        { components = Bag.create ()
+        ; components_by_id = Id.Table.create ()
+        ; buffer
+        ; last_value_len = 0
+        ; send_last_value_on_add
+        }
       ;;
 
       let length t = Bag.length t.components
@@ -947,7 +974,18 @@ module Pipe_rpc = struct
         Hashtbl.add_exn
           t.components_by_id
           ~key:writer.id
-          ~data:{ writer_element_in_group; group_element_in_writer }
+          ~data:{ writer_element_in_group; group_element_in_writer };
+        if t.send_last_value_on_add && t.last_value_len > 0
+        then (
+          (* We already checked if the writer is closed above. *)
+          let (`Ok | `Closed) =
+            Expert.write_without_pushback
+              writer
+              ~buf:!(t.buffer)
+              ~pos:0
+              ~len:t.last_value_len
+          in
+          ())
       ;;
 
       let remove t (writer : _ Implementations.Direct_stream_writer.t) =
@@ -975,7 +1013,13 @@ module Pipe_rpc = struct
                closed, so [`Closed] here just means that the removal didn't happen yet. *)
             ignore
               (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
-               : [ `Ok | `Closed ]))
+               : [ `Ok | `Closed ]));
+          if t.send_last_value_on_add && not (phys_equal !(t.buffer) buf)
+          then (
+            if Bigstring.length !(t.buffer) < len
+            then t.buffer := Bigstring.create (Int.ceil_pow2 len);
+            Bigstring.blit ~src:buf ~src_pos:pos ~dst:!(t.buffer) ~dst_pos:0 ~len;
+            t.last_value_len <- len)
         ;;
 
         let write t ~buf ~pos ~len =
@@ -993,7 +1037,9 @@ module Pipe_rpc = struct
           let buffer = !(t.buffer) in
           (* Optimistic first try *)
           (match write buffer ~pos:0 x with
-           | len -> Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len
+           | len ->
+             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
+             t.last_value_len <- len
            | exception _ ->
              (* It's likely that the exception is due to a buffer overflow, so resize the
                 internal buffer and try again. Technically we could match on
@@ -1005,7 +1051,8 @@ module Pipe_rpc = struct
              let buffer = Bigstring.create (Int.ceil_pow2 len) in
              t.buffer := buffer;
              let len = write buffer ~pos:0 x in
-             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len)
+             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
+             t.last_value_len <- len)
       ;;
 
       let write t x =

@@ -298,10 +298,15 @@ module Rpc : sig
       val write_error : t -> Error.t -> unit
     end
 
+
     (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
         the flushed [Deferred.t] is determined.
         The return value of [handle_response] has the same meaning as in the function
-        argument of [Implementations.Expert.create]. *)
+        argument of [Implementations.Expert.create].
+
+        [schedule_dispatch] will raise if the length of the RPC message (i.e. [len] plus
+        the message header) is longer than the underlying transport's max message size.
+    *)
     val schedule_dispatch
       :  ?metadata:Rpc_metadata.t
       -> Connection.t
@@ -314,6 +319,9 @@ module Rpc : sig
       -> handle_error:(Error.t -> unit)
       -> [ `Flushed of unit Deferred.t | `Connection_closed ]
 
+    (** [dispatch] will raise if the length of the RPC message (i.e. [len] plus the
+        message header) is longer than the underlying transport's max message size.
+    *)
     val dispatch
       :  ?metadata:Rpc_metadata.t
       -> Connection.t
@@ -530,7 +538,13 @@ module Pipe_rpc : sig
         val create : ?initial_size:int (* default 4096 *) -> unit -> t
       end
 
-      val create : ?buffer:Buffer.t -> unit -> _ t
+      val create
+        :  ?buffer:Buffer.t
+        -> ?send_last_value_on_add:bool
+        (** If [true], the group will automatically send a copy of the last value written
+            to each new writer when it's added to the group. Default: false. *)
+        -> unit
+        -> _ t
 
       (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
           flushed or closed. *)
@@ -563,6 +577,9 @@ module Pipe_rpc : sig
       val to_list : 'a t -> 'a direct_stream_writer list
       val length : _ t -> int
 
+      (** When these functions are used with a group created with
+          [~send_last_value_on_add:true], the group will save a copy of the relevant part
+          of the buffer in order to send it to writers added in the future. *)
       module Expert : sig
         val write : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit Deferred.t
         val write_without_pushback : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit
