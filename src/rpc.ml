@@ -41,6 +41,14 @@ let handle_schedule_dispatch_bigstring_result_exn ~connection
       raise_s (message_too_big_message ~connection message_too_big)
 ;;
 
+let rpc_result_to_or_error rpc_description conn result =
+  Rpc_result.or_error
+    result
+    ~rpc_description
+    ~connection_description:(Connection.description conn)
+    ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
+;;
+
 module Rpc_common = struct
   let dispatch_raw'
         ?metadata
@@ -189,11 +197,7 @@ module Rpc = struct
   ;;
 
   let rpc_result_to_or_error t conn result =
-    Rpc_result.or_error
-      result
-      ~rpc_description:(description t)
-      ~connection_description:(Connection.description conn)
-      ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
+    rpc_result_to_or_error (description t) conn result
   ;;
 
   let dispatch ?metadata t conn query =
@@ -368,7 +372,7 @@ module One_way = struct
     ; bin_msg : 'msg Bin_prot.Type_class.t
     ; msg_type_id : 'msg Type_equal.Id.t
     }
-  [@@deriving fields]
+  [@@deriving fields ~getters]
 
   let name t = P.Rpc_tag.to_string t.tag
 
@@ -408,11 +412,7 @@ module One_way = struct
   ;;
 
   let rpc_result_to_or_error t conn result =
-    Rpc_result.or_error
-      result
-      ~rpc_description:(description t)
-      ~connection_description:(Connection.description conn)
-      ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
+    rpc_result_to_or_error (description t) conn result
   ;;
 
   let dispatch ?metadata t conn query =
@@ -572,6 +572,10 @@ module Streaming_rpc = struct
     }
   ;;
 
+  let name t = P.Rpc_tag.to_string t.tag
+  let version t = t.version
+  let description t = { Description.name = name t; version = version t }
+
   let make_initial_message x =
     { Initial_message.unused_query_id = P.Unused_query_id.t; initial = x }
   ;;
@@ -665,18 +669,18 @@ module Streaming_rpc = struct
     end
 
     module Initial = struct
-      type nonrec ('q, 'i, 'u, 'e, 'extra) t =
-        { rpc : ('q, 'i, 'u, 'e) t
+      type nonrec ('query, 'init, 'update, 'error, 'init_response) t =
+        { rpc : ('query, 'init, 'update, 'error) t
         ; query_id : P.Query_id.t
-        ; make_update_handler : unit -> 'extra * 'u Update_handler.t
-        ; ivar : (P.Query_id.t * 'i * 'extra, 'e) Result.t Rpc_result.t Ivar.t
+        ; make_update_handler : 'init -> 'init_response * 'update Update_handler.t
+        ; ivar : (P.Query_id.t * 'init_response, 'error) Result.t Rpc_result.t Ivar.t
         ; connection : Connection.t
         }
     end
 
     module State = struct
       type 'a t =
-        | Waiting_for_initial_response : ('q, 'i, 'u, 'e, 'extra) Initial.t -> 'u t
+        | Waiting_for_initial_response : ('q, 'i, 'u, 'e, 'ir) Initial.t -> 'u t
         | Writing_updates of 'a Bin_prot.Type_class.reader * 'a Update_handler.t
     end
 
@@ -770,10 +774,12 @@ module Streaming_rpc = struct
                  Ivar.fill_exn initial_handler.ivar (Ok (Error err));
                  `remove (Ok ())
                | Ok initial ->
-                 let extra, handler = initial_handler.make_update_handler () in
+                 let initial_response, handler =
+                   initial_handler.make_update_handler initial
+                 in
                  Ivar.fill_exn
                    initial_handler.ivar
-                   (Ok (Ok (initial_handler.query_id, initial, extra)));
+                   (Ok (Ok (initial_handler.query_id, initial_response)));
                  state.state
                  <- Writing_updates
                       (initial_handler.rpc.bin_update_response.reader, handler);
@@ -802,21 +808,30 @@ module Streaming_rpc = struct
               (Deferred.peek (Connection.close_reason ~on_close:`started conn)
                : Info.t option)])
           { rpc = t; query_id; connection = conn; ivar; make_update_handler })
-    >>| Rpc_result.or_error
-          ~rpc_description:{ name = P.Rpc_tag.to_string t.tag; version = t.version }
-          ~connection_description:(Connection.description conn)
-          ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
   ;;
 
-  let dispatch_iter ?metadata t conn query ~f =
-    match%map dispatch_gen ?metadata t conn query (fun () -> (), f) with
-    | (Error _ | Ok (Error _)) as e -> e
-    | Ok (Ok (id, init, ())) -> Ok (Ok (id, init))
-  ;;
-
-  let dispatch ?metadata t conn query =
+  let dispatch_fold ?metadata t conn query ~init ~f ~closed =
+    let result = Ivar.create () in
     match%map
-      dispatch_gen ?metadata t conn query (fun () ->
+      dispatch_gen ?metadata t conn query (fun state ->
+        let acc = ref (init state) in
+        ( ()
+        , function
+          | Update update ->
+            let new_acc, response = f !acc update in
+            acc := new_acc;
+            response
+          | Closed reason ->
+            Ivar.fill_exn result (closed !acc reason);
+            Continue ))
+    with
+    | (Error _ | Ok (Error _)) as e -> rpc_result_to_or_error (description t) conn e
+    | Ok (Ok (id, ())) -> Ok (Ok (id, Ivar.read result))
+  ;;
+
+  let dispatch' ?metadata t conn query =
+    match%map
+      dispatch_gen ?metadata t conn query (fun init ->
         let pipe_r, pipe_w = Pipe.create () in
         (* Set a small buffer to reduce the number of pushback events *)
         Pipe.set_size_budget pipe_w 100;
@@ -842,10 +857,10 @@ module Streaming_rpc = struct
             Pipe.close pipe_w;
             Continue
         in
-        (pipe_r, close_reason), f)
+        (init, pipe_r, close_reason), f)
     with
     | (Error _ | Ok (Error _)) as e -> e
-    | Ok (Ok (id, init, (pipe_r, close_reason))) ->
+    | Ok (Ok (id, (init, pipe_r, close_reason))) ->
       upon (Pipe.closed pipe_r) (fun () ->
         if not (Ivar.is_full close_reason)
         then (
@@ -856,7 +871,14 @@ module Streaming_rpc = struct
       in
       Ok (Ok (pipe_metadata, init, pipe_r))
   ;;
+
+  let dispatch ?metadata t conn query =
+    dispatch' ?metadata t conn query >>| rpc_result_to_or_error (description t) conn
+  ;;
 end
+
+module Pipe_message = Streaming_rpc.Pipe_message
+module Pipe_response = Streaming_rpc.Pipe_response
 
 (* A Pipe_rpc is like a Streaming_rpc, except we don't care about initial state - thus
    it is restricted to unit and ultimately ignored *)
@@ -1066,9 +1088,14 @@ module Pipe_rpc = struct
     Streaming_rpc.implement_direct ?on_exception t f
   ;;
 
-  let dispatch ?metadata t conn query =
-    let%map response = Streaming_rpc.dispatch ?metadata t conn query in
+  let dispatch' ?metadata t conn query =
+    let%map response = Streaming_rpc.dispatch' ?metadata t conn query in
     response >>|~ fun x -> x >>|~ fun (metadata, (), pipe_r) -> pipe_r, metadata
+  ;;
+
+  let dispatch ?metadata t conn query =
+    dispatch' ?metadata t conn query
+    >>| rpc_result_to_or_error (Streaming_rpc.description t) conn
   ;;
 
   exception Pipe_rpc_failed
@@ -1081,19 +1108,21 @@ module Pipe_rpc = struct
     | Ok (Ok pipe_and_id) -> pipe_and_id
   ;;
 
-  module Pipe_message = Streaming_rpc.Pipe_message
-  module Pipe_response = Streaming_rpc.Pipe_response
+  module Pipe_message = Pipe_message
+  module Pipe_response = Pipe_response
 
   let dispatch_iter ?metadata t conn query ~f =
-    let%map response = Streaming_rpc.dispatch_iter ?metadata t conn query ~f in
-    response >>|~ fun x -> x >>|~ fun (id, ()) -> id
+    match%map Streaming_rpc.dispatch_gen ?metadata t conn query (fun () -> (), f) with
+    | (Error _ | Ok (Error _)) as e ->
+      rpc_result_to_or_error (Streaming_rpc.description t) conn e
+    | Ok (Ok (id, ())) -> Ok (Ok id)
   ;;
 
   let abort = Streaming_rpc.abort
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
-  let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
-  let version t = t.Streaming_rpc.version
-  let description t = { Description.name = name t; version = version t }
+  let name = Streaming_rpc.name
+  let version = Streaming_rpc.version
+  let description = Streaming_rpc.description
   let query_type_id t = t.Streaming_rpc.query_type_id
   let error_type_id t = t.Streaming_rpc.error_response_type_id
   let response_type_id t = t.Streaming_rpc.update_response_type_id
@@ -1137,17 +1166,21 @@ module State_rpc = struct
   let implement_direct = Streaming_rpc.implement_direct
 
   let dispatch ?metadata t conn query =
-    let%map response = Streaming_rpc.dispatch ?metadata t conn query in
-    response
-    >>|~ fun x -> x >>|~ fun (metadata, state, update_r) -> state, update_r, metadata
+    let open Deferred.Result.Let_syntax in
+    Streaming_rpc.dispatch ?metadata t conn query
+    >>| Result.map ~f:(fun (metadata, state, update_r) -> state, update_r, metadata)
   ;;
 
+  module Pipe_message = Pipe_message
+  module Pipe_response = Pipe_response
+
+  let dispatch_fold = Streaming_rpc.dispatch_fold
   let abort = Streaming_rpc.abort
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
-  let name t = P.Rpc_tag.to_string t.Streaming_rpc.tag
-  let version t = t.Streaming_rpc.version
-  let description t = { Description.name = name t; version = version t }
+  let name = Streaming_rpc.name
+  let version = Streaming_rpc.version
+  let description = Streaming_rpc.description
   let query_type_id t = t.Streaming_rpc.query_type_id
   let state_type_id t = t.Streaming_rpc.initial_response_type_id
   let update_type_id t = t.Streaming_rpc.update_response_type_id

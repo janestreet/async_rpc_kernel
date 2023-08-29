@@ -59,7 +59,7 @@ module Callee_converts = struct
         { name : string
         ; adapters : ('query, 'response) adapter Int.Map.t
         }
-      [@@deriving fields]
+      [@@deriving fields ~getters]
 
       let create ~name = { name; adapters = Int.Map.empty }
 
@@ -760,7 +760,7 @@ module Connection_with_menu = struct
     { connection : Connection.t
     ; menu : Menu.t
     }
-  [@@deriving fields]
+  [@@deriving fields ~getters]
 
   let create connection =
     let open Deferred.Or_error.Let_syntax in

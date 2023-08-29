@@ -147,7 +147,7 @@ module Heartbeat_config = struct
     { timeout : Time_ns.Span.t
     ; send_every : Time_ns.Span.t
     }
-  [@@deriving sexp, bin_io, fields]
+  [@@deriving sexp, bin_io, fields ~getters]
 
   let%expect_test _ =
     print_endline [%bin_digest: t];

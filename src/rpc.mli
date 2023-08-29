@@ -425,6 +425,22 @@ module Pipe_close_reason : sig
   end
 end
 
+(** The input type of the [f] passed to [dispatch_iter]. *)
+module Pipe_message : sig
+  type 'a t =
+    | Update of 'a
+    | Closed of [ `By_remote_side | `Error of Error.t ]
+end
+
+(** The output type of the [f] passed to [dispatch_iter]. This is analagous to a simple
+    [unit Deferred.t], with [Continue] being like [Deferred.unit], but it is made
+    explicit when no waiting should occur. *)
+module Pipe_response : sig
+  type t =
+    | Continue
+    | Wait of unit Deferred.t
+end
+
 module Pipe_rpc : sig
   type ('query, 'response, 'error) t
 
@@ -621,6 +637,14 @@ module Pipe_rpc : sig
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t Deferred.t
 
+  (** Like {!dispatch} but gives an {!Rpc_error.t} instead of an {!Error.t}. *)
+  val dispatch'
+    :  ?metadata:Rpc_metadata.t
+    -> ('query, 'response, 'error) t
+    -> Connection.t
+    -> 'query
+    -> ('response Pipe.Reader.t * Metadata.t, 'error) Result.t Rpc_result.t Deferred.t
+
   val dispatch_exn
     :  ?metadata:Rpc_metadata.t
     -> ('query, 'response, 'error) t
@@ -628,21 +652,8 @@ module Pipe_rpc : sig
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t) Deferred.t
 
-  (** The input type of the [f] passed to [dispatch_iter]. *)
-  module Pipe_message : sig
-    type 'a t =
-      | Update of 'a
-      | Closed of [ `By_remote_side | `Error of Error.t ]
-  end
-
-  (** The output type of the [f] passed to [dispatch_iter]. This is analagous to a simple
-      [unit Deferred.t], with [Continue] being like [Deferred.unit], but it is made
-      explicit when no waiting should occur. *)
-  module Pipe_response : sig
-    type t =
-      | Continue
-      | Wait of unit Deferred.t
-  end
+  module Pipe_message = Pipe_message
+  module Pipe_response = Pipe_response
 
   (** Calling [dispatch_iter t conn query ~f] is similar to calling [dispatch t conn
       query] and then iterating over the result pipe with [f]. The main advantage it
@@ -751,6 +762,26 @@ module State_rpc : sig
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t
          Deferred.t
+
+  module Pipe_message = Pipe_message
+  module Pipe_response = Pipe_response
+
+
+  (** [dispatch_fold] is similar to [Pipe_rpc.dispatch_iter]. [init] will be called with the
+      initial state, and then [f] will be called on each update message. If the update pipe
+      is closed either by the implementer or an error, [closed] will be invoked on the last
+      accumulated value to produce the result. The update stream can be stopped with
+      [abort], in which case [closed] will not be called and the ['result Deferred.t] will
+      never become determined. *)
+  val dispatch_fold
+    :  ?metadata:Rpc_metadata.t
+    -> ('query, 'state, 'update, 'error) t
+    -> Connection.t
+    -> 'query
+    -> init:('state -> 'acc)
+    -> f:('acc -> 'update -> 'acc * Pipe_response.t)
+    -> closed:('acc -> [ `By_remote_side | `Error of Error.t ] -> 'result)
+    -> (Id.t * 'result Deferred.t, 'error) Result.t Or_error.t Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
