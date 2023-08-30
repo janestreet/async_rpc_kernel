@@ -29,10 +29,7 @@ let try_with ?on_background_exception ?run ~location f =
       | None -> `Log
       | Some callback -> `Call callback
     in
-    Monitor.try_with
-      ~rest
-      ~run:(Option.value run ~default:`Schedule)
-      f
+    Monitor.try_with ~rest ~run:(Option.value run ~default:`Schedule) f
   in
   let join = function
     | Ok x -> x

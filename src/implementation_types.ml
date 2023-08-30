@@ -41,7 +41,7 @@ module rec Implementation : sig
           ('connection_state
            -> 'query
            -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t
-                Deferred.t)
+              Deferred.t)
       | Direct of
           ('connection_state
            -> 'query
@@ -52,7 +52,7 @@ module rec Implementation : sig
       { bin_query_reader : 'query Bin_prot.Type_class.reader
       ; bin_init_writer : 'init Bin_prot.Type_class.writer
       ; bin_update_writer : 'update Bin_prot.Type_class.writer
-      (* 'init can be an error or an initial state *)
+          (* 'init can be an error or an initial state *)
       ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
       }
 
@@ -104,19 +104,19 @@ and Implementations : sig
     | `Continue
     | `Close_connection
     | `Call of
-        'connection_state
-        -> rpc_tag:string
-        -> version:int
-        -> [ `Close_connection | `Continue ]
+      'connection_state
+      -> rpc_tag:string
+      -> version:int
+      -> [ `Close_connection | `Continue ]
     | `Expert of
-        'connection_state
-        -> rpc_tag:string
-        -> version:int
-        -> Implementation.Expert.Responder.t
-        -> Bigstring.t
-        -> pos:int
-        -> len:int
-        -> unit Deferred.t
+      'connection_state
+      -> rpc_tag:string
+      -> version:int
+      -> Implementation.Expert.Responder.t
+      -> Bigstring.t
+      -> pos:int
+      -> len:int
+      -> unit Deferred.t
     ]
 
   type 'connection_state t =
@@ -141,7 +141,7 @@ and Implementations : sig
       ; connection_description : Info.t
       ; connection_close_started : Info.t Deferred.t
       ; mutable
-        last_dispatched_implementation :
+          last_dispatched_implementation :
           (Description.t * 'a Implementation.t) option
       ; packed_self : t
       }

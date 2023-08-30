@@ -56,7 +56,7 @@ module Writer = struct
   type 'a writer =
     { impl : (module S with type t = 'a)
     ; t : 'a
-    (* We cache the result of [stopped] because it is often the [Deferred.any] of several
+        (* We cache the result of [stopped] because it is often the [Deferred.any] of several
        other deferreds and we want [can_send] to be simple. *)
     ; stopped : unit Deferred.t
     }
@@ -84,24 +84,24 @@ module Writer = struct
   ;;
 
   let send_bin_prot_and_bigstring
-        (T { impl = (module M); t; _ })
-        bin_writer
-        x
-        ~buf
-        ~pos
-        ~len
+    (T { impl = (module M); t; _ })
+    bin_writer
+    x
+    ~buf
+    ~pos
+    ~len
     : _ Send_result.t
     =
      (M.send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len)
   ;;
 
   let send_bin_prot_and_bigstring_non_copying
-        (T { impl = (module M); t; _ })
-        bin_writer
-        x
-        ~buf
-        ~pos
-        ~len
+    (T { impl = (module M); t; _ })
+    bin_writer
+    x
+    ~buf
+    ~pos
+    ~len
     : _ Send_result.t
     =
     

@@ -21,12 +21,12 @@ exception
 
 (* utility function for bin-io'ing out of a Bigstring.t *)
 let bin_read_from_bigstring
-      (bin_reader_t : _ Bin_prot.Type_class.reader)
-      ?add_len
-      buf
-      ~pos_ref
-      ~(len : Nat0.t)
-      ~location
+  (bin_reader_t : _ Bin_prot.Type_class.reader)
+  ?add_len
+  buf
+  ~pos_ref
+  ~(len : Nat0.t)
+  ~location
   =
   let init_pos = !pos_ref in
   try

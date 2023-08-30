@@ -6,7 +6,7 @@ let max_message_size = 16 lsl 20
 
 let config =
   Rpc.Low_latency_transport.Config.create
-    (* Always batch, we don't care about measuring the syscall time here *)
+  (* Always batch, we don't care about measuring the syscall time here *)
     ~start_batching_after_num_messages:0
     ()
 ;;
@@ -43,9 +43,9 @@ let make_direct rpc =
   in
   ( impl
   , fun () ->
-    match%map Pipe.read pipe_reader with
-    | `Eof -> assert false
-    | `Ok x -> x )
+      match%map Pipe.read pipe_reader with
+      | `Eof -> assert false
+      | `Ok x -> x )
 ;;
 
 let implementation, next_direct_writer = make_direct rpc_direct
@@ -181,8 +181,8 @@ let add_tracing_subscriber connection =
       (Async_rpc_kernel.Async_rpc_kernel_private.Connection.events connection)
       [%here]
       ~f:(fun event ->
-        let (_ : _) = Base.Sys.opaque_identity event in
-        ())
+      let (_ : _) = Base.Sys.opaque_identity event in
+      ())
   in
   ()
 ;;
@@ -266,18 +266,18 @@ let read_messages (type a) (rpc : (unit, a, unit) Rpc.Pipe_rpc.t) connection ~nu
 ;;
 
 let%bench_fun ("end-to-end Pipe write (small)" [@indexed
-                 num_messages = [ 5; 500; 50_000 ]])
+                                                 num_messages = [ 5; 500; 50_000 ]])
   =
   let client_conn = pipe_setup_conn rpc_pipe ~num_messages ~message_data:data in
   fun () -> read_messages rpc_pipe client_conn ~num_messages
 ;;
 
 let%bench_fun ("end-to-end Pipe write with tracing subscriber (small)" [@indexed
-                 num_messages
-                 = [ 5
-                   ; 500
-                   ; 50_000
-                   ]])
+                                                                         num_messages
+                                                                         = [ 5
+                                                                           ; 500
+                                                                           ; 50_000
+                                                                           ]])
   =
   let client_conn =
     pipe_setup_conn

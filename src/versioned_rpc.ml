@@ -141,11 +141,11 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type response
-      end) =
+      type query
+      type response
+    end) =
     struct
       let name = Model.name
 
@@ -170,13 +170,13 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-          type query [@@deriving bin_io]
-          type response [@@deriving bin_io]
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
 
-          val version : int
-          val model_of_query : query -> Model.query
-          val response_of_model : Model.response -> response
-        end) =
+        val version : int
+        val model_of_query : query -> Model.query
+        val response_of_model : Model.response -> response
+      end) =
       struct
         open Version_i
 
@@ -234,12 +234,12 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type response
-        type error
-      end) =
+      type query
+      type response
+      type error
+    end) =
     struct
       let name = Model.name
 
@@ -294,13 +294,13 @@ module Callee_converts = struct
       end
 
       module Make_shared
-          (Version_i : Version_shared) (Convert : sig
-                                          val convert_elt : (Model.response -> Version_i.response) Or_error.t
+        (Version_i : Version_shared) (Convert : sig
+          val convert_elt : (Model.response -> Version_i.response) Or_error.t
 
-                                          val convert_pipe
-                                            :  Model.response Pipe.Reader.t
-                                            -> Version_i.response Pipe.Reader.t
-                                        end) =
+          val convert_pipe
+            :  Model.response Pipe.Reader.t
+            -> Version_i.response Pipe.Reader.t
+        end) =
       struct
         open Version_i
         open Convert
@@ -340,8 +340,8 @@ module Callee_converts = struct
                 Monitor.handle_errors
                   (fun () -> return (Ok (convert_pipe pipe)))
                   (fun exn ->
-                     Error.raise
-                       (failed_conversion (`Response, `Rpc name, `Version version, exn)))
+                    Error.raise
+                      (failed_conversion (`Response, `Rpc name, `Version version, exn)))
               | Error error -> return (wrapped_error_of_model error))
           | Direct f ->
             let convert_elt = Or_error.ok_exn convert_elt in
@@ -362,10 +362,10 @@ module Callee_converts = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val response_of_model : Model.response Pipe.Reader.t -> response Pipe.Reader.t
-        end) =
+        val response_of_model : Model.response Pipe.Reader.t -> response Pipe.Reader.t
+      end) =
         Make_shared
           (Version_i)
           (struct
@@ -377,10 +377,10 @@ module Callee_converts = struct
           end)
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val response_of_model : Model.response -> response
-        end) =
+        val response_of_model : Model.response -> response
+      end) =
         Make_shared
           (Version_i)
           (struct
@@ -411,13 +411,13 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type state
-        type update
-        type error
-      end) =
+      type query
+      type state
+      type update
+      type error
+    end) =
     struct
       let name = Model.name
 
@@ -459,13 +459,13 @@ module Callee_converts = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val update_of_model
-            :  Model.state
-            -> Model.update Pipe.Reader.t
-            -> update Pipe.Reader.t
-        end) =
+        val update_of_model
+          :  Model.state
+          -> Model.update Pipe.Reader.t
+          -> update Pipe.Reader.t
+      end) =
       struct
         open Version_i
 
@@ -501,10 +501,10 @@ module Callee_converts = struct
                    in
                    Monitor.handle_errors
                      (fun () ->
-                        return (Ok (state, Version_i.update_of_model model_state pipe)))
+                       return (Ok (state, Version_i.update_of_model model_state pipe)))
                      (fun exn ->
-                        Error.raise
-                          (failed_conversion (`Update, `Rpc name, `Version version, exn)))
+                       Error.raise
+                         (failed_conversion (`Update, `Rpc name, `Version version, exn)))
                  | Error error ->
                    return
                      (match Version_i.error_of_model error with
@@ -520,16 +520,16 @@ module Callee_converts = struct
       end
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val update_of_model : Model.update -> update
-        end) =
+        val update_of_model : Model.update -> update
+      end) =
       struct
         include Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let update_of_model _state pipe = Pipe.map ~f:update_of_model pipe
-          end)
+          let update_of_model _state pipe = Pipe.map ~f:update_of_model pipe
+        end)
       end
     end
   end
@@ -549,10 +549,10 @@ module Callee_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type msg
-      end) =
+      type msg
+    end) =
     struct
       let name = Model.name
 
@@ -577,11 +577,11 @@ module Callee_converts = struct
       let versions () = Int.Set.of_list (Hashtbl.keys registry)
 
       module Register (Version_i : sig
-          type msg [@@deriving bin_io]
+        type msg [@@deriving bin_io]
 
-          val version : int
-          val model_of_msg : msg -> Model.msg
-        end) =
+        val version : int
+        val model_of_msg : msg -> Model.msg
+      end) =
       struct
         open Version_i
 
@@ -824,13 +824,13 @@ module Caller_converts = struct
       open M
 
       let with_specific_version
-            ~version
-            ~connection
-            ~name
-            ~query
-            ~dispatcher
-            ~registry
-            ~metadata
+        ~version
+        ~connection
+        ~name
+        ~query
+        ~dispatcher
+        ~registry
+        ~metadata
         =
         match Hashtbl.find registry version with
         | None -> return (Error (unknown_version (name, version)))
@@ -838,13 +838,13 @@ module Caller_converts = struct
       ;;
 
       let with_version_menu
-            ?metadata
-            { Connection_with_menu.connection; menu }
-            query
-            ~name
-            ~versions
-            ~registry
-            ~dispatcher
+        ?metadata
+        { Connection_with_menu.connection; menu }
+        query
+        ~name
+        ~versions
+        ~registry
+        ~dispatcher
         =
         let callee_versions = Menu.supported_versions menu ~rpc_name:name in
         let caller_versions = versions () in
@@ -880,7 +880,7 @@ module Caller_converts = struct
 
       val dispatch_multi
         : (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
-            opt_with_metadata
+          opt_with_metadata
 
       val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
@@ -893,20 +893,20 @@ module Caller_converts = struct
       Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make_shared (Model : sig
-        val name : string
+      val name : string
 
-        type 'f opt_with_metadata
-        type query
-        type response
+      type 'f opt_with_metadata
+      type query
+      type response
 
-        val conv_opt_with_metadata
-          :  (?metadata:Rpc_metadata.t
-              -> Connection_with_menu.t
-              -> query
-              -> response Or_error.t Deferred.t)
-          -> (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
-               opt_with_metadata
-      end) =
+      val conv_opt_with_metadata
+        :  (?metadata:Rpc_metadata.t
+            -> Connection_with_menu.t
+            -> query
+            -> response Or_error.t Deferred.t)
+        -> (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
+           opt_with_metadata
+    end) =
     struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
@@ -927,13 +927,13 @@ module Caller_converts = struct
       let dispatch_multi = Model.conv_opt_with_metadata dispatch_multi
 
       module Register' (Version_i : sig
-          type query [@@deriving bin_io]
-          type response [@@deriving bin_io]
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
 
-          val version : int
-          val query_of_model : Model.query -> query
-          val model_of_response : Model.query -> response -> Model.response
-        end) =
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_response : Model.query -> response -> Model.response
+      end) =
       struct
         open Version_i
 
@@ -960,47 +960,47 @@ module Caller_converts = struct
       end
 
       module Register (Version_i : sig
-          type query [@@deriving bin_io]
-          type response [@@deriving bin_io]
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
 
-          val version : int
-          val query_of_model : Model.query -> query
-          val model_of_response : response -> Model.response
-        end) =
-        Register' (struct
-          include Version_i
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_response : response -> Model.response
+      end) =
+      Register' (struct
+        include Version_i
 
-          let model_of_response _ r = model_of_response r
-        end)
+        let model_of_response _ r = model_of_response r
+      end)
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type response
-      end) =
-      Make_shared (struct
-        include Model
+      type query
+      type response
+    end) =
+    Make_shared (struct
+      include Model
 
-        type 'f opt_with_metadata = 'f
+      type 'f opt_with_metadata = 'f
 
-        let conv_opt_with_metadata f = f ?metadata:None
-      end)
+      let conv_opt_with_metadata f = f ?metadata:None
+    end)
 
     module Make' (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type response
-      end) =
-      Make_shared (struct
-        include Model
+      type query
+      type response
+    end) =
+    Make_shared (struct
+      include Model
 
-        type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+      type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
 
-        let conv_opt_with_metadata = Fn.id
-      end)
+      let conv_opt_with_metadata = Fn.id
+    end)
   end
 
   module Pipe_rpc = struct
@@ -1013,8 +1013,8 @@ module Caller_converts = struct
         :  Connection_with_menu.t
         -> query
         -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) Result.t
-             Or_error.t
-             Deferred.t
+           Or_error.t
+           Deferred.t
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -1029,12 +1029,12 @@ module Caller_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type response
-        type error
-      end) =
+      type query
+      type response
+      type error
+    end) =
     struct
       type dispatcher =
         { abort : Connection.t -> Pipe_rpc.Id.t -> unit
@@ -1044,9 +1044,9 @@ module Caller_converts = struct
             -> Model.query
             -> ( Model.response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
                , Model.error )
-                 Result.t
-                 Or_error.t
-                 Deferred.t
+               Result.t
+               Or_error.t
+               Deferred.t
         ; dispatch_iter :
             ?metadata:Rpc_metadata.t
             -> Connection.t
@@ -1068,7 +1068,7 @@ module Caller_converts = struct
           ~versions
           ~registry
           ~dispatcher:(fun { dispatch_iter; _ } ?metadata conn query ->
-            dispatch_iter ?metadata conn query ~f)
+          dispatch_iter ?metadata conn query ~f)
       ;;
 
       let dispatch_multi conn_with_menu query =
@@ -1079,7 +1079,7 @@ module Caller_converts = struct
           ~versions
           ~registry
           ~dispatcher:(fun { dispatch; _ } ?metadata conn query ->
-            dispatch ?metadata conn query)
+          dispatch ?metadata conn query)
       ;;
 
       let abort_multi conn_with_menu id =
@@ -1090,8 +1090,8 @@ module Caller_converts = struct
           ~versions
           ~registry
           ~dispatcher:(fun { abort; _ } ?metadata:_ conn id ->
-            abort conn id;
-            Ok ())
+          abort conn id;
+          Ok ())
       ;;
 
       module type Version_shared = sig
@@ -1106,13 +1106,13 @@ module Caller_converts = struct
       end
 
       module Make_shared
-          (Version_i : Version_shared) (Convert : sig
-                                          val convert_elt : (Version_i.response -> Model.response) Or_error.t
+        (Version_i : Version_shared) (Convert : sig
+          val convert_elt : (Version_i.response -> Model.response) Or_error.t
 
-                                          val convert_pipe
-                                            :  Version_i.response Pipe.Reader.t
-                                            -> Model.response Or_error.t Pipe.Reader.t
-                                        end) =
+          val convert_pipe
+            :  Version_i.response Pipe.Reader.t
+            -> Model.response Or_error.t Pipe.Reader.t
+        end) =
       struct
         open Version_i
         open Convert
@@ -1183,12 +1183,12 @@ module Caller_converts = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val model_of_response
-            :  response Pipe.Reader.t
-            -> Model.response Or_error.t Pipe.Reader.t
-        end) =
+        val model_of_response
+          :  response Pipe.Reader.t
+          -> Model.response Or_error.t Pipe.Reader.t
+      end) =
         Make_shared
           (Version_i)
           (struct
@@ -1197,10 +1197,10 @@ module Caller_converts = struct
           end)
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val model_of_response : response -> Model.response
-        end) =
+        val model_of_response : response -> Model.response
+      end) =
         Make_shared
           (Version_i)
           (struct
@@ -1231,9 +1231,9 @@ module Caller_converts = struct
         -> query
         -> ( state * update Or_error.t Pipe.Reader.t * State_rpc.Metadata.t
            , error )
-             Result.t
-             Or_error.t
-             Deferred.t
+           Result.t
+           Or_error.t
+           Deferred.t
 
       val rpcs : unit -> Any.t list
       val versions : unit -> Int.Set.t
@@ -1241,13 +1241,13 @@ module Caller_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type query
-        type state
-        type update
-        type error
-      end) =
+      type query
+      type state
+      type update
+      type error
+    end) =
     struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
@@ -1278,12 +1278,12 @@ module Caller_converts = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val model_of_update
-            :  update Pipe.Reader.t
-            -> Model.update Or_error.t Pipe.Reader.t
-        end) =
+        val model_of_update
+          :  update Pipe.Reader.t
+          -> Model.update Or_error.t Pipe.Reader.t
+      end) =
       struct
         open Version_i
 
@@ -1327,22 +1327,22 @@ module Caller_converts = struct
       end
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val model_of_update : update -> Model.update
-        end) =
+        val model_of_update : update -> Model.update
+      end) =
       struct
         include Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let model_of_update rs =
-              Pipe.map rs ~f:(fun r ->
-                match Version_i.model_of_update r with
-                | r -> Ok r
-                | exception exn ->
-                  Error (failed_conversion (`Update, `Rpc name, `Version version, exn)))
-            ;;
-          end)
+          let model_of_update rs =
+            Pipe.map rs ~f:(fun r ->
+              match Version_i.model_of_update r with
+              | r -> Ok r
+              | exception exn ->
+                Error (failed_conversion (`Update, `Rpc name, `Version version, exn)))
+          ;;
+        end)
       end
     end
   end
@@ -1366,15 +1366,15 @@ module Caller_converts = struct
       Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make_shared (Model : sig
-        val name : string
+      val name : string
 
-        type 'f opt_with_metadata
-        type msg
+      type 'f opt_with_metadata
+      type msg
 
-        val conv_opt_with_metadata
-          :  (?metadata:Rpc_metadata.t -> Connection_with_menu.t -> msg -> unit Or_error.t)
-          -> (Connection_with_menu.t -> msg -> unit Or_error.t) opt_with_metadata
-      end) =
+      val conv_opt_with_metadata
+        :  (?metadata:Rpc_metadata.t -> Connection_with_menu.t -> msg -> unit Or_error.t)
+        -> (Connection_with_menu.t -> msg -> unit Or_error.t) opt_with_metadata
+    end) =
     struct
       let name = Model.name
       let registry = Int.Table.create ~size:1 ()
@@ -1395,11 +1395,11 @@ module Caller_converts = struct
       let dispatch_multi = Model.conv_opt_with_metadata dispatch_multi
 
       module Register (Version_i : sig
-          type msg [@@deriving bin_io]
+        type msg [@@deriving bin_io]
 
-          val version : int
-          val msg_of_model : Model.msg -> msg
-        end) =
+        val version : int
+        val msg_of_model : Model.msg -> msg
+      end) =
       struct
         open Version_i
 
@@ -1420,30 +1420,30 @@ module Caller_converts = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        type msg
-      end) =
-      Make_shared (struct
-        include Model
+      type msg
+    end) =
+    Make_shared (struct
+      include Model
 
-        type 'f opt_with_metadata = 'f
+      type 'f opt_with_metadata = 'f
 
-        let conv_opt_with_metadata f = f ?metadata:None
-      end)
+      let conv_opt_with_metadata f = f ?metadata:None
+    end)
 
     module Make' (Model : sig
-        val name : string
+      val name : string
 
-        type msg
-      end) =
-      Make_shared (struct
-        include Model
+      type msg
+    end) =
+    Make_shared (struct
+      include Model
 
-        type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+      type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
 
-        let conv_opt_with_metadata = Fn.id
-      end)
+      let conv_opt_with_metadata = Fn.id
+    end)
   end
 end
 
@@ -1460,7 +1460,7 @@ module Both_convert = struct
         : (Connection_with_menu.t
            -> caller_query
            -> caller_response Or_error.t Deferred.t)
-            opt_with_metadata
+          opt_with_metadata
 
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
@@ -1478,73 +1478,73 @@ module Both_convert = struct
       Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make_shared (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type 'f opt_with_metadata
-          type query
-          type response
+      module Caller : sig
+        type 'f opt_with_metadata
+        type query
+        type response
 
-          val conv_opt_with_metadata
-            :  (?metadata:Rpc_metadata.t
-                -> Connection_with_menu.t
-                -> query
-                -> response Or_error.t Deferred.t)
-            -> (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
-                 opt_with_metadata
-        end
+        val conv_opt_with_metadata
+          :  (?metadata:Rpc_metadata.t
+              -> Connection_with_menu.t
+              -> query
+              -> response Or_error.t Deferred.t)
+          -> (Connection_with_menu.t -> query -> response Or_error.t Deferred.t)
+             opt_with_metadata
+      end
 
-        module Callee : sig
-          type query
-          type response
-        end
-      end) =
+      module Callee : sig
+        type query
+        type response
+      end
+    end) =
     struct
       open Model
 
       let name = name
 
       module Caller = Caller_converts.Rpc.Make_shared (struct
-          let name = name
+        let name = name
 
-          include Caller
-        end)
+        include Caller
+      end)
 
       module Callee = Callee_converts.Rpc.Make (struct
-          let name = name
+        let name = name
 
-          include Callee
-        end)
+        include Callee
+      end)
 
       let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
       module Register (Version : sig
-          open Model
+        open Model
 
-          val version : int
+        val version : int
 
-          type query [@@deriving bin_io]
-          type response [@@deriving bin_io]
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
 
-          val query_of_caller_model : Caller.query -> query
-          val callee_model_of_query : query -> Callee.query
-          val response_of_callee_model : Callee.response -> response
-          val caller_model_of_response : response -> Caller.response
-        end) =
+        val query_of_caller_model : Caller.query -> query
+        val callee_model_of_query : query -> Callee.query
+        val response_of_callee_model : Callee.response -> response
+        val caller_model_of_response : response -> Caller.response
+      end) =
       struct
         include Callee.Register (struct
-            include Version
+          include Version
 
-            let model_of_query = callee_model_of_query
-            let response_of_model = response_of_callee_model
-          end)
+          let model_of_query = callee_model_of_query
+          let response_of_model = response_of_callee_model
+        end)
 
         include Caller.Register (struct
-            include Version
+          include Version
 
-            let query_of_model = query_of_caller_model
-            let model_of_response = caller_model_of_response
-          end)
+          let query_of_model = query_of_caller_model
+          let model_of_response = caller_model_of_response
+        end)
 
         let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
       end
@@ -1559,54 +1559,54 @@ module Both_convert = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type query
-          type response
-        end
+      module Caller : sig
+        type query
+        type response
+      end
 
-        module Callee : sig
-          type query
-          type response
-        end
-      end) =
-      Make_shared (struct
-        include Model
+      module Callee : sig
+        type query
+        type response
+      end
+    end) =
+    Make_shared (struct
+      include Model
 
-        module Caller = struct
-          include Model.Caller
+      module Caller = struct
+        include Model.Caller
 
-          type 'f opt_with_metadata = 'f
+        type 'f opt_with_metadata = 'f
 
-          let conv_opt_with_metadata f = f ?metadata:None
-        end
-      end)
+        let conv_opt_with_metadata f = f ?metadata:None
+      end
+    end)
 
     module Make' (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type query
-          type response
-        end
+      module Caller : sig
+        type query
+        type response
+      end
 
-        module Callee : sig
-          type query
-          type response
-        end
-      end) =
-      Make_shared (struct
-        include Model
+      module Callee : sig
+        type query
+        type response
+      end
+    end) =
+    Make_shared (struct
+      include Model
 
-        module Caller = struct
-          include Model.Caller
+      module Caller = struct
+        include Model.Caller
 
-          type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+        type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
 
-          let conv_opt_with_metadata = Fn.id
-        end
-      end)
+        let conv_opt_with_metadata = Fn.id
+      end
+    end)
   end
 
   module Pipe_rpc = struct
@@ -1623,9 +1623,9 @@ module Both_convert = struct
         -> caller_query
         -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
            , caller_error )
-             Result.t
-             Or_error.t
-             Deferred.t
+           Result.t
+           Or_error.t
+           Deferred.t
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -1658,36 +1658,36 @@ module Both_convert = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type query
-          type response
-          type error
-        end
+      module Caller : sig
+        type query
+        type response
+        type error
+      end
 
-        module Callee : sig
-          type query
-          type response
-          type error
-        end
-      end) =
+      module Callee : sig
+        type query
+        type response
+        type error
+      end
+    end) =
     struct
       open Model
 
       let name = name
 
       module Caller = Caller_converts.Pipe_rpc.Make (struct
-          let name = name
+        let name = name
 
-          include Caller
-        end)
+        include Caller
+      end)
 
       module Callee = Callee_converts.Pipe_rpc.Make (struct
-          let name = name
+        let name = name
 
-          include Callee
-        end)
+        include Callee
+      end)
 
       let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
@@ -1706,56 +1706,56 @@ module Both_convert = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val response_of_callee_model
-            :  Model.Callee.response Pipe.Reader.t
-            -> response Pipe.Reader.t
+        val response_of_callee_model
+          :  Model.Callee.response Pipe.Reader.t
+          -> response Pipe.Reader.t
 
-          val caller_model_of_response
-            :  response Pipe.Reader.t
-            -> Model.Caller.response Or_error.t Pipe.Reader.t
-        end) =
+        val caller_model_of_response
+          :  response Pipe.Reader.t
+          -> Model.Caller.response Or_error.t Pipe.Reader.t
+      end) =
       struct
         include Callee.Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let model_of_query = callee_model_of_query
-            let response_of_model = response_of_callee_model
-            let error_of_model = error_of_callee_model
-          end)
+          let model_of_query = callee_model_of_query
+          let response_of_model = response_of_callee_model
+          let error_of_model = error_of_callee_model
+        end)
 
         include Caller.Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let query_of_model = query_of_caller_model
-            let model_of_response = caller_model_of_response
-            let model_of_error = caller_model_of_error
-          end)
+          let query_of_model = query_of_caller_model
+          let model_of_response = caller_model_of_response
+          let model_of_error = caller_model_of_error
+        end)
       end
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val response_of_callee_model : Model.Callee.response -> response
-          val caller_model_of_response : response -> Model.Caller.response
-        end) =
+        val response_of_callee_model : Model.Callee.response -> response
+        val caller_model_of_response : response -> Model.Caller.response
+      end) =
       struct
         include Callee.Register (struct
-            include Version_i
+          include Version_i
 
-            let model_of_query = callee_model_of_query
-            let response_of_model = response_of_callee_model
-            let error_of_model = error_of_callee_model
-          end)
+          let model_of_query = callee_model_of_query
+          let response_of_model = response_of_callee_model
+          let error_of_model = error_of_callee_model
+        end)
 
         include Caller.Register (struct
-            include Version_i
+          include Version_i
 
-            let query_of_model = query_of_caller_model
-            let model_of_response = caller_model_of_response
-            let model_of_error = caller_model_of_error
-          end)
+          let query_of_model = query_of_caller_model
+          let model_of_response = caller_model_of_response
+          let model_of_error = caller_model_of_error
+        end)
       end
 
       let dispatch_multi = Caller.dispatch_multi
@@ -1784,9 +1784,9 @@ module Both_convert = struct
         -> caller_query
         -> ( caller_state * caller_update Or_error.t Pipe.Reader.t * State_rpc.Metadata.t
            , caller_error )
-             Result.t
-             Or_error.t
-             Deferred.t
+           Result.t
+           Or_error.t
+           Deferred.t
 
       val implement_multi
         :  ?log_not_previously_seen_version:(name:string -> int -> unit)
@@ -1794,7 +1794,7 @@ module Both_convert = struct
             -> version:int
             -> callee_query
             -> (callee_state * callee_update Pipe.Reader.t, callee_error) Result.t
-                 Deferred.t)
+               Deferred.t)
         -> 'state Implementation.t list
 
       val rpcs : unit -> Any.t list
@@ -1803,38 +1803,38 @@ module Both_convert = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type query
-          type state
-          type update
-          type error
-        end
+      module Caller : sig
+        type query
+        type state
+        type update
+        type error
+      end
 
-        module Callee : sig
-          type query
-          type state
-          type update
-          type error
-        end
-      end) =
+      module Callee : sig
+        type query
+        type state
+        type update
+        type error
+      end
+    end) =
     struct
       open Model
 
       let name = name
 
       module Caller = Caller_converts.State_rpc.Make (struct
-          let name = name
+        let name = name
 
-          include Caller
-        end)
+        include Caller
+      end)
 
       module Callee = Callee_converts.State_rpc.Make (struct
-          let name = name
+        let name = name
 
-          include Callee
-        end)
+        include Callee
+      end)
 
       let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
@@ -1856,61 +1856,61 @@ module Both_convert = struct
       end
 
       module Register_raw (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val caller_model_of_update
-            :  update Pipe.Reader.t
-            -> Model.Caller.update Or_error.t Pipe.Reader.t
+        val caller_model_of_update
+          :  update Pipe.Reader.t
+          -> Model.Caller.update Or_error.t Pipe.Reader.t
 
-          val update_of_callee_model
-            :  Model.Callee.state
-            -> Model.Callee.update Pipe.Reader.t
-            -> update Pipe.Reader.t
-        end) =
+        val update_of_callee_model
+          :  Model.Callee.state
+          -> Model.Callee.update Pipe.Reader.t
+          -> update Pipe.Reader.t
+      end) =
       struct
         include Callee.Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let model_of_query = callee_model_of_query
-            let state_of_model = state_of_callee_model
-            let update_of_model = update_of_callee_model
-            let error_of_model = error_of_callee_model
-          end)
+          let model_of_query = callee_model_of_query
+          let state_of_model = state_of_callee_model
+          let update_of_model = update_of_callee_model
+          let error_of_model = error_of_callee_model
+        end)
 
         include Caller.Register_raw (struct
-            include Version_i
+          include Version_i
 
-            let query_of_model = query_of_caller_model
-            let model_of_state = caller_model_of_state
-            let model_of_update = caller_model_of_update
-            let model_of_error = caller_model_of_error
-          end)
+          let query_of_model = query_of_caller_model
+          let model_of_state = caller_model_of_state
+          let model_of_update = caller_model_of_update
+          let model_of_error = caller_model_of_error
+        end)
       end
 
       module Register (Version_i : sig
-          include Version_shared
+        include Version_shared
 
-          val update_of_callee_model : Model.Callee.update -> update
-          val caller_model_of_update : update -> Model.Caller.update
-        end) =
+        val update_of_callee_model : Model.Callee.update -> update
+        val caller_model_of_update : update -> Model.Caller.update
+      end) =
       struct
         include Callee.Register (struct
-            include Version_i
+          include Version_i
 
-            let model_of_query = callee_model_of_query
-            let state_of_model = state_of_callee_model
-            let update_of_model = update_of_callee_model
-            let error_of_model = error_of_callee_model
-          end)
+          let model_of_query = callee_model_of_query
+          let state_of_model = state_of_callee_model
+          let update_of_model = update_of_callee_model
+          let error_of_model = error_of_callee_model
+        end)
 
         include Caller.Register (struct
-            include Version_i
+          include Version_i
 
-            let query_of_model = query_of_caller_model
-            let model_of_state = caller_model_of_state
-            let model_of_update = caller_model_of_update
-            let model_of_error = caller_model_of_error
-          end)
+          let query_of_model = query_of_caller_model
+          let model_of_state = caller_model_of_state
+          let model_of_update = caller_model_of_update
+          let model_of_error = caller_model_of_error
+        end)
       end
 
       let dispatch_multi = Caller.dispatch_multi
@@ -1945,62 +1945,62 @@ module Both_convert = struct
       Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make_shared (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type 'f opt_with_metadata
-          type msg
+      module Caller : sig
+        type 'f opt_with_metadata
+        type msg
 
-          val conv_opt_with_metadata
-            :  (?metadata:Rpc_metadata.t -> Connection_with_menu.t -> msg -> unit Or_error.t)
-            -> (Connection_with_menu.t -> msg -> unit Or_error.t) opt_with_metadata
-        end
+        val conv_opt_with_metadata
+          :  (?metadata:Rpc_metadata.t -> Connection_with_menu.t -> msg -> unit Or_error.t)
+          -> (Connection_with_menu.t -> msg -> unit Or_error.t) opt_with_metadata
+      end
 
-        module Callee : sig
-          type msg
-        end
-      end) =
+      module Callee : sig
+        type msg
+      end
+    end) =
     struct
       open Model
 
       let name = name
 
       module Caller = Caller_converts.One_way.Make_shared (struct
-          let name = name
+        let name = name
 
-          include Caller
-        end)
+        include Caller
+      end)
 
       module Callee = Callee_converts.One_way.Make (struct
-          let name = name
+        let name = name
 
-          include Callee
-        end)
+        include Callee
+      end)
 
       let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
 
       module Register (Version : sig
-          open Model
+        open Model
 
-          val version : int
+        val version : int
 
-          type msg [@@deriving bin_io]
+        type msg [@@deriving bin_io]
 
-          val msg_of_caller_model : Caller.msg -> msg
-          val callee_model_of_msg : msg -> Callee.msg
-        end) =
+        val msg_of_caller_model : Caller.msg -> msg
+        val callee_model_of_msg : msg -> Callee.msg
+      end) =
       struct
         include Callee.Register (struct
-            include Version
+          include Version
 
-            let model_of_msg = callee_model_of_msg
-          end)
+          let model_of_msg = callee_model_of_msg
+        end)
 
         include Caller.Register (struct
-            include Version
+          include Version
 
-            let msg_of_model = msg_of_caller_model
-          end)
+          let msg_of_model = msg_of_caller_model
+        end)
 
         let%test _ = Int.Set.equal (Caller.versions ()) (Callee.versions ())
       end
@@ -2015,49 +2015,49 @@ module Both_convert = struct
     end
 
     module Make (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type msg
-        end
+      module Caller : sig
+        type msg
+      end
 
-        module Callee : sig
-          type msg
-        end
-      end) =
-      Make_shared (struct
-        include Model
+      module Callee : sig
+        type msg
+      end
+    end) =
+    Make_shared (struct
+      include Model
 
-        module Caller = struct
-          include Model.Caller
+      module Caller = struct
+        include Model.Caller
 
-          type 'f opt_with_metadata = 'f
+        type 'f opt_with_metadata = 'f
 
-          let conv_opt_with_metadata f = f ?metadata:None
-        end
-      end)
+        let conv_opt_with_metadata f = f ?metadata:None
+      end
+    end)
 
     module Make' (Model : sig
-        val name : string
+      val name : string
 
-        module Caller : sig
-          type msg
-        end
+      module Caller : sig
+        type msg
+      end
 
-        module Callee : sig
-          type msg
-        end
-      end) =
-      Make_shared (struct
-        include Model
+      module Callee : sig
+        type msg
+      end
+    end) =
+    Make_shared (struct
+      include Model
 
-        module Caller = struct
-          include Model.Caller
+      module Caller = struct
+        include Model.Caller
 
-          type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+        type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
 
-          let conv_opt_with_metadata = Fn.id
-        end
-      end)
+        let conv_opt_with_metadata = Fn.id
+      end
+    end)
   end
 end

@@ -21,10 +21,10 @@ let sexp_of_t t ~get_connection_close_reason =
 (* it would make sense to just take a [Connection.t], but we take its pieces instead to
    avoid a dependency cycle *)
 let to_error
-      t
-      ~rpc_description:{ Description.name = rpc_name; version = rpc_version }
-      ~connection_description
-      ~connection_close_started
+  t
+  ~rpc_description:{ Description.name = rpc_name; version = rpc_version }
+  ~connection_description
+  ~connection_close_started
   =
   let rpc_error =
     sexp_of_t t ~get_connection_close_reason:(fun () ->

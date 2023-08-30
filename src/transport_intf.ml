@@ -13,7 +13,6 @@ module Handler_result = struct
     | Wait of unit Deferred.t
 end
 
-
 module type Reader = sig
   type t [@@deriving sexp_of]
 
@@ -44,7 +43,7 @@ module Send_result = struct
     | Sent of
         { result : 'a [@global]
         ; bytes : int
-        (** Bytes should equal the size of the bin_prot rpc message and data. The total
+            (** Bytes should equal the size of the bin_prot rpc message and data. The total
             bytes written on the network in the standard protocol (which has 8-bytes sizes
             before each frame) will be [sum([8 + x.bytes for each send result x])]. Other
             framing protocols or encryption (e.g. rpc over kerberos) may write more or

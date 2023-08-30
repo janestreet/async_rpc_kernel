@@ -28,7 +28,7 @@ module F : sig
     | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
 
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
-    ('connection_state, 'query, 'init, 'update) F.streaming_impl =
+        ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
@@ -40,11 +40,11 @@ module F : sig
          -> ('init, 'init) Result.t Or_not_authorized.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
-    ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
+        ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
     { bin_query_reader : 'query Bin_prot.Type_class.reader
     ; bin_init_writer : 'init Bin_prot.Type_class.writer
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
-    (* 'init can be an error or an initial state *)
+        (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
     }
 

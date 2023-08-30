@@ -44,7 +44,7 @@ let dispatch_expert ~client ~payload =
       ~len:(Bigstring.length buf)
       ~handle_response
       ~handle_error:(fun err ->
-        failwiths ~here:[%here] "expert rpc error" err [%sexp_of: Error.t])
+      failwiths ~here:[%here] "expert rpc error" err [%sexp_of: Error.t])
   with
   | `Connection_closed -> failwith "connection closed"
   | `Ok -> Ivar.read wait_for_response
@@ -254,9 +254,9 @@ let%expect_test "[V1 -> V1] RPC connection" =
     ~client_header:Test_helpers.Header.v1
     ~server_header:Test_helpers.Header.v1
     ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
-      print_headers ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    print_headers ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0700 0000 0000 0000    length= 7 (64-bit LE)
         02                       body= List: 2 items
@@ -267,10 +267,10 @@ let%expect_test "[V1 -> V1] RPC connection" =
         02                       body= List: 2 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
@@ -300,10 +300,10 @@ let%expect_test "[V1 -> V1] RPC connection" =
         feea 01                                        1: 490 (int)
         fe14 02                                        2: 532 (int)
         fed7 03                                        3: 983 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1300 0000 0000 0000    length= 19 (64-bit LE)
         01                       body= Query_v1
@@ -325,10 +325,10 @@ let%expect_test "[V1 -> V1] RPC connection" =
         fecb 00                                        0: 203 (int)
         fe6e 02                                        1: 622 (int)
         feb5 03                                        2: 949 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0f00 0000 0000 0000    length= 15 (64-bit LE)
         01                       body= Query_v1
@@ -350,7 +350,7 @@ let%expect_test "[V1 -> V1] RPC connection" =
         37                                             0: 55 (int)
         74                                             1: 116 (int)
         fe18 02                                        2: 536 (int) |}];
-      return ())
+    return ())
 ;;
 
 let%expect_test "[V2 -> V2] RPC connection" =
@@ -358,9 +358,9 @@ let%expect_test "[V2 -> V2] RPC connection" =
     ~client_header:Test_helpers.Header.v2
     ~server_header:Test_helpers.Header.v2
     ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
-      print_headers ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    print_headers ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0800 0000 0000 0000    length= 8 (64-bit LE)
         03                       body= List: 3 items
@@ -373,10 +373,10 @@ let%expect_test "[V2 -> V2] RPC connection" =
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
         02                             2: 2 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
@@ -407,10 +407,10 @@ let%expect_test "[V2 -> V2] RPC connection" =
         feea 01                                        1: 490 (int)
         fe14 02                                        2: 532 (int)
         fed7 03                                        3: 983 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1400 0000 0000 0000    length= 20 (64-bit LE)
         03                       body= Query
@@ -433,10 +433,10 @@ let%expect_test "[V2 -> V2] RPC connection" =
         fecb 00                                        0: 203 (int)
         fe6e 02                                        1: 622 (int)
         feb5 03                                        2: 949 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1000 0000 0000 0000    length= 16 (64-bit LE)
         03                       body= Query
@@ -459,7 +459,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         37                                             0: 55 (int)
         74                                             1: 116 (int)
         fe18 02                                        2: 536 (int) |}];
-      return ())
+    return ())
 ;;
 
 (* Compatibility tests *)
@@ -469,9 +469,9 @@ let%expect_test "[V1 -> V2] RPC connection" =
     ~client_header:Test_helpers.Header.v1
     ~server_header:Test_helpers.Header.v2
     ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
-      print_headers ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    print_headers ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0700 0000 0000 0000    length= 7 (64-bit LE)
         02                       body= List: 2 items
@@ -483,10 +483,10 @@ let%expect_test "[V1 -> V2] RPC connection" =
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
         02                             2: 2 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
@@ -516,10 +516,10 @@ let%expect_test "[V1 -> V2] RPC connection" =
         feea 01                                        1: 490 (int)
         fe14 02                                        2: 532 (int)
         fed7 03                                        3: 983 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1300 0000 0000 0000    length= 19 (64-bit LE)
         01                       body= Query_v1
@@ -541,10 +541,10 @@ let%expect_test "[V1 -> V2] RPC connection" =
         fecb 00                                        0: 203 (int)
         fe6e 02                                        1: 622 (int)
         feb5 03                                        2: 949 (int) |}];
-      let%bind _ = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind _ = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0f00 0000 0000 0000    length= 15 (64-bit LE)
         01                       body= Query_v1
@@ -566,7 +566,7 @@ let%expect_test "[V1 -> V2] RPC connection" =
         37                                             0: 55 (int)
         74                                             1: 116 (int)
         fe18 02                                        2: 536 (int) |}];
-      return ())
+    return ())
 ;;
 
 let%expect_test "[V2 -> V1] RPC connection" =
@@ -574,9 +574,9 @@ let%expect_test "[V2 -> V1] RPC connection" =
     ~client_header:Test_helpers.Header.v2
     ~server_header:Test_helpers.Header.v1
     ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
-      print_headers ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    print_headers ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0800 0000 0000 0000    length= 8 (64-bit LE)
         03                       body= List: 3 items
@@ -588,10 +588,10 @@ let%expect_test "[V2 -> V1] RPC connection" =
         02                       body= List: 2 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
@@ -621,10 +621,10 @@ let%expect_test "[V2 -> V1] RPC connection" =
         feea 01                                        1: 490 (int)
         fe14 02                                        2: 532 (int)
         fed7 03                                        3: 983 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         1300 0000 0000 0000    length= 19 (64-bit LE)
         01                       body= Query_v1
@@ -646,10 +646,10 @@ let%expect_test "[V2 -> V1] RPC connection" =
         fecb 00                                        0: 203 (int)
         fe6e 02                                        1: 622 (int)
         feb5 03                                        2: 949 (int) |}];
-      let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
-      [%expect
-        {|
+    let%bind () = dispatch ~client in
+    print_messages_bidirectional ~s_to_c ~c_to_s;
+    [%expect
+      {|
         ---   client -> server:   ---
         0f00 0000 0000 0000    length= 15 (64-bit LE)
         01                       body= Query_v1
@@ -671,7 +671,7 @@ let%expect_test "[V2 -> V1] RPC connection" =
         37                                             0: 55 (int)
         74                                             1: 116 (int)
         fe18 02                                        2: 536 (int) |}];
-      return ())
+    return ())
 ;;
 
 let%expect_test "expert v2 dispatch" =

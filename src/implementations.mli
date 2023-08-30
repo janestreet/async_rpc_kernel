@@ -11,10 +11,10 @@ type 'connection_state on_unknown_rpc =
   | `Continue
   | `Close_connection
   | `Call of
-      'connection_state
-      -> rpc_tag:string
-      -> version:int
-      -> [ `Close_connection | `Continue ]
+    'connection_state
+    -> rpc_tag:string
+    -> version:int
+    -> [ `Close_connection | `Continue ]
   ]
 
 val create
@@ -90,10 +90,10 @@ val create_exn
        | `Continue
        | `Close_connection
        | `Call of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> [ `Close_connection | `Continue ]
+         'connection_state
+         -> rpc_tag:string
+         -> version:int
+         -> [ `Close_connection | `Continue ]
        ]
   -> 'connection_state t
 
@@ -134,19 +134,19 @@ module Expert : sig
          | `Continue
          | `Close_connection
          | `Call of
-             'connection_state
-             -> rpc_tag:string
-             -> version:int
-             -> [ `Close_connection | `Continue ]
+           'connection_state
+           -> rpc_tag:string
+           -> version:int
+           -> [ `Close_connection | `Continue ]
          | `Expert of
-             'connection_state
-             -> rpc_tag:string
-             -> version:int
-             -> Responder.t
-             -> Bigstring.t
-             -> pos:int
-             -> len:int
-             -> unit Deferred.t
+           'connection_state
+           -> rpc_tag:string
+           -> version:int
+           -> Responder.t
+           -> Bigstring.t
+           -> pos:int
+           -> len:int
+           -> unit Deferred.t
          ]
     -> 'connection_state t
 end

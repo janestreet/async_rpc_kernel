@@ -120,11 +120,11 @@ module Implementations : sig
     | `Continue
     | `Close_connection (** used to be the behavior of [`Ignore] *)
     | `Call of
-        'connection_state
-        -> rpc_tag:string
-        -> version:int
-        -> [ `Close_connection | `Continue ]
-        (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
+      'connection_state
+      -> rpc_tag:string
+      -> version:int
+      -> [ `Close_connection | `Continue ]
+      (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
     ]
 
   (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
@@ -136,7 +136,7 @@ module Implementations : sig
     -> on_unknown_rpc:'connection_state on_unknown_rpc
     -> ( 'connection_state t
        , [ `Duplicate_implementations of Description.t list ] )
-         Result.t
+       Result.t
 
   val create_exn
     :  implementations:'connection_state Implementation.t list
@@ -145,10 +145,10 @@ module Implementations : sig
          | `Continue
          | `Close_connection (** used to be the behavior of [`Ignore] *)
          | `Call of
-             'connection_state
-             -> rpc_tag:string
-             -> version:int
-             -> [ `Close_connection | `Continue ]
+           'connection_state
+           -> rpc_tag:string
+           -> version:int
+           -> [ `Close_connection | `Continue ]
          ]
     -> 'connection_state t
 
@@ -179,20 +179,20 @@ module Implementations : sig
            | `Continue
            | `Close_connection (** used to be the behavior of [`Ignore] *)
            | `Call of
-               'connection_state
-               -> rpc_tag:string
-               -> version:int
-               -> [ `Close_connection | `Continue ]
+             'connection_state
+             -> rpc_tag:string
+             -> version:int
+             -> [ `Close_connection | `Continue ]
            | `Expert of
-               'connection_state
-               -> rpc_tag:string
-               -> version:int
-               -> Responder.t
-               -> Bigstring.t
-               -> pos:int
-               -> len:int
-               -> unit Deferred.t
-               (** The [Deferred.t] the function returns is only used to determine when it is
+             'connection_state
+             -> rpc_tag:string
+             -> version:int
+             -> Responder.t
+             -> Bigstring.t
+             -> pos:int
+             -> len:int
+             -> unit Deferred.t
+             (** The [Deferred.t] the function returns is only used to determine when it is
                    safe to overwrite the supplied [Bigstring.t], so it is *not* necessary to
                    completely finish handling the query before it is filled in.  In
                    particular, if you don't intend to read from the [Bigstring.t] after the
@@ -297,7 +297,6 @@ module Rpc : sig
       val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
       val write_error : t -> Error.t -> unit
     end
-
 
     (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
         the flushed [Deferred.t] is determined.
@@ -409,7 +408,7 @@ module Pipe_close_reason : sig
     | Closed_locally (** You closed the pipe. *)
     | Closed_remotely (** The RPC implementer closed the pipe. *)
     | Error of Error.t
-    (** An error occurred, e.g. a message could not be deserialized.  If the connection
+        (** An error occurred, e.g. a message could not be deserialized.  If the connection
         closes before either side explicitly closes the pipe, it will also go into this
         case. *)
   [@@deriving bin_io, compare, sexp]
@@ -456,7 +455,7 @@ module Pipe_rpc : sig
 
   val create
     :  ?client_pushes_back:unit
-    (** If the connection is backed up, the rpc server library stops consuming elements
+         (** If the connection is backed up, the rpc server library stops consuming elements
         from the pipe being filled by [implement]'s caller. Servers should pay attention
         to the pipe's pushback, otherwise they risk running out of memory if they fill the
         pipe much faster than the transport can handle, or if the client pushes back as
@@ -508,7 +507,6 @@ module Pipe_rpc : sig
   (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] or
       {!State_rpc} query. *)
   module Direct_stream_writer : sig
-
     type 'a t
 
     (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
@@ -557,7 +555,7 @@ module Pipe_rpc : sig
       val create
         :  ?buffer:Buffer.t
         -> ?send_last_value_on_add:bool
-        (** If [true], the group will automatically send a copy of the last value written
+             (** If [true], the group will automatically send a copy of the last value written
             to each new writer when it's added to the group. Default: false. *)
         -> unit
         -> _ t
@@ -567,7 +565,7 @@ module Pipe_rpc : sig
       val flushed_or_closed : _ t -> unit Deferred.t
 
       val flushed : _ t -> unit Deferred.t
-      [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]"]
+        [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]"]
 
       (** Add a direct stream writer to the group. Raises if the writer is closed or
           already part of the group, or if its bin-prot writer is different than an
@@ -589,7 +587,6 @@ module Pipe_rpc : sig
       val write : 'a t -> 'a -> unit Deferred.t
 
       val write_without_pushback : 'a t -> 'a -> unit
-
       val to_list : 'a t -> 'a direct_stream_writer list
       val length : _ t -> int
 
@@ -681,7 +678,6 @@ module Pipe_rpc : sig
     -> f:('response Pipe_message.t -> Pipe_response.t)
     -> (Id.t, 'error) Result.t Or_error.t Deferred.t
 
-
   (** [abort rpc connection id] given an RPC and the id returned as part of a call to
       dispatch, abort requests that the other side of the connection stop sending
       updates.
@@ -702,7 +698,6 @@ module Pipe_rpc : sig
   val query_type_id : ('query, _, _) t -> 'query Type_equal.Id.t
   val response_type_id : (_, 'response, _) t -> 'response Type_equal.Id.t
   val error_type_id : (_, _, 'error) t -> 'error Type_equal.Id.t
-
 end
 
 (** A state rpc is an easy way for two processes to synchronize a data structure by
@@ -761,11 +756,10 @@ module State_rpc : sig
     -> Connection.t
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t
-         Deferred.t
+       Deferred.t
 
   module Pipe_message = Pipe_message
   module Pipe_response = Pipe_response
-
 
   (** [dispatch_fold] is similar to [Pipe_rpc.dispatch_iter]. [init] will be called with the
       initial state, and then [f] will be called on each update message. If the update pipe

@@ -155,9 +155,9 @@ module Heartbeat_config = struct
   ;;
 
   let create
-        ?(timeout = Time_ns.Span.of_sec 30.)
-        ?(send_every = Time_ns.Span.of_sec 10.)
-        ()
+    ?(timeout = Time_ns.Span.of_sec 30.)
+    ?(send_every = Time_ns.Span.of_sec 10.)
+    ()
     =
     { timeout; send_every }
   ;;
@@ -194,7 +194,7 @@ type t =
   ; open_queries : (P.Query_id.t, (response_handler[@sexp.opaque])) Hashtbl.t
   ; close_started : Info.t Ivar.t
   ; close_finished : unit Ivar.t
-  (* There's a circular dependency between connections and their implementation instances
+      (* There's a circular dependency between connections and their implementation instances
      (the latter depends on the connection state, which is given access to the connection
      when it is created). *)
   ; implementations_instance : Implementations.Instance.t Set_once.t
@@ -202,7 +202,7 @@ type t =
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
   ; negotiated_protocol_version : int Set_once.t
   ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
-  (* responses to queries are written by the implementations instance. Other events are
+      (* responses to queries are written by the implementations instance. Other events are
      written by this module. *)
   }
 [@@deriving sexp_of]
@@ -239,12 +239,12 @@ module Dispatch_error = struct
 end
 
 let handle_send_result :
-  'a.
-  t
-  -> ('a Transport.Send_result.t[@local])
-  -> rpc:(Description.t[@ocaml.local])
-  -> id:(P.Query_id.t[@ocaml.local])
-  -> ('a, Dispatch_error.t) Result.t
+      'a.
+      t
+      -> ('a Transport.Send_result.t[@local])
+      -> rpc:(Description.t[@ocaml.local])
+      -> id:(P.Query_id.t[@ocaml.local])
+      -> ('a, Dispatch_error.t) Result.t
   =
   fun t r ~rpc ~id ->
   let id = (id :> Int63.t) in
@@ -280,20 +280,20 @@ let handle_special_send_result t ((result : unit Transport.Send_result.t) [@loca
     raise_s
       [%sexp
         "Message cannot be sent"
-      , { reason =
-            ([%globalize: unit Transport.Send_result.t] result
-             : unit Transport.Send_result.t)
-        ; connection = (t : t_hum_writer)
-        }]
+        , { reason =
+              ([%globalize: unit Transport.Send_result.t] result
+                : unit Transport.Send_result.t)
+          ; connection = (t : t_hum_writer)
+          }]
 ;;
 
 let send_query_with_registered_response_handler
-      t
-      (query : 'query P.Query.t)
-      ~response_handler
-      ~send_query:
-      ((send_query : 'query P.Query.t -> ('response Transport.Send_result.t[@local])) [@local
-       ])
+  t
+  (query : 'query P.Query.t)
+  ~response_handler
+  ~send_query:
+    ((send_query : 'query P.Query.t -> ('response Transport.Send_result.t[@local])) [@local
+                                                                                      ])
   : ('response, Dispatch_error.t) Result.t
   =
   let registered_response_handler =
@@ -339,15 +339,15 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
 ;;
 
 let make_dispatch_bigstring
-      do_send
-      ?metadata
-      t
-      ~tag
-      ~version
-      buf
-      ~pos
-      ~len
-      ~response_handler
+  do_send
+  ?metadata
+  t
+  ~tag
+  ~version
+  buf
+  ~pos
+  ~len
+  ~response_handler
   =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
@@ -377,11 +377,11 @@ let schedule_dispatch_bigstring =
 ;;
 
 let handle_response
-      t
-      (response : Nat0.t P.Response.t)
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~protocol_message_len
+  t
+  (response : Nat0.t P.Response.t)
+  ~read_buffer
+  ~read_buffer_pos_ref
+  ~protocol_message_len
   : _ Transport.Handler_result.t
   =
   match Hashtbl.find t.open_queries response.id with
@@ -431,12 +431,12 @@ let handle_response
 ;;
 
 let handle_msg
-      t
-      (msg : _ P.Message.t)
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~close_connection_monitor
-      ~protocol_message_len
+  t
+  (msg : _ P.Message.t)
+  ~read_buffer
+  ~read_buffer_pos_ref
+  ~close_connection_monitor
+  ~protocol_message_len
   : _ Transport.Handler_result.t
   =
   match msg with
@@ -634,12 +634,12 @@ let schedule_heartbeats t =
 ;;
 
 let run_after_handshake
-      t
-      writer
-      ~negotiated_protocol_version
-      ~implementations
-      ~connection_state
-      ~writer_monitor_exns
+  t
+  writer
+  ~negotiated_protocol_version
+  ~implementations
+  ~connection_state
+  ~writer_monitor_exns
   =
   Protocol_writer.set_negotiated_protocol_version t.writer negotiated_protocol_version;
   let instance =
@@ -696,10 +696,8 @@ let do_handshake t writer ~handshake_timeout ~header =
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
     let result =
-      Monitor.try_with
-        ~rest:`Log
-        ~run:`Now
-        (fun () -> Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
+      Monitor.try_with ~rest:`Log ~run:`Now (fun () ->
+        Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
     match%map
       Time_source.with_timeout
@@ -734,14 +732,14 @@ let get_handshake_header () =
 ;;
 
 let create
-      ?implementations
-      ~connection_state
-      ?(handshake_timeout = default_handshake_timeout)
-      ?(heartbeat_config = Heartbeat_config.create ())
-      ?(max_metadata_size = Byte_units.of_kilobytes 1.)
-      ?(description = Info.of_string "<created-directly>")
-      ?(time_source = Synchronous_time_source.wall_clock ())
-      ({ reader; writer } : Transport.t)
+  ?implementations
+  ~connection_state
+  ?(handshake_timeout = default_handshake_timeout)
+  ?(heartbeat_config = Heartbeat_config.create ())
+  ?(max_metadata_size = Byte_units.of_kilobytes 1.)
+  ?(description = Info.of_string "<created-directly>")
+  ?(time_source = Synchronous_time_source.wall_clock ())
+  ({ reader; writer } : Transport.t)
   =
   let implementations =
     match implementations with
@@ -791,15 +789,15 @@ let create
 ;;
 
 let with_close
-      ?implementations
-      ?handshake_timeout
-      ?heartbeat_config
-      ?description
-      ?time_source
-      ~connection_state
-      transport
-      ~dispatch_queries
-      ~on_handshake_error
+  ?implementations
+  ?handshake_timeout
+  ?heartbeat_config
+  ?description
+  ?time_source
+  ~connection_state
+  transport
+  ~dispatch_queries
+  ~on_handshake_error
   =
   let handle_handshake_error =
     match on_handshake_error with
@@ -827,24 +825,24 @@ let with_close
       ~finally:(fun () ->
         close t ~reason:(Info.of_string "Rpc.Connection.with_close finished"))
       (fun () ->
-         let%bind result = dispatch_queries t in
-         let%map () =
-           match implementations with
-           | None -> Deferred.unit
-           | Some _ -> close_finished t
-         in
-         result)
+        let%bind result = dispatch_queries t in
+        let%map () =
+          match implementations with
+          | None -> Deferred.unit
+          | Some _ -> close_finished t
+        in
+        result)
 ;;
 
 let server_with_close
-      ?handshake_timeout
-      ?heartbeat_config
-      ?description
-      ?time_source
-      transport
-      ~implementations
-      ~connection_state
-      ~on_handshake_error
+  ?handshake_timeout
+  ?heartbeat_config
+  ?description
+  ?time_source
+  transport
+  ~implementations
+  ~connection_state
+  ~on_handshake_error
   =
   let on_handshake_error =
     match on_handshake_error with
@@ -865,9 +863,9 @@ let server_with_close
 ;;
 
 let close
-      ?streaming_responses_flush_timeout
-      ?(reason = Info.of_string "Rpc.Connection.close")
-      t
+  ?streaming_responses_flush_timeout
+  ?(reason = Info.of_string "Rpc.Connection.close")
+  t
   =
   close ?streaming_responses_flush_timeout ~reason t
 ;;

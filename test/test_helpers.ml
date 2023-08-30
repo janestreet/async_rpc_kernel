@@ -107,7 +107,7 @@ module Tap = struct
       Binio_printer_helper.parse_and_print
         [%bin_shape:
           Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header.t
-            Binio_printer_helper.With_length64.t]
+          Binio_printer_helper.With_length64.t]
         buf
         ~pos)
   ;;
@@ -122,8 +122,8 @@ module Tap = struct
   let message_shape bin_shape_payload =
     [%bin_shape:
       payload Binio_printer_helper.With_length.t
-        Async_rpc_kernel.Async_rpc_kernel_private.Protocol.Message.needs_length
-        Binio_printer_helper.With_length64.t]
+      Async_rpc_kernel.Async_rpc_kernel_private.Protocol.Message.needs_length
+      Binio_printer_helper.With_length64.t]
   ;;
 
   let print_messages t payload_shape =
@@ -210,13 +210,13 @@ let tap_server (serv : (Socket.Address.Inet.t, int) Tcp.Server.t) =
       ~on_handler_error:`Raise
       Tcp.Where_to_listen.of_port_chosen_by_os
       (fun (_addr : Socket.Address.Inet.t) from_client to_client ->
-         let tap_server_to_client, record_chunk_s2c = Tap.create () in
-         let tap_client_to_server, record_chunk_c2s = Tap.create () in
-         let%bind (_ : _ Socket.t), from_server, to_server = Tcp.connect upstream in
-         copy_and_tap ~source:from_client ~sink:to_server ~record_chunk:record_chunk_c2s;
-         copy_and_tap ~source:from_server ~sink:to_client ~record_chunk:record_chunk_s2c;
-         Queue.enqueue conns (tap_server_to_client, tap_client_to_server);
-         Writer.close_finished to_server)
+      let tap_server_to_client, record_chunk_s2c = Tap.create () in
+      let tap_client_to_server, record_chunk_c2s = Tap.create () in
+      let%bind (_ : _ Socket.t), from_server, to_server = Tcp.connect upstream in
+      copy_and_tap ~source:from_client ~sink:to_server ~record_chunk:record_chunk_c2s;
+      copy_and_tap ~source:from_server ~sink:to_client ~record_chunk:record_chunk_s2c;
+      Queue.enqueue conns (tap_server_to_client, tap_client_to_server);
+      Writer.close_finished to_server)
   in
   conns, server
 ;;

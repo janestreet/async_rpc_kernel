@@ -21,13 +21,13 @@ module Int64_long = struct
 end
 
 module Make_with_length (Length : sig
-    type t
+  type t
 
-    val bin_shape_t : Bin_shape.t
-    val bin_read_t : Bigstring.t -> pos_ref:int ref -> t
-    val bin_write_t : Bigstring.t -> pos:int -> t -> int
-    val bin_size_t : t -> int
-  end) =
+  val bin_shape_t : Bin_shape.t
+  val bin_read_t : Bigstring.t -> pos_ref:int ref -> t
+  val bin_write_t : Bigstring.t -> pos:int -> t -> int
+  val bin_size_t : t -> int
+end) =
 struct
   type 'a t = 'a
 
@@ -222,7 +222,6 @@ let add_base_handlers () =
 let () = add_base_handlers ()
 
 module Aligned_row = struct
-
   module Simplified_row = struct
     type t =
       { bytes : string
@@ -270,7 +269,7 @@ module Aligned_row = struct
         let max_prefix, last_child = loop (i + 1) 0 in
         for j = i + 1 to last_child do
           simplified.(j).parts.(prefix_len - 1)
-          <- sprintf "%*s " max_prefix simplified.(j).parts.(prefix_len - 1)
+            <- sprintf "%*s " max_prefix simplified.(j).parts.(prefix_len - 1)
         done
       done
     done;

@@ -222,27 +222,27 @@ module Pipe_writer (Data : DATA) = struct
   ;;
 
   let send_bin_prot_and_bigstring
-        t
-        (writer : _ Bin_prot.Type_class.writer)
-        x
-        ~buf
-        ~pos
-        ~len:payload_size
+    t
+    (writer : _ Bin_prot.Type_class.writer)
+    x
+    ~buf
+    ~pos
+    ~len:payload_size
     =
     
       (check_closed t (fun () ->
          
            ((* Write the size header manually and concatenate the two *)
-             let data_size = writer.size x in
-             let data = Bigstring.create (data_size + Header.length + payload_size) in
-             Header.unsafe_set_payload_length data ~pos:0 (data_size + payload_size);
-             let dst_pos = writer.write data ~pos:Header.length x in
-             Bigstring.blit ~src:buf ~src_pos:pos ~dst:data ~dst_pos ~len:payload_size;
-             let data = Data.of_bigstring data in
-             let len = Data.length data in
-             incr_bytes_written t len;
-             Pipe.write_without_pushback t.pipe data;
-             sent_result () ~bytes:(len - Header.length))))
+            let data_size = writer.size x in
+            let data = Bigstring.create (data_size + Header.length + payload_size) in
+            Header.unsafe_set_payload_length data ~pos:0 (data_size + payload_size);
+            let dst_pos = writer.write data ~pos:Header.length x in
+            Bigstring.blit ~src:buf ~src_pos:pos ~dst:data ~dst_pos ~len:payload_size;
+            let data = Data.of_bigstring data in
+            let len = Data.length data in
+            incr_bytes_written t len;
+            Pipe.write_without_pushback t.pipe data;
+            sent_result () ~bytes:(len - Header.length))))
   ;;
 
   let send_bin_prot_and_bigstring_non_copying t writer x ~buf ~pos ~len =

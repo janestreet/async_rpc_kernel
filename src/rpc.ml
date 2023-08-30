@@ -1,4 +1,3 @@
-
 open Core
 open Async_kernel
 open Util
@@ -17,28 +16,28 @@ let ( >>|~ ) = Result.( >>| )
 let message_too_big_message message_too_big ~connection =
   [%sexp
     "Message cannot be sent"
-  , { reason = (Message_too_big message_too_big : Connection.Dispatch_error.t)
-    ; connection : Connection.t_hum_writer
-    }]
+    , { reason = (Message_too_big message_too_big : Connection.Dispatch_error.t)
+      ; connection : Connection.t_hum_writer
+      }]
 ;;
 
 let handle_dispatch_bigstring_result_exn ~connection
   : (unit, Connection.Dispatch_error.t) Result.t -> [ `Ok | `Connection_closed ]
   = function
-    | Ok () -> `Ok
-    | Error Closed -> `Connection_closed
-    | Error (Message_too_big message_too_big) ->
-      raise_s (message_too_big_message ~connection message_too_big)
+  | Ok () -> `Ok
+  | Error Closed -> `Connection_closed
+  | Error (Message_too_big message_too_big) ->
+    raise_s (message_too_big_message ~connection message_too_big)
 ;;
 
 let handle_schedule_dispatch_bigstring_result_exn ~connection
   :  (unit Deferred.t, Connection.Dispatch_error.t) Result.t
-    -> [ `Flushed of unit Deferred.t | `Connection_closed ]
+  -> [ `Flushed of unit Deferred.t | `Connection_closed ]
   = function
-    | Ok d -> `Flushed d
-    | Error Closed -> `Connection_closed
-    | Error (Message_too_big message_too_big) ->
-      raise_s (message_too_big_message ~connection message_too_big)
+  | Ok d -> `Flushed d
+  | Error Closed -> `Connection_closed
+  | Error (Message_too_big message_too_big) ->
+    raise_s (message_too_big_message ~connection message_too_big)
 ;;
 
 let rpc_result_to_or_error rpc_description conn result =
@@ -51,14 +50,14 @@ let rpc_result_to_or_error rpc_description conn result =
 
 module Rpc_common = struct
   let dispatch_raw'
-        ?metadata
-        conn
-        ~tag
-        ~version
-        ~bin_writer_query
-        ~query
-        ~query_id
-        ~response_handler
+    ?metadata
+    conn
+    ~tag
+    ~version
+    ~bin_writer_query
+    ~query
+    ~query_id
+    ~response_handler
     =
     let query = { P.Query.tag; version; id = query_id; metadata; data = query } in
     match Connection.dispatch conn ~response_handler ~bin_writer_query ~query with
@@ -66,9 +65,7 @@ module Rpc_common = struct
     | Error Closed -> Error Rpc_error.Connection_closed
     | Error (Message_too_big message_too_big) ->
       Error
-        (
-          Rpc_error.Uncaught_exn
-            (message_too_big_message message_too_big ~connection:conn))
+        (Rpc_error.Uncaught_exn (message_too_big_message message_too_big ~connection:conn))
   ;;
 
   let dispatch_raw ?metadata conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
@@ -166,10 +163,10 @@ module Rpc = struct
 
   let dispatch' ?metadata t conn query =
     let response_handler
-          ivar
-          (response : _ P.Response.t)
-          ~read_buffer
-          ~read_buffer_pos_ref
+      ivar
+      (response : _ P.Response.t)
+      ~read_buffer
+      ~read_buffer_pos_ref
       =
       let response =
         response.data
@@ -213,16 +210,16 @@ module Rpc = struct
     module Responder = Implementations.Expert.Rpc_responder
 
     let make_dispatch
-          do_dispatch
-          conn
-          ~rpc_tag
-          ~version
-          ?metadata
-          buf
-          ~pos
-          ~len
-          ~handle_response
-          ~handle_error
+      do_dispatch
+      conn
+      ~rpc_tag
+      ~version
+      ?metadata
+      buf
+      ~pos
+      ~len
+      ~handle_response
+      ~handle_error
       =
       let response_handler : Connection.response_handler =
         fun response ~read_buffer ~read_buffer_pos_ref ->
@@ -234,7 +231,7 @@ module Rpc = struct
                   ~get_connection_close_reason:(fun () ->
                     [%sexp
                       (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-                       : Info.t option)])
+                        : Info.t option)])
                   e));
           `remove (Ok ())
         | Ok len ->
@@ -255,15 +252,15 @@ module Rpc = struct
     ;;
 
     let dispatch
-          ?metadata
-          conn
-          ~rpc_tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~handle_response
-          ~handle_error
+      ?metadata
+      conn
+      ~rpc_tag
+      ~version
+      buf
+      ~pos
+      ~len
+      ~handle_response
+      ~handle_error
       =
       make_dispatch
         Connection.dispatch_bigstring
@@ -280,15 +277,15 @@ module Rpc = struct
     ;;
 
     let schedule_dispatch
-          ?metadata
-          conn
-          ~rpc_tag
-          ~version
-          buf
-          ~pos
-          ~len
-          ~handle_response
-          ~handle_error
+      ?metadata
+      conn
+      ~rpc_tag
+      ~version
+      buf
+      ~pos
+      ~len
+      ~handle_response
+      ~handle_error
       =
       make_dispatch
         Connection.schedule_dispatch_bigstring
@@ -336,10 +333,10 @@ module Rpc = struct
     ;;
 
     let implement_for_tag_and_version
-          ?(on_exception = On_exception.continue)
-          ~rpc_tag
-          ~version
-          f
+      ?(on_exception = On_exception.continue)
+      ~rpc_tag
+      ~version
+      f
       =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
@@ -350,10 +347,10 @@ module Rpc = struct
     ;;
 
     let implement_for_tag_and_version'
-          ?(on_exception = On_exception.continue)
-          ~rpc_tag
-          ~version
-          f
+      ?(on_exception = On_exception.continue)
+      ~rpc_tag
+      ~version
+      f
       =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
@@ -438,12 +435,12 @@ module One_way = struct
     ;;
 
     let dispatch
-          ?metadata
-          { tag; version; bin_msg = _; msg_type_id = _ }
-          conn
-          buf
-          ~pos
-          ~len
+      ?metadata
+      { tag; version; bin_msg = _; msg_type_id = _ }
+      conn
+      buf
+      ~pos
+      ~len
       =
       Connection.dispatch_bigstring
         ?metadata
@@ -458,12 +455,12 @@ module One_way = struct
     ;;
 
     let schedule_dispatch
-          ?metadata
-          { tag; version; bin_msg = _; msg_type_id = _ }
-          conn
-          buf
-          ~pos
-          ~len
+      ?metadata
+      { tag; version; bin_msg = _; msg_type_id = _ }
+      conn
+      buf
+      ~pos
+      ~len
       =
       Connection.schedule_dispatch_bigstring
         ?metadata
@@ -526,16 +523,16 @@ module Streaming_rpc = struct
     }
 
   let create
-        ?client_pushes_back
-        ~name
-        ~version
-        ~bin_query
-        ~bin_initial_response
-        ~bin_update_response
-        ~bin_error
-        ~alias_for_initial_response
-        ~alias_for_update_response
-        ()
+    ?client_pushes_back
+    ~name
+    ~version
+    ~bin_query
+    ~bin_initial_response
+    ~bin_update_response
+    ~bin_error
+    ~alias_for_initial_response
+    ~alias_for_update_response
+    ()
     =
     let client_pushes_back =
       match client_pushes_back with
@@ -638,7 +635,7 @@ module Streaming_rpc = struct
          ~bin_writer_query:P.Stream_query.bin_writer_nat0_t
          ~query
          ~response_handler:None
-       : (unit, Connection.Dispatch_error.t) Result.t)
+        : (unit, Connection.Dispatch_error.t) Result.t)
   ;;
 
   module Pipe_message = struct
@@ -688,9 +685,9 @@ module Streaming_rpc = struct
   end
 
   let read_error
-        ~get_connection_close_reason
-        (handler : _ Response_state.Update_handler.t)
-        err
+    ~get_connection_close_reason
+    (handler : _ Response_state.Update_handler.t)
+    err
     =
     let core_err =
       Error.t_of_sexp (Rpc_error.sexp_of_t ~get_connection_close_reason err)
@@ -723,8 +720,8 @@ module Streaming_rpc = struct
                ~len
                ~location:"client-side streaming_rpc response un-bin-io'ing"
                ~add_len:(function
-                 | `Eof -> 0
-                 | `Ok (len : Nat0.t) -> (len :> int))
+               | `Eof -> 0
+               | `Ok (len : Nat0.t) -> (len :> int))
            in
            (match data with
             | Error err -> read_error ~get_connection_close_reason handler err
@@ -781,8 +778,8 @@ module Streaming_rpc = struct
                    initial_handler.ivar
                    (Ok (Ok (initial_handler.query_id, initial_response)));
                  state.state
-                 <- Writing_updates
-                      (initial_handler.rpc.bin_update_response.reader, handler);
+                   <- Writing_updates
+                        (initial_handler.rpc.bin_update_response.reader, handler);
                  `keep)))
   ;;
 
@@ -802,12 +799,12 @@ module Streaming_rpc = struct
       ~bin_writer_query
       ~query
       ~f:(fun ivar ->
-        response_handler
-          ~get_connection_close_reason:(fun () ->
-            [%sexp
-              (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-               : Info.t option)])
-          { rpc = t; query_id; connection = conn; ivar; make_update_handler })
+      response_handler
+        ~get_connection_close_reason:(fun () ->
+          [%sexp
+            (Deferred.peek (Connection.close_reason ~on_close:`started conn)
+              : Info.t option)])
+        { rpc = t; query_id; connection = conn; ivar; make_update_handler })
   ;;
 
   let dispatch_fold ?metadata t conn query ~init ~f ~closed =
@@ -897,7 +894,7 @@ module Pipe_rpc = struct
       ~bin_initial_response:Unit.bin_t
       ~bin_update_response:bin_response
       ~bin_error
-      (* [initial_response] doesn't show up in [Pipe_rpc]'s signature,
+        (* [initial_response] doesn't show up in [Pipe_rpc]'s signature,
          so the type-id created using [alias_for_initial_response] is
          unreachable. *)
       ~alias_for_initial_response:""
@@ -1035,7 +1032,7 @@ module Pipe_rpc = struct
                closed, so [`Closed] here just means that the removal didn't happen yet. *)
             ignore
               (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
-               : [ `Ok | `Closed ]));
+                : [ `Ok | `Closed ]));
           if t.send_last_value_on_add && not (phys_equal !(t.buffer) buf)
           then (
             if Bigstring.length !(t.buffer) < len
@@ -1136,14 +1133,14 @@ module State_rpc = struct
   module Metadata = Streaming_rpc.Pipe_metadata
 
   let create
-        ?client_pushes_back
-        ~name
-        ~version
-        ~bin_query
-        ~bin_state
-        ~bin_update
-        ~bin_error
-        ()
+    ?client_pushes_back
+    ~name
+    ~version
+    ~bin_query
+    ~bin_state
+    ~bin_update
+    ~bin_error
+    ()
     =
     Streaming_rpc.create
       ?client_pushes_back

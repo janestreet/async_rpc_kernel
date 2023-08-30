@@ -45,12 +45,12 @@ open Core
 module Sent_response_kind : sig
   type t =
     | One_way_so_no_response
-    (** If the handler of a one-way RPC uses Async, this response message may be sent when
+        (** If the handler of a one-way RPC uses Async, this response message may be sent when
         that handler first calls [bind] rather than when it finishes its work. *)
     | Single_succeeded
     | Single_or_streaming_error
     | Expert_single_succeeded_or_failed
-    (** We can't always tell if an Expert response was successful so sometimes use this
+        (** We can't always tell if an Expert response was successful so sometimes use this
         variant. *)
     | Streaming_initial
     | Streaming_update
@@ -91,13 +91,13 @@ end
 type t =
   { event : Event.t
   ; rpc : Description.t option
-  (** Associated information for the RPC. This is [None] only for [Received (Response _)]
+      (** Associated information for the RPC. This is [None] only for [Received (Response _)]
       events. *)
   ; id : Int63.t
-  (** A unique identifier per in-flight RPC, this can be used to tie together request
+      (** A unique identifier per in-flight RPC, this can be used to tie together request
       and response events. The client and server see the same id. *)
   ; payload_bytes : int
-  (** The number of bytes for the message, except for the 8-byte length header before
+      (** The number of bytes for the message, except for the 8-byte length header before
       async-rpc messages. This includes the bytes specifying the rpc name/version or query
       id. This will be 0 in some cases where nothing is sent. *)
   }

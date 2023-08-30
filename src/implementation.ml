@@ -26,7 +26,7 @@ module F = struct
     | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
 
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
-    ('connection_state, 'query, 'init, 'update) F.streaming_impl =
+        ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
@@ -38,11 +38,11 @@ module F = struct
          -> ('init, 'init) Result.t Or_not_authorized.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
-    ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
+        ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
     { bin_query_reader : 'query Bin_prot.Type_class.reader
     ; bin_init_writer : 'init Bin_prot.Type_class.writer
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
-    (* 'init can be an error or an initial state *)
+        (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
     }
 
@@ -94,8 +94,8 @@ module F = struct
     | One_way_expert impl ->
       One_way_expert
         (fun state buf ~pos ~len ->
-           Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
-             impl authorized_state buf ~pos ~len))
+          Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
+            impl authorized_state buf ~pos ~len))
     | Rpc (bin_query, bin_response, impl, Blocking) ->
       let impl state q =
         Or_not_authorized.bind (f state) ~f:(fun authorized_state ->
@@ -126,13 +126,13 @@ module F = struct
         | Pipe impl ->
           Pipe
             (fun state q ->
-               Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
-                 impl authorized_state q))
+              Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
+                impl authorized_state q))
         | Direct impl ->
           Direct
             (fun state q w ->
-               Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
-                 impl authorized_state q w))
+              Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
+                impl authorized_state q w))
       in
       Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
   ;;
@@ -151,7 +151,7 @@ module F = struct
     | One_way_expert impl ->
       One_way_expert
         (fun state buf ~pos ~len ->
-           lift_and_bind state ~f:(fun state -> impl state buf ~pos ~len))
+          lift_and_bind state ~f:(fun state -> impl state buf ~pos ~len))
     | Rpc (bin_query, bin_response, impl, Blocking) ->
       Rpc
         ( bin_query
