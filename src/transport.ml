@@ -80,7 +80,7 @@ module Writer = struct
   ;;
 
   let send_bin_prot (T { impl = (module M); t; _ }) bin_writer x : _ Send_result.t =
-     (M.send_bin_prot t bin_writer x)
+    [%ocaml.local] (M.send_bin_prot t bin_writer x)
   ;;
 
   let send_bin_prot_and_bigstring
@@ -92,7 +92,7 @@ module Writer = struct
     ~len
     : _ Send_result.t
     =
-     (M.send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len)
+    [%ocaml.local] (M.send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len)
   ;;
 
   let send_bin_prot_and_bigstring_non_copying
@@ -104,7 +104,7 @@ module Writer = struct
     ~len
     : _ Send_result.t
     =
-    
+    [%ocaml.local]
       (M.send_bin_prot_and_bigstring_non_copying t bin_writer x ~buf ~pos ~len)
   ;;
 

@@ -109,7 +109,7 @@ end = struct
 
   let send_query t query ~bin_writer_query =
     let message = query_message t query in
-    
+    [%ocaml.local]
       (Writer.send_bin_prot
          t.writer
          (P.Message.bin_writer_needs_length
@@ -119,7 +119,7 @@ end = struct
 
   let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
     let header = query_message t { query with data = Nat0.of_int_exn len } in
-    
+    [%ocaml.local]
       (send_bin_prot_and_bigstring
          t.writer
          P.Message.bin_writer_nat0_t
@@ -130,7 +130,7 @@ end = struct
   ;;
 
   let send_heartbeat t =
-     (Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat)
+    [%ocaml.local] (Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat)
   ;;
 
   let of_writer f t = f t.writer
@@ -333,8 +333,8 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
       query
       ~response_handler
       ~send_query:
-        ( (fun query ->
-            (Protocol_writer.send_query writer query ~bin_writer_query)))
+        ([%ocaml.local] (fun query ->
+           [%ocaml.local] (Protocol_writer.send_query writer query ~bin_writer_query)))
     [@nontail]
 ;;
 
@@ -359,8 +359,8 @@ let make_dispatch_bigstring
       query
       ~response_handler
       ~send_query:
-        ( (fun query ->
-           
+        ([%ocaml.local] (fun query ->
+           [%ocaml.local]
              (Protocol_writer.send_expert_query
                 writer
                 query
