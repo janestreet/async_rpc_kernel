@@ -638,10 +638,17 @@ module Streaming_rpc = struct
         : (unit, Connection.Dispatch_error.t) Result.t)
   ;;
 
+  module Closed_by = struct
+    type t =
+      [ `By_remote_side
+      | `Error of Error.t
+      ]
+  end
+
   module Pipe_message = struct
     type 'a t =
       | Update of 'a
-      | Closed of [ `By_remote_side | `Error of Error.t ]
+      | Closed of Closed_by.t
   end
 
   module Pipe_response = struct
@@ -662,7 +669,12 @@ module Streaming_rpc = struct
 
   module Response_state = struct
     module Update_handler = struct
-      type 'a t = 'a Pipe_message.t -> Pipe_response.t
+      type 'a t =
+        | Standard of ('a Pipe_message.t -> Pipe_response.t)
+        | Expert of
+            { on_update : Bigstring.t -> pos:int -> len:int -> Pipe_response.t
+            ; on_closed : Closed_by.t -> unit
+            }
     end
 
     module Initial = struct
@@ -684,6 +696,13 @@ module Streaming_rpc = struct
     type 'a t = { mutable state : 'a State.t }
   end
 
+  let handle_closed (handler : _ Response_state.Update_handler.t) closed_by =
+    match handler with
+    | Standard update_handler ->
+      ignore (update_handler (Closed closed_by) : Pipe_response.t)
+    | Expert { on_update = _; on_closed } -> on_closed closed_by
+  ;;
+
   let read_error
     ~get_connection_close_reason
     (handler : _ Response_state.Update_handler.t)
@@ -692,12 +711,12 @@ module Streaming_rpc = struct
     let core_err =
       Error.t_of_sexp (Rpc_error.sexp_of_t ~get_connection_close_reason err)
     in
-    ignore (handler (Closed (`Error core_err)) : Pipe_response.t);
+    handle_closed handler (`Error core_err);
     `remove (Error err)
   ;;
 
   let eof (handler : _ Response_state.Update_handler.t) =
-    ignore (handler (Closed `By_remote_side) : Pipe_response.t);
+    handle_closed handler `By_remote_side;
     `remove (Ok ())
   ;;
 
@@ -727,20 +746,38 @@ module Streaming_rpc = struct
             | Error err -> read_error ~get_connection_close_reason handler err
             | Ok `Eof -> eof handler
             | Ok (`Ok len) ->
-              let data =
-                bin_read_from_bigstring
-                  bin_reader_update
-                  read_buffer
-                  ~pos_ref:read_buffer_pos_ref
-                  ~len
-                  ~location:"client-side streaming_rpc response un-bin-io'ing"
-              in
-              (match data with
-               | Error err -> read_error ~get_connection_close_reason handler err
-               | Ok data ->
-                 (match handler (Update data) with
-                  | Continue -> `keep
-                  | Wait d -> `wait d))))
+              (match handler with
+               | Standard update_handler ->
+                 let data =
+                   bin_read_from_bigstring
+                     bin_reader_update
+                     read_buffer
+                     ~pos_ref:read_buffer_pos_ref
+                     ~len
+                     ~location:"client-side streaming_rpc response un-bin-io'ing"
+                 in
+                 (match data with
+                  | Error err -> read_error ~get_connection_close_reason handler err
+                  | Ok data ->
+                    (match update_handler (Update data) with
+                     | Continue -> `keep
+                     | Wait d -> `wait d))
+               | Expert { on_update; on_closed = _ } ->
+                 let pos = !read_buffer_pos_ref in
+                 let len = (len :> int) in
+                 read_buffer_pos_ref := pos + len;
+                 (try
+                    match on_update read_buffer ~pos ~len with
+                    | Continue -> `keep
+                    | Wait d -> `wait d
+                  with
+                  | exn ->
+                    read_error
+                      ~get_connection_close_reason
+                      handler
+                      (Uncaught_exn
+                         [%message
+                           "Uncaught exception in expert update handler" (exn : Exn.t)])))))
       | State.Waiting_for_initial_response initial_handler ->
         (* We never use [`remove (Error _)] here, since that indicates that the
            connection should be closed, and these are "normal" errors. (In contrast, the
@@ -813,14 +850,15 @@ module Streaming_rpc = struct
       dispatch_gen ?metadata t conn query (fun state ->
         let acc = ref (init state) in
         ( ()
-        , function
-          | Update update ->
-            let new_acc, response = f !acc update in
-            acc := new_acc;
-            response
-          | Closed reason ->
-            Ivar.fill_exn result (closed !acc reason);
-            Continue ))
+        , Standard
+            (function
+             | Update update ->
+               let new_acc, response = f !acc update in
+               acc := new_acc;
+               response
+             | Closed reason ->
+               Ivar.fill_exn result (closed !acc reason);
+               Continue) ))
     with
     | (Error _ | Ok (Error _)) as e -> rpc_result_to_or_error (description t) conn e
     | Ok (Ok (id, ())) -> Ok (Ok (id, Ivar.read result))
@@ -833,7 +871,7 @@ module Streaming_rpc = struct
         (* Set a small buffer to reduce the number of pushback events *)
         Pipe.set_size_budget pipe_w 100;
         let close_reason : Pipe_close_reason.t Ivar.t = Ivar.create () in
-        let f : _ Response_state.Update_handler.t = function
+        let f : _ Pipe_message.t -> Pipe_response.t = function
           | Update data ->
             if not (Pipe.is_closed pipe_w)
             then (
@@ -854,7 +892,7 @@ module Streaming_rpc = struct
             Pipe.close pipe_w;
             Continue
         in
-        (init, pipe_r, close_reason), f)
+        (init, pipe_r, close_reason), Standard f)
     with
     | (Error _ | Ok (Error _)) as e -> e
     | Ok (Ok (id, (init, pipe_r, close_reason))) ->
@@ -1109,11 +1147,25 @@ module Pipe_rpc = struct
   module Pipe_response = Pipe_response
 
   let dispatch_iter ?metadata t conn query ~f =
-    match%map Streaming_rpc.dispatch_gen ?metadata t conn query (fun () -> (), f) with
+    match%map
+      Streaming_rpc.dispatch_gen ?metadata t conn query (fun () -> (), Standard f)
+    with
     | (Error _ | Ok (Error _)) as e ->
       rpc_result_to_or_error (Streaming_rpc.description t) conn e
     | Ok (Ok (id, ())) -> Ok (Ok id)
   ;;
+
+  module Expert = struct
+    let dispatch_iter ?metadata t conn query ~f ~closed =
+      match%map
+        Streaming_rpc.dispatch_gen ?metadata t conn query (fun () ->
+          (), Expert { on_update = f; on_closed = closed })
+      with
+      | (Error _ | Ok (Error _)) as e ->
+        rpc_result_to_or_error (Streaming_rpc.description t) conn e
+      | Ok (Ok (id, ())) -> Ok (Ok id)
+    ;;
+  end
 
   let abort = Streaming_rpc.abort
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason

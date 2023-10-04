@@ -21,12 +21,16 @@ module type S = sig
   end
 
   module Client_implementations : sig
-    type nonrec 's t =
-      { connection_state : t -> 's
-      ; implementations : 's Implementations.t
-      }
+    type connection := t
 
-    val null : unit -> unit t
+    type t =
+      | T :
+          { connection_state : connection -> 's
+          ; implementations : 's Implementations.t
+          }
+          -> t
+
+    val null : unit -> t
   end
 
   (** Initiate an Rpc connection on the given transport.  [implementations] should be the

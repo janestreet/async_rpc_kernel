@@ -678,6 +678,29 @@ module Pipe_rpc : sig
     -> f:('response Pipe_message.t -> Pipe_response.t)
     -> (Id.t, 'error) Result.t Or_error.t Deferred.t
 
+  module Expert : sig
+    (** [Expert.dispatch_iter] is like [dispatch_iter] except it provides the buffer
+        that the update is in directly. In some RPC transports, the buffer provided is the
+        buffer that is being used to read from the connection, so it will eventually be
+        re-used and the contents will be overwritten. It's guaranteed not to be re-used
+        before either:
+        - [f] completes, returning [Continue]
+        - [f] completes, returning [Wait d], and [d] becomes determined
+
+        [closed] will be called once, after which [f] will not be called.
+
+        Note that unlike the non-expert [dispatch_iter], exceptions from [f] are caught,
+        resulting in [closed] being invoked, instead of terminating the connection. *)
+    val dispatch_iter
+      :  ?metadata:Rpc_metadata.t
+      -> ('query, 'response, 'error) t
+      -> Connection.t
+      -> 'query
+      -> f:(Bigstring.t -> pos:int -> len:int -> Pipe_response.t)
+      -> closed:([ `By_remote_side | `Error of Error.t ] -> unit)
+      -> (Id.t, 'error) Result.t Or_error.t Deferred.t
+  end
+
   (** [abort rpc connection id] given an RPC and the id returned as part of a call to
       dispatch, abort requests that the other side of the connection stop sending
       updates.

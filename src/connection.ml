@@ -871,13 +871,17 @@ let close
 ;;
 
 module Client_implementations = struct
-  type nonrec 's t =
-    { connection_state : t -> 's
-    ; implementations : 's Implementations.t
-    }
+  type conn = t
+
+  type t =
+    | T :
+        { connection_state : conn -> 's
+        ; implementations : 's Implementations.t
+        }
+        -> t
 
   let null () =
-    { connection_state = (fun _ -> ()); implementations = Implementations.null () }
+    T { connection_state = (fun _ -> ()); implementations = Implementations.null () }
   ;;
 end
 
