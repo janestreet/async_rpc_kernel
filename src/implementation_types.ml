@@ -193,6 +193,7 @@ and Direct_stream_writer : sig
       ; components_by_id : 'a component Id.Table.t
       ; buffer : Bigstring.t ref
       ; mutable last_value_len : int
+      ; last_value_not_written : 'a Moption.t
       ; send_last_value_on_add : bool
       }
 

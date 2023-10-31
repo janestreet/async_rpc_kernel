@@ -726,12 +726,19 @@ module Instance = struct
       in
       (match result_mode with
        | Implementation.F.Blocking ->
-         (try
+         (match
             Result.bind query_contents ~f:(fun query ->
               f t.connection_state query |> or_not_authorized_to_rpc_result)
-            |> write_response t id bin_response_writer ~rpc ~ok_kind:Single_succeeded
           with
-          | exn ->
+          | response ->
+            write_response
+              t
+              id
+              bin_response_writer
+              response
+              ~rpc
+              ~ok_kind:Single_succeeded
+          | exception exn ->
             (* In the [Deferred] branch we use [Monitor.try_with], which includes
                backtraces when it catches an exception. For consistency, we also get
                backtraces here. *)

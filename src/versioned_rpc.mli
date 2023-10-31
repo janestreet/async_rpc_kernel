@@ -259,7 +259,8 @@ module Caller_converts : sig
 
   module Pipe_rpc : sig
     (* signature for dispatchers *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type query
       type response
       type error
@@ -270,11 +271,12 @@ module Caller_converts : sig
           that conversion of each individual element in the returned pipe may fail. *)
 
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> query
-        -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) Result.t
-           Or_error.t
-           Deferred.t
+        : (Connection_with_menu.t
+           -> query
+           -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) Result.t
+              Or_error.t
+              Deferred.t)
+          opt_with_metadata
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -293,6 +295,11 @@ module Caller_converts : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     (** Given a model of the types involved in a family of Pipe_RPCs, this functor
         provides a single Pipe_RPC versioned dispatch function [dispatch_multi] in terms
@@ -357,6 +364,62 @@ module Caller_converts : sig
 
       include
         S
+          with type query := Model.query
+          with type response := Model.response
+          with type error := Model.error
+    end
+
+    (** Identical to [Make], except that [dispatch_multi] carries an optional [?metadata]
+        argument, to be used for telemetry. *)
+    module Make' (Model : sig
+      val name : string (* the name of the Rpc's being unified in the model *)
+
+      type query
+      type response
+      type error
+    end) : sig
+      module type Version_shared = sig
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
+        type error [@@deriving bin_io]
+
+        val version : int
+        val query_of_model : Model.query -> query
+        val model_of_error : error -> Model.error
+        val client_pushes_back : bool
+      end
+
+      (** add a new version to the set of versions available via [dispatch_multi]
+          and [dispatch_iter_multi]. *)
+      module Register (Version_i : sig
+        include Version_shared
+
+        val model_of_response : response -> Model.response
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
+      end
+
+      (** [Register_raw] is like [Register] except you get to deal with the whole pipe.
+          This is useful if, e.g., your [model_of_response] function can fail, so that
+          you'd like to filter items out from the result pipe. *)
+      module Register_raw (Version_i : sig
+        include Version_shared
+
+        (** [model_of_response] should never raise exceptions.  If it does,
+              [dispatch_multi] is going to raise, which is not supposed to happen.
+
+              One may not call [dispatch_iter_multi] when using [Register_raw] as
+              [Pipe_rpc.dispatch_iter] never has access to a pipe.
+          *)
+        val model_of_response
+          :  response Pipe.Reader.t
+          -> Model.response Or_error.t Pipe.Reader.t
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
+      end
+
+      include
+        S'
           with type query := Model.query
           with type response := Model.response
           with type error := Model.error
@@ -1060,7 +1123,8 @@ module Both_convert : sig
                    `->-- Q3 -->---- Q.callee --> R.callee ---->-- R3 -->-´
       v}
     *)
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type caller_query
       type caller_response
       type caller_error
@@ -1070,13 +1134,14 @@ module Both_convert : sig
 
       (** multi-version dispatch *)
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> caller_query
-        -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
-           , caller_error )
-           Result.t
-           Or_error.t
-           Deferred.t
+        : (Connection_with_menu.t
+           -> caller_query
+           -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
+              , caller_error )
+              Result.t
+              Or_error.t
+              Deferred.t)
+          opt_with_metadata
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -1113,6 +1178,11 @@ module Both_convert : sig
 
       val name : string
     end
+
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
 
     module Make (Model : sig
       val name : string
@@ -1178,6 +1248,80 @@ module Both_convert : sig
 
       include
         S
+          with type caller_query := Caller.query
+          with type caller_response := Caller.response
+          with type caller_error := Caller.error
+          with type callee_query := Callee.query
+          with type callee_response := Callee.response
+          with type callee_error := Callee.error
+    end
+
+    (** Identical to [Make], except that [dispatch_multi] carries an optional [?metadata]
+        argument, to be used for telemetry. *)
+    module Make' (Model : sig
+      val name : string
+
+      module Caller : sig
+        type query
+        type response
+        type error
+      end
+
+      module Callee : sig
+        type query
+        type response
+        type error
+      end
+    end) : sig
+      open Model
+
+      module type Version_shared = sig
+        val version : int
+
+        type query [@@deriving bin_io]
+        type response [@@deriving bin_io]
+        type error [@@deriving bin_io]
+
+        val query_of_caller_model : Caller.query -> query
+        val callee_model_of_query : query -> Callee.query
+        val error_of_callee_model : Callee.error -> error
+        val caller_model_of_error : error -> Caller.error
+        val client_pushes_back : bool
+      end
+
+      module Register (Version_i : sig
+        include Version_shared
+
+        val response_of_callee_model : Callee.response -> response
+        val caller_model_of_response : response -> Caller.response
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
+      end
+
+      (** [Register_raw] is like [Register] except you get the whole pipe to deal with.
+
+          This is useful if, e.g., your [caller_model_of_response] function can fail, so
+          that you'd like to filter items out from the result pipe.
+
+          You can use neither [dispatch_iter_multi] nor [implement_direct_multi] if you
+          use this, as their non-versioned counterparts do not get access to pipes.
+      *)
+      module Register_raw (Version_i : sig
+        include Version_shared
+
+        val response_of_callee_model
+          :  Callee.response Pipe.Reader.t
+          -> response Pipe.Reader.t
+
+        val caller_model_of_response
+          :  response Pipe.Reader.t
+          -> Caller.response Or_error.t Pipe.Reader.t
+      end) : sig
+        val rpc : (Version_i.query, Version_i.response, Version_i.error) Pipe_rpc.t
+      end
+
+      include
+        S'
           with type caller_query := Caller.query
           with type caller_response := Caller.response
           with type caller_error := Caller.error

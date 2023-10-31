@@ -13,6 +13,7 @@ depends: [
   "ocaml" {>= "4.14.0"}
   "async_kernel"
   "core"
+  "core_kernel"
   "ppx_jane"
   "protocol_version_header"
   "dune"                    {>= "2.0.0"}

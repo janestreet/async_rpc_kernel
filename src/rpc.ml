@@ -147,6 +147,15 @@ module Rpc = struct
     }
   ;;
 
+  let implement_with_auth ?(on_exception = On_exception.continue) t f =
+    { Implementation.tag = t.tag
+    ; version = t.version
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
+    ; shapes = lazy (shapes t)
+    ; on_exception
+    }
+  ;;
+
   let implement' ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
     ; version = t.version
@@ -156,6 +165,15 @@ module Rpc = struct
           , t.bin_response.writer
           , blocking_no_authorization f
           , Blocking )
+    ; shapes = lazy (shapes t)
+    ; on_exception
+    }
+  ;;
+
+  let implement_with_auth' ?(on_exception = On_exception.continue) t f =
+    { Implementation.tag = t.tag
+    ; version = t.version
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
     ; shapes = lazy (shapes t)
     ; on_exception
     }
@@ -616,11 +634,33 @@ module Streaming_rpc = struct
     implement_gen t ?on_exception (Pipe f)
   ;;
 
+  let implement_with_auth ?on_exception t f =
+    let f c query =
+      let%map response_or_not_authorized = f c query in
+      Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
+        match response with
+        | Error err -> Error (make_initial_message (Error err))
+        | Ok (initial, pipe) -> Ok (make_initial_message (Ok initial), pipe))
+    in
+    implement_gen t ?on_exception (Pipe f)
+  ;;
+
   let implement_direct ?on_exception t f =
     let f c query writer =
       match%map f c query writer with
       | Error _ as x -> Or_not_authorized.Authorized (Error (make_initial_message x))
       | Ok _ as x -> Authorized (Ok (make_initial_message x))
+    in
+    implement_gen ?on_exception t (Direct f)
+  ;;
+
+  let implement_direct_with_auth ?on_exception t f =
+    let f c query writer =
+      let%map response_or_not_authorized = f c query writer in
+      Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
+        match response with
+        | Error _ as x -> Error (make_initial_message x)
+        | Ok _ as x -> Ok (make_initial_message x))
     in
     implement_gen ?on_exception t (Direct f)
   ;;
@@ -943,12 +983,21 @@ module Pipe_rpc = struct
   let bin_query t = t.Streaming_rpc.bin_query
   let bin_response t = t.Streaming_rpc.bin_update_response
   let bin_error t = t.Streaming_rpc.bin_error_response
+  let shapes t = Streaming_rpc.shapes t
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
   let implement ?on_exception t f =
     Streaming_rpc.implement ?on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
+  ;;
+
+  let implement_with_auth ?on_exception t f =
+    Streaming_rpc.implement_with_auth ?on_exception t (fun a query ->
+      match%map f a query with
+      | (Not_authorized _ : _ Or_not_authorized.t) as r -> r
+      | Authorized (Error _) as err -> err
+      | Authorized (Ok pipe) -> Authorized (Ok ((), pipe)))
   ;;
 
   module Direct_stream_writer = struct
@@ -980,6 +1029,7 @@ module Pipe_rpc = struct
         ; components_by_id : 'a component Id.Table.t
         ; buffer : Bigstring.t ref
         ; mutable last_value_len : int
+        ; last_value_not_written : 'a Moption.t
         ; send_last_value_on_add : bool
         }
 
@@ -997,12 +1047,88 @@ module Pipe_rpc = struct
         { components = Bag.create ()
         ; components_by_id = Id.Table.create ()
         ; buffer
-        ; last_value_len = 0
+        ; last_value_len = -1
+        ; last_value_not_written = Moption.create ()
         ; send_last_value_on_add
         }
       ;;
 
       let length t = Bag.length t.components
+
+      let remove t (writer : _ Implementations.Direct_stream_writer.t) =
+        match Hashtbl.find_and_remove t.components_by_id writer.id with
+        | None -> ()
+        | Some { writer_element_in_group; group_element_in_writer } ->
+          Bag.remove t.components writer_element_in_group;
+          Bag.remove writer.groups group_element_in_writer
+      ;;
+
+      let to_list t = Bag.to_list t.components
+
+      let flushed_or_closed t =
+        to_list t
+        |> List.map ~f:(fun t -> Deferred.any_unit [ flushed t; closed t ])
+        |> Deferred.all_unit
+      ;;
+
+      let flushed t = flushed_or_closed t
+      let direct_write_without_pushback = Expert.write_without_pushback
+
+      module Expert = struct
+        let write_without_pushback t ~buf ~pos ~len =
+          Bag.iter t.components ~f:(fun direct_stream_writer ->
+            (* Writers are automatically scheduled to be removed from their groups when
+               closed, so [`Closed] here just means that the removal didn't happen yet. *)
+            ignore
+              (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
+                : [ `Ok | `Closed ]));
+          if t.send_last_value_on_add && not (phys_equal !(t.buffer) buf)
+          then (
+            if Bigstring.length !(t.buffer) < len
+            then t.buffer := Bigstring.create (Int.ceil_pow2 len);
+            Bigstring.blit ~src:buf ~src_pos:pos ~dst:!(t.buffer) ~dst_pos:0 ~len;
+            t.last_value_len <- len)
+        ;;
+
+        let write t ~buf ~pos ~len =
+          write_without_pushback t ~buf ~pos ~len;
+          flushed_or_closed t
+        ;;
+      end
+
+      let write_without_pushback t x =
+        match Bag.choose t.components with
+        | None ->
+          if t.send_last_value_on_add
+          then (
+            Moption.set_some t.last_value_not_written x;
+            (* Updating [last_value_len] isn't strictly necessary, but it makes it true
+               that we always either have a [last_value_not_written] OR [last_value_len >=
+               0], not both (or that we've never had a value written to this group). *)
+            t.last_value_len <- -1)
+        | Some one ->
+          let one = Bag.Elt.value one in
+          let { Bin_prot.Type_class.write; size } = bin_writer one in
+          let buffer = !(t.buffer) in
+          (* Optimistic first try *)
+          (match write buffer ~pos:0 x with
+           | len ->
+             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
+             t.last_value_len <- len
+           | exception _ ->
+             (* It's likely that the exception is due to a buffer overflow, so resize the
+                internal buffer and try again. Technically we could match on
+                [Bin_prot.Common.Buffer_short] only, however we can't easily enforce that
+                custom bin_write_xxx functions raise this particular exception and not
+                [Invalid_argument] or [Failure] for instance. *)
+             let len = size x in
+             Bigstring.unsafe_destroy buffer;
+             let buffer = Bigstring.create (Int.ceil_pow2 len) in
+             t.buffer := buffer;
+             let len = write buffer ~pos:0 x in
+             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
+             t.last_value_len <- len)
+      ;;
 
       let add_exn t (writer : _ Implementations.Direct_stream_writer.t) =
         if is_closed writer
@@ -1032,84 +1158,27 @@ module Pipe_rpc = struct
           t.components_by_id
           ~key:writer.id
           ~data:{ writer_element_in_group; group_element_in_writer };
-        if t.send_last_value_on_add && t.last_value_len > 0
+        if t.send_last_value_on_add
         then (
-          (* We already checked if the writer is closed above. *)
-          let (`Ok | `Closed) =
-            Expert.write_without_pushback
-              writer
-              ~buf:!(t.buffer)
-              ~pos:0
-              ~len:t.last_value_len
-          in
-          ())
-      ;;
-
-      let remove t (writer : _ Implementations.Direct_stream_writer.t) =
-        match Hashtbl.find_and_remove t.components_by_id writer.id with
-        | None -> ()
-        | Some { writer_element_in_group; group_element_in_writer } ->
-          Bag.remove t.components writer_element_in_group;
-          Bag.remove writer.groups group_element_in_writer
-      ;;
-
-      let to_list t = Bag.to_list t.components
-
-      let flushed_or_closed t =
-        to_list t
-        |> List.map ~f:(fun t -> Deferred.any_unit [ flushed t; closed t ])
-        |> Deferred.all_unit
-      ;;
-
-      let flushed t = flushed_or_closed t
-
-      module Expert = struct
-        let write_without_pushback t ~buf ~pos ~len =
-          Bag.iter t.components ~f:(fun direct_stream_writer ->
-            (* Writers are automatically scheduled to be removed from their groups when
-               closed, so [`Closed] here just means that the removal didn't happen yet. *)
-            ignore
-              (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
-                : [ `Ok | `Closed ]));
-          if t.send_last_value_on_add && not (phys_equal !(t.buffer) buf)
-          then (
-            if Bigstring.length !(t.buffer) < len
-            then t.buffer := Bigstring.create (Int.ceil_pow2 len);
-            Bigstring.blit ~src:buf ~src_pos:pos ~dst:!(t.buffer) ~dst_pos:0 ~len;
-            t.last_value_len <- len)
-        ;;
-
-        let write t ~buf ~pos ~len =
-          write_without_pushback t ~buf ~pos ~len;
-          flushed_or_closed t
-        ;;
-      end
-
-      let write_without_pushback t x =
-        match Bag.choose t.components with
-        | None -> ()
-        | Some one ->
-          let one = Bag.Elt.value one in
-          let { Bin_prot.Type_class.write; size } = bin_writer one in
-          let buffer = !(t.buffer) in
-          (* Optimistic first try *)
-          (match write buffer ~pos:0 x with
-           | len ->
-             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
-             t.last_value_len <- len
-           | exception _ ->
-             (* It's likely that the exception is due to a buffer overflow, so resize the
-                internal buffer and try again. Technically we could match on
-                [Bin_prot.Common.Buffer_short] only, however we can't easily enforce that
-                custom bin_write_xxx functions raise this particular exception and not
-                [Invalid_argument] or [Failure] for instance. *)
-             let len = size x in
-             Bigstring.unsafe_destroy buffer;
-             let buffer = Bigstring.create (Int.ceil_pow2 len) in
-             t.buffer := buffer;
-             let len = write buffer ~pos:0 x in
-             Expert.write_without_pushback t ~buf:buffer ~pos:0 ~len;
-             t.last_value_len <- len)
+          (* It shouldn't be possible for last_value_not_written to be Some if there are
+             other writers, but in case there is we should send the value in the buffer to
+             just this writer and unconditionally reset [last_value_not_written] *)
+          (match Moption.is_some t.last_value_not_written, length t with
+           | true, 1 ->
+             write_without_pushback t (Moption.get_some_exn t.last_value_not_written)
+           | (false | true), (_ : int) ->
+             if t.last_value_len >= 0
+             then (
+               (* We already checked if the writer is closed above. *)
+               let (`Closed | `Ok) =
+                 direct_write_without_pushback
+                   writer
+                   ~buf:!(t.buffer)
+                   ~pos:0
+                   ~len:t.last_value_len
+               in
+               ()));
+          Moption.set_none t.last_value_not_written)
       ;;
 
       let write t x =
@@ -1121,6 +1190,10 @@ module Pipe_rpc = struct
 
   let implement_direct ?on_exception t f =
     Streaming_rpc.implement_direct ?on_exception t f
+  ;;
+
+  let implement_direct_with_auth ?on_exception t f =
+    Streaming_rpc.implement_direct_with_auth ?on_exception t f
   ;;
 
   let dispatch' ?metadata t conn query =
@@ -1211,13 +1284,25 @@ module State_rpc = struct
   let bin_state t = t.Streaming_rpc.bin_initial_response
   let bin_update t = t.Streaming_rpc.bin_update_response
   let bin_error t = t.Streaming_rpc.bin_error_response
+  let shapes t = Streaming_rpc.shapes t
   let implement = Streaming_rpc.implement
   let implement_direct = Streaming_rpc.implement_direct
+  let implement_with_auth = Streaming_rpc.implement_with_auth
+  let implement_direct_with_auth = Streaming_rpc.implement_direct_with_auth
+
+  let unwrap_dispatch_result rpc_result =
+    let open Result.Let_syntax in
+    let%map callee_response = rpc_result in
+    let%map metadata, state, update_r = callee_response in
+    state, update_r, metadata
+  ;;
 
   let dispatch ?metadata t conn query =
-    let open Deferred.Result.Let_syntax in
-    Streaming_rpc.dispatch ?metadata t conn query
-    >>| Result.map ~f:(fun (metadata, state, update_r) -> state, update_r, metadata)
+    Streaming_rpc.dispatch ?metadata t conn query >>| unwrap_dispatch_result
+  ;;
+
+  let dispatch' ?metadata t conn query =
+    Streaming_rpc.dispatch' ?metadata t conn query >>| unwrap_dispatch_result
   ;;
 
   module Pipe_message = Pipe_message

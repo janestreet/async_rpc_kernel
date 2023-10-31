@@ -224,6 +224,7 @@ module Rpc : sig
   val response_type_id : (_, 'response) t -> 'response Type_equal.Id.t
   val bin_query : ('query, _) t -> 'query Bin_prot.Type_class.t
   val bin_response : (_, 'response) t -> 'response Bin_prot.Type_class.t
+  val shapes : (_, _) t -> Rpc_shapes.t
 
   (** If the function that implements the RPC raises, the implementer does not see the
       exception. Instead, it is sent as an error to the caller of the RPC, i.e. the
@@ -232,6 +233,12 @@ module Rpc : sig
     :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Deferred.t)
+    -> 'connection_state Implementation.t
+
+  val implement_with_auth
+    :  ?on_exception:On_exception.t
+    -> ('query, 'response) t
+    -> ('connection_state -> 'query -> 'response Or_not_authorized.t Deferred.t)
     -> 'connection_state Implementation.t
 
   (** [implement'] is different from [implement] in that:
@@ -247,6 +254,12 @@ module Rpc : sig
     :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response)
+    -> 'connection_state Implementation.t
+
+  val implement_with_auth'
+    :  ?on_exception:On_exception.t
+    -> ('query, 'response) t
+    -> ('connection_state -> 'query -> 'response Or_not_authorized.t)
     -> 'connection_state Implementation.t
 
   (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
@@ -493,6 +506,7 @@ module Pipe_rpc : sig
   val bin_query : ('query, _, _) t -> 'query Bin_prot.Type_class.t
   val bin_response : (_, 'response, _) t -> 'response Bin_prot.Type_class.t
   val bin_error : (_, _, 'error) t -> 'error Bin_prot.Type_class.t
+  val shapes : (_, _, _) t -> Rpc_shapes.t
 
   (** The pipe returned by the implementation function will be closed automatically when
       either the connection to the client is closed or the client closes their pipe. *)
@@ -502,6 +516,14 @@ module Pipe_rpc : sig
     -> ('connection_state
         -> 'query
         -> ('response Pipe.Reader.t, 'error) Result.t Deferred.t)
+    -> 'connection_state Implementation.t
+
+  val implement_with_auth
+    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    -> ('query, 'response, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> ('response Pipe.Reader.t, 'error) Result.t Or_not_authorized.t Deferred.t)
     -> 'connection_state Implementation.t
 
   (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] or
@@ -583,7 +605,12 @@ module Pipe_rpc : sig
           group are removed immediately when they are closed.
 
           [write t x] is the same as [write_without_pushback t x; flushed t].
-      *)
+
+          Note: if the group was created with [~send_last_value_on_add:true], all write
+          functions will save the value when written. If there are writers in the group at
+          the time of writing, it will be serialized and saved to the buffer, but if there
+          are no writers it will hold onto the ['a]. This means that it is unsafe to use
+          if the ['a] is mutable or if it has a finalizer that is expected to be run *)
       val write : 'a t -> 'a -> unit Deferred.t
 
       val write_without_pushback : 'a t -> 'a -> unit
@@ -620,11 +647,30 @@ module Pipe_rpc : sig
         -> (unit, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
+  val implement_direct_with_auth
+    :  ?on_exception:On_exception.t
+    -> ('query, 'response, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> 'response Direct_stream_writer.t
+        -> (unit, 'error) Result.t Or_not_authorized.t Deferred.t)
+    -> 'connection_state Implementation.t
+
   (** This has [(..., 'error) Result.t] as its return type to represent the possibility of
       the call itself being somehow erroneous (but understood - the outer [Or_error.t]
       encompasses failures of that nature).  Note that this cannot be done simply by
       making ['response] a result type, since [('response Pipe.Reader.t, 'error) Result.t]
       is distinct from [('response, 'error) Result.t Pipe.Reader.t].
+
+      Note that the pipe will be closed if either of:
+      - The implementer closes the pipe
+      - The [Connection.t] is closed, either intentionally or due to a network error or
+        other failure
+
+      This means that it's possible for the pipe returned from [dispatch] to close before
+      all the data that the server wanted to send has been received. If it's important to
+      ensure that you got all the values the server intended to send, you should call
+      [close_reason] with the provided [Metadata.t] to check why the pipe was closed.
 
       Closing the pipe has the effect of calling [abort]. *)
   val dispatch
@@ -755,6 +801,7 @@ module State_rpc : sig
   val bin_state : (_, 'state, _, _) t -> 'state Bin_prot.Type_class.t
   val bin_update : (_, _, 'update, _) t -> 'update Bin_prot.Type_class.t
   val bin_error : (_, _, _, 'error) t -> 'error Bin_prot.Type_class.t
+  val shapes : (_, _, _, _) t -> Rpc_shapes.t
 
   val implement
     :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
@@ -764,6 +811,15 @@ module State_rpc : sig
         -> ('state * 'update Pipe.Reader.t, 'error) Result.t Deferred.t)
     -> 'connection_state Implementation.t
 
+  val implement_with_auth
+    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    -> ('query, 'state, 'update, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> ('state * 'update Pipe.Reader.t, 'error) Result.t Or_not_authorized.t
+           Deferred.t)
+    -> 'connection_state Implementation.t
+
   val implement_direct
     :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
     -> ('query, 'state, 'update, 'error) t
@@ -771,6 +827,15 @@ module State_rpc : sig
         -> 'query
         -> 'update Pipe_rpc.Direct_stream_writer.t
         -> ('state, 'error) Result.t Deferred.t)
+    -> 'connection_state Implementation.t
+
+  val implement_direct_with_auth
+    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    -> ('query, 'state, 'update, 'error) t
+    -> ('connection_state
+        -> 'query
+        -> 'update Pipe_rpc.Direct_stream_writer.t
+        -> ('state, 'error) Result.t Or_not_authorized.t Deferred.t)
     -> 'connection_state Implementation.t
 
   val dispatch
@@ -800,6 +865,14 @@ module State_rpc : sig
     -> closed:('acc -> [ `By_remote_side | `Error of Error.t ] -> 'result)
     -> (Id.t * 'result Deferred.t, 'error) Result.t Or_error.t Deferred.t
 
+  val dispatch'
+    :  ?metadata:Rpc_metadata.t
+    -> ('query, 'state, 'update, 'error) t
+    -> Connection.t
+    -> 'query
+    -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Rpc_result.t
+       Deferred.t
+
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
   val client_pushes_back : (_, _, _, _) t -> bool
@@ -826,6 +899,7 @@ module One_way : sig
   val description : _ t -> Description.t
   val msg_type_id : 'msg t -> 'msg Type_equal.Id.t
   val bin_msg : 'msg t -> 'msg Bin_prot.Type_class.t
+  val shapes : _ t -> Rpc_shapes.t
 
   val implement
     :  ?on_exception:On_exception.t (* default On_exception.close_connection *)

@@ -1004,17 +1004,19 @@ module Caller_converts = struct
   end
 
   module Pipe_rpc = struct
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type query
       type response
       type error
 
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> query
-        -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) Result.t
-           Or_error.t
-           Deferred.t
+        : (Connection_with_menu.t
+           -> query
+           -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) Result.t
+              Or_error.t
+              Deferred.t)
+          opt_with_metadata
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -1028,12 +1030,32 @@ module Caller_converts = struct
       val name : string
     end
 
-    module Make (Model : sig
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
+
+    module Make_shared (Model : sig
       val name : string
 
+      type 'f opt_with_metadata
       type query
       type response
       type error
+
+      val conv_opt_with_metadata
+        :  (?metadata:string
+            -> Connection_with_menu.t
+            -> query
+            -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) result
+               Or_error.t
+               Deferred.t)
+        -> (Connection_with_menu.t
+            -> query
+            -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) result
+               Or_error.t
+               Deferred.t)
+           opt_with_metadata
     end) =
     struct
       type dispatcher =
@@ -1071,8 +1093,9 @@ module Caller_converts = struct
           dispatch_iter ?metadata conn query ~f)
       ;;
 
-      let dispatch_multi conn_with_menu query =
+      let dispatch_multi ?metadata conn_with_menu query =
         Dispatch.Async.with_version_menu
+          ?metadata
           conn_with_menu
           query
           ~name
@@ -1081,6 +1104,8 @@ module Caller_converts = struct
           ~dispatcher:(fun { dispatch; _ } ?metadata conn query ->
           dispatch ?metadata conn query)
       ;;
+
+      let dispatch_multi = Model.conv_opt_with_metadata dispatch_multi
 
       let abort_multi conn_with_menu id =
         Dispatch.Direct.with_version_menu
@@ -1217,6 +1242,36 @@ module Caller_converts = struct
             ;;
           end)
     end
+
+    module Make (Model : sig
+      val name : string
+
+      type query
+      type response
+      type error
+    end) =
+    Make_shared (struct
+      include Model
+
+      type 'f opt_with_metadata = 'f
+
+      let conv_opt_with_metadata f = f ?metadata:None
+    end)
+
+    module Make' (Model : sig
+      val name : string
+
+      type query
+      type response
+      type error
+    end) =
+    Make_shared (struct
+      include Model
+
+      type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+
+      let conv_opt_with_metadata = Fn.id
+    end)
   end
 
   module State_rpc = struct
@@ -1610,7 +1665,8 @@ module Both_convert = struct
   end
 
   module Pipe_rpc = struct
-    module type S = sig
+    module type Basic = sig
+      type 'f opt_with_metadata
       type caller_query
       type callee_query
       type caller_response
@@ -1619,13 +1675,14 @@ module Both_convert = struct
       type callee_error
 
       val dispatch_multi
-        :  Connection_with_menu.t
-        -> caller_query
-        -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
-           , caller_error )
-           Result.t
-           Or_error.t
-           Deferred.t
+        : (Connection_with_menu.t
+           -> caller_query
+           -> ( caller_response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t
+              , caller_error )
+              Result.t
+              Or_error.t
+              Deferred.t)
+          opt_with_metadata
 
       val dispatch_iter_multi
         :  Connection_with_menu.t
@@ -1657,13 +1714,33 @@ module Both_convert = struct
       val name : string
     end
 
-    module Make (Model : sig
+    module type S = Basic with type 'f opt_with_metadata := 'f
+
+    module type S' =
+      Basic with type 'f opt_with_metadata := ?metadata:Rpc_metadata.t -> 'f
+
+    module Make_shared (Model : sig
       val name : string
 
       module Caller : sig
+        type 'f opt_with_metadata
         type query
         type response
         type error
+
+        val conv_opt_with_metadata
+          :  (?metadata:string
+              -> Connection_with_menu.t
+              -> query
+              -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) result
+                 Or_error.t
+                 Deferred.t)
+          -> (Connection_with_menu.t
+              -> query
+              -> (response Or_error.t Pipe.Reader.t * Pipe_rpc.Metadata.t, error) result
+                 Or_error.t
+                 Deferred.t)
+             opt_with_metadata
       end
 
       module Callee : sig
@@ -1677,7 +1754,7 @@ module Both_convert = struct
 
       let name = name
 
-      module Caller = Caller_converts.Pipe_rpc.Make (struct
+      module Caller = Caller_converts.Pipe_rpc.Make_shared (struct
         let name = name
 
         include Caller
@@ -1766,6 +1843,60 @@ module Both_convert = struct
       let versions () = Caller.versions ()
       let rpcs () = Caller.rpcs ()
     end
+
+    module Make (Model : sig
+      val name : string
+
+      module Caller : sig
+        type query
+        type response
+        type error
+      end
+
+      module Callee : sig
+        type query
+        type response
+        type error
+      end
+    end) =
+    Make_shared (struct
+      include Model
+
+      module Caller = struct
+        include Model.Caller
+
+        type 'f opt_with_metadata = 'f
+
+        let conv_opt_with_metadata f = f ?metadata:None
+      end
+    end)
+
+    module Make' (Model : sig
+      val name : string
+
+      module Caller : sig
+        type query
+        type response
+        type error
+      end
+
+      module Callee : sig
+        type query
+        type response
+        type error
+      end
+    end) =
+    Make_shared (struct
+      include Model
+
+      module Caller = struct
+        include Model.Caller
+
+        type 'f opt_with_metadata = ?metadata:Rpc_metadata.t -> 'f
+
+        let conv_opt_with_metadata = Fn.id
+      end
+    end)
   end
 
   module State_rpc = struct

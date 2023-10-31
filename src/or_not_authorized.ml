@@ -10,6 +10,8 @@ let bind t ~f =
   | Not_authorized _ as t -> t
 ;;
 
+let map t ~f = bind t ~f:(fun x -> Authorized (f x))
+
 let bind_deferred t ~f =
   match t with
   | Authorized a -> f a
