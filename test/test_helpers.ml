@@ -9,6 +9,14 @@ let rpc =
     ~bin_response:Bigstring.Stable.V1.bin_t
 ;;
 
+let rpc_v2 =
+  Rpc.Rpc.create
+    ~name:"test-rpc"
+    ~version:2
+    ~bin_query:Bigstring.Stable.V1.bin_t
+    ~bin_response:Bigstring.Stable.V1.bin_t
+;;
+
 let one_way_rpc =
   Rpc.One_way.create
     ~name:"test-one-way-rpc"
@@ -44,6 +52,10 @@ let sort_rpc =
     ~bin_query:[%bin_type_class: int array]
     ~bin_response:[%bin_type_class: int array]
 ;;
+
+(* Short ids to reduce size of test output *)
+let server_identification = Bigstring.of_string "serv-id"
+let client_identification = Bigstring.of_string "clin-id"
 
 module Header = Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header
 
@@ -81,6 +93,7 @@ let implementations =
   ; Rpc.Rpc.implement sort_rpc (fun () payload ->
       Array.sort payload ~compare;
       return payload)
+  ; Rpc.Rpc.implement rpc_v2 (fun () payload -> return payload)
   ]
 ;;
 
@@ -122,7 +135,7 @@ module Tap = struct
   let message_shape bin_shape_payload =
     [%bin_shape:
       payload Binio_printer_helper.With_length.t
-      Async_rpc_kernel.Async_rpc_kernel_private.Protocol.Message.needs_length
+      Async_rpc_kernel.Async_rpc_kernel_private.Protocol.Message.maybe_needs_length
       Binio_printer_helper.With_length64.t]
   ;;
 
@@ -262,6 +275,7 @@ let with_rpc_server_connection ~server_header ~client_header ~f =
           Ivar.fill_exn server_ivar conn;
           ())
         ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
+        ~identification:server_identification
         ())
   in
   let%bind taps, server_proxy = tap_server server in
@@ -273,6 +287,7 @@ let with_rpc_server_connection ~server_header ~client_header ~f =
     with_handshake_header client_header ~f:(fun () ->
       Rpc.Connection.client
         ~heartbeat_config:only_heartbeat_once_at_the_beginning
+        ~identification:client_identification
         where_to_connect
       >>| Result.ok_exn)
   in

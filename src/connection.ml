@@ -30,6 +30,7 @@ module Header : sig
 
   val v1 : t
   val v2 : t
+  val v3 : t
   val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
@@ -38,6 +39,7 @@ end = struct
     Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
 
+  let v3 = create ~supported_versions:[ 1; 2; 3 ]
   let v2 = create ~supported_versions:[ 1; 2 ]
   let v1 = create ~supported_versions:[ 1 ]
 
@@ -46,100 +48,6 @@ end = struct
     | Error e -> Error (Handshake_error.Negotiation_failed e)
     | Ok i -> Ok i
   ;;
-end
-
-module Protocol_writer : sig
-  type t [@@deriving sexp_of]
-
-  val sexp_of_writer : t -> Sexp.t
-  val create_before_negotiation : Writer.t -> t
-  val set_negotiated_protocol_version : t -> int -> unit
-
-  val send_query
-    :  t
-    -> 'query P.Query.t
-    -> bin_writer_query:'query Bin_prot.Type_class.writer
-    -> (unit Transport.Send_result.t[@local])
-
-  val send_expert_query
-    :  t
-    -> unit P.Query.t
-    -> buf:Bigstring.t
-    -> pos:int
-    -> len:int
-    -> send_bin_prot_and_bigstring:
-         (Writer.t
-          -> P.Message.nat0_t Bin_prot.Type_class.writer
-          -> P.Message.nat0_t
-          -> buf:Bigstring.t
-          -> pos:int
-          -> len:int
-          -> ('result Transport.Send_result.t[@local]))
-    -> ('result Transport.Send_result.t[@local])
-
-  val send_heartbeat : t -> (unit Transport.Send_result.t[@local])
-  val can_send : t -> bool
-  val bytes_to_write : t -> int
-  val bytes_written : t -> Int63.t
-  val flushed : t -> unit Deferred.t
-  val stopped : t -> unit Deferred.t
-  val close : t -> unit Deferred.t
-end = struct
-  type t =
-    { negotiated_protocol_version : int Set_once.t
-    ; writer : Writer.t
-    }
-  [@@deriving sexp_of]
-
-  let sexp_of_writer t = [%sexp_of: Writer.t] t.writer
-
-  let create_before_negotiation writer =
-    { negotiated_protocol_version = Set_once.create (); writer }
-  ;;
-
-  let set_negotiated_protocol_version t negotiated_protocol_version =
-    Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version
-  ;;
-
-  let query_message t query : _ P.Message.t =
-    match Set_once.get_exn t.negotiated_protocol_version [%here] with
-    | 1 -> Query_v1 (P.Query.to_v1 query)
-    | _ -> Query query
-  ;;
-
-  let send_query t query ~bin_writer_query =
-    let message = query_message t query in
-    
-      (Writer.send_bin_prot
-         t.writer
-         (P.Message.bin_writer_needs_length
-            (Writer_with_length.of_writer bin_writer_query))
-         message)
-  ;;
-
-  let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
-    let header = query_message t { query with data = Nat0.of_int_exn len } in
-    
-      (send_bin_prot_and_bigstring
-         t.writer
-         P.Message.bin_writer_nat0_t
-         header
-         ~buf
-         ~pos
-         ~len)
-  ;;
-
-  let send_heartbeat t =
-     (Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t Heartbeat)
-  ;;
-
-  let of_writer f t = f t.writer
-  let can_send = of_writer Writer.can_send
-  let bytes_to_write = of_writer Writer.bytes_to_write
-  let bytes_written = of_writer Writer.bytes_written
-  let flushed = of_writer Writer.flushed
-  let stopped = of_writer Writer.stopped
-  let close = of_writer Writer.close
 end
 
 module Heartbeat_config = struct
@@ -202,8 +110,14 @@ type t =
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
   ; negotiated_protocol_version : int Set_once.t
   ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
-      (* responses to queries are written by the implementations instance. Other events are
-     written by this module. *)
+      (* Variant is decided once the protocol version negotiation is completed -- then, either
+     sending the id is unsupported, or the id is requested and is on its way or received
+  *)
+  ; peer_metadata :
+      [ `Unsupported | `Requested of (Bigstring.t option * Menu.t option) Ivar.t ]
+      Set_once.t
+      (* responses to queries are written by the implementations instance. Other events
+           are written by this module. *)
   }
 [@@deriving sexp_of]
 
@@ -214,6 +128,20 @@ let sexp_of_t_hum_writer t =
 
 let description t = t.description
 let is_closed t = Ivar.is_full t.close_started
+
+let unwrap_metadata metadata ~f =
+  match Set_once.get metadata with
+  | Some `Unsupported | None -> return None
+  | Some (`Requested ivar) ->
+    let%bind metadata = Ivar.read ivar in
+    return (Some (f metadata))
+;;
+
+let peer_identification t =
+  Deferred.map (unwrap_metadata t.peer_metadata ~f:fst) ~f:Option.join
+;;
+
+let peer_menu t = Deferred.map (unwrap_metadata t.peer_metadata ~f:snd) ~f:Option.join
 
 let writer t =
   if is_closed t || not (Protocol_writer.can_send t.writer)
@@ -427,7 +355,10 @@ let handle_response
            | Connection_closed
            | Write_error _
            | Uncaught_exn _
-           | Unknown_query_id _ -> Stop (Error e))))
+           | Unknown_query_id _
+           | Authorization_failure _
+           | Message_too_big _
+           | Unknown _ -> Stop (Error e))))
 ;;
 
 let handle_msg
@@ -440,6 +371,18 @@ let handle_msg
   : _ Transport.Handler_result.t
   =
   match msg with
+  | Metadata metadata ->
+    (match Set_once.get t.peer_metadata with
+     | None | Some `Unsupported ->
+       raise_s
+         [%message
+           "Inconsistent state: receiving a metadata message is unsupported, but a \
+            metadata message was received"]
+     | Some (`Requested ivar) ->
+       Ivar.fill_exn
+         ivar
+         (metadata.identification, Option.map metadata.menu ~f:Menu.of_v2_response));
+    Continue
   | Heartbeat ->
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
     Continue
@@ -635,7 +578,6 @@ let schedule_heartbeats t =
 
 let run_after_handshake
   t
-  writer
   ~negotiated_protocol_version
   ~implementations
   ~connection_state
@@ -645,7 +587,7 @@ let run_after_handshake
   let instance =
     Implementations.instantiate
       implementations
-      ~writer
+      ~writer:t.writer
       ~events:t.events
       ~connection_description:t.description
       ~connection_close_started:(Ivar.read t.close_started)
@@ -687,7 +629,29 @@ let run_after_handshake
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
-let do_handshake t writer ~handshake_timeout ~header =
+let send_metadata t writer ~menu ?identification () =
+  P.Message.Metadata { identification; menu }
+  |> Writer.send_bin_prot
+       writer
+       (P.Message.bin_writer_maybe_needs_length P.Connection_metadata.V1.bin_t.writer)
+  |> handle_special_send_result t;
+  ()
+;;
+
+let negotiate t ?identification ~header ~peer ~writer ~menu () =
+  let negotiate_result = Header.negotiate ~us:header ~peer in
+  match negotiate_result with
+  | Ok version ->
+    if version >= 3
+    then (
+      Set_once.set_exn t.peer_metadata [%here] (`Requested (Ivar.create ()));
+      send_metadata t writer ~menu ?identification ())
+    else Set_once.set_exn t.peer_metadata [%here] `Unsupported;
+    return negotiate_result
+  | Error (_ : Handshake_error.t) -> return negotiate_result
+;;
+
+let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
   if not (Writer.can_send writer)
   then return (Error Handshake_error.Transport_closed)
   else (
@@ -699,7 +663,7 @@ let do_handshake t writer ~handshake_timeout ~header =
       Monitor.try_with ~rest:`Log ~run:`Now (fun () ->
         Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
-    match%map
+    match%bind
       Time_source.with_timeout
         (Time_source.of_synchronous t.time_source)
         handshake_timeout
@@ -709,18 +673,18 @@ let do_handshake t writer ~handshake_timeout ~header =
       (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
       don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
-      Error Handshake_error.Timeout
+      return (Error Handshake_error.Timeout)
     | `Result (Error exn) ->
       let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
       don't_wait_for (close t ~reason);
-      Error (Reading_header_failed (Error.of_exn exn))
-    | `Result (Ok (Error `Eof)) -> Error Eof
-    | `Result (Ok (Error `Closed)) -> Error Transport_closed
-    | `Result (Ok (Ok peer)) -> Header.negotiate ~us:header ~peer)
+      return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
+    | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
+    | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
+    | `Result (Ok (Ok peer)) -> negotiate t ?identification ~writer ~peer ~header ~menu ())
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
-let default_handshake_header = Header.v2
+let default_handshake_header = Header.v3
 
 let handshake_header_override_key =
   Univ_map.Key.create ~name:"async rpc handshake header override" [%sexp_of: Header.t]
@@ -739,6 +703,7 @@ let create
   ?(max_metadata_size = Byte_units.of_kilobytes 1.)
   ?(description = Info.of_string "<created-directly>")
   ?(time_source = Synchronous_time_source.wall_clock ())
+  ?identification
   ({ reader; writer } : Transport.t)
   =
   let implementations =
@@ -767,6 +732,7 @@ let create
           Arity1_local
           ~on_subscription_after_first_write:Allow
           ~on_callback_raise:Error.raise
+    ; peer_metadata = Set_once.create ()
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
@@ -774,11 +740,59 @@ let create
     don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
   upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
   let header = get_handshake_header () in
-  match%map do_handshake t writer ~handshake_timeout ~header with
+  let menu, implementations =
+    (* There are three cases:
+
+       1. [Versioned_rpc.Menu.add] inserted the default menu
+       2. [Versioned_rpc.Menu.implement_multi] inserted a custom menu
+       3. No menu was inserted into the implementations
+
+       We need to be able to distinguish between the three to preserve behaviour for old
+       clients so we have modified [Versioned_rpc.Menu.add] that inserts a special
+       implementation type that allows us to precompute the menu. *)
+    match
+      Implementations.find
+        implementations
+        { name = Menu.version_menu_rpc_name; version = 1 }
+    with
+    | Some { f = Legacy_menu_rpc menu; _ } ->
+      (* 1. There exists a default menu rpc. We can dispatch it to retrieve the menu then
+         include this in the metadata. menu rpc or a custom rpc to figure out whether we
+         can dispatch it to retrieve the menu. *)
+      Some menu, implementations
+    | Some (_ : _ Implementation.t) ->
+      (* 2. There was a custom menu rpc implemented. We cannot include a menu in the
+         metadata. *)
+      None, implementations
+    | None ->
+      (* 3. There is no menu so we are free to send a menu containing all of the
+         implementations in the metadata. We should also include the menu rpc in the
+         implementation so that we can eventually deprecate the custom implementation
+         type. Old clients can't complain about the menu rpc being added because they
+         don't have a way to figure out the list of available rpcs ;) *)
+      let menu = Implementations.descriptions_and_shapes implementations in
+      ( Some menu
+      , Implementations.add_exn
+          implementations
+          { Implementation_types.Implementation.tag =
+              Protocol.Rpc_tag.of_string Menu.version_menu_rpc_name
+          ; version = 1
+          ; f = Legacy_menu_rpc menu
+          ; shapes =
+              lazy
+                (Rpc_shapes.Rpc
+                   { query = Menu.Stable.V1.bin_query.shape
+                   ; response = Menu.Stable.V1.bin_response.shape
+                   }
+                 |> fun shapes -> shapes, Rpc_shapes.eval_to_digest shapes)
+          ; on_exception =
+              { callback = None; close_connection_if_no_return_value = false }
+          } )
+  in
+  match%map do_handshake t writer ~handshake_timeout ~header ~menu ?identification () with
   | Ok negotiated_protocol_version ->
     run_after_handshake
       t
-      writer
       ~negotiated_protocol_version
       ~implementations
       ~connection_state

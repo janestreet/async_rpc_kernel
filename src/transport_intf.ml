@@ -37,7 +37,7 @@ module Send_result = struct
     { size : int
     ; max_message_size : int
     }
-  [@@deriving sexp_of, globalize]
+  [@@deriving bin_io, compare, globalize, sexp]
 
   type 'a t =
     | Sent of

@@ -607,99 +607,61 @@ module Callee_converts = struct
 end
 
 module Menu = struct
-  (***************** some prohibitions for this module ******************
+  include Menu
 
-                     (1) !!! never prune old versions of this rpc !!!
+  let create descriptions = of_supported_rpcs descriptions ~rpc_shapes:`Unknown
 
-                     It is too fundamental to the workings of various versioning
-                     schemes and it probably won't change very much anyway.
+  let rpc =
+    Rpc.create
+      ~name:Menu.version_menu_rpc_name
+      ~version:1
+      ~bin_query:[%bin_type_class: Stable.V1.query]
+      ~bin_response:[%bin_type_class: Stable.V1.response]
+  ;;
 
-                     (2) !!! only ever say "with bin_io" on built-in ocaml types !!!
-
-                     Examples of built-in types are int, list, string, etc.
-
-                     This is to protect ourselves against changes to Core data
-                     structures, for example.
-
-   *********************************************************************)
-
-  module Model = struct
-    let name = "__Versioned_rpc.Menu"
-
-    type query = unit
-    type response = Description.t list
-  end
-
-  include Callee_converts.Rpc.Make (Model)
-
-  let rpc_name = Model.name
-
-  module V1 = struct
-    module T = struct
-      let version = 1
-
-      type query = unit [@@deriving bin_io]
-
-      let%expect_test _ =
-        print_endline [%bin_digest: query];
-        [%expect {| 86ba5df747eec837f0b391dd49f33f9e |}]
-      ;;
-
-      type response = (string * int) list [@@deriving bin_io]
-
-      let%expect_test _ =
-        print_endline [%bin_digest: response];
-        [%expect {| 4c1e50c93b38c2ad0554cbd929bef3ac |}]
-      ;;
-
-      let model_of_query q = q
-
-      let response_of_model =
-        List.map ~f:(fun { Description.name; version } -> name, version)
-      ;;
-    end
-
-    include T
-    include Register (T)
-  end
-
-  module Current_version = V1
+  let supported_versions = Menu.supported_versions
 
   let add impls =
-    let menu = List.map impls ~f:Implementation.description in
-    let menu_impls = implement_multi (fun _ ~version:_ () -> return menu) in
-    impls @ menu_impls
-  ;;
-
-  type t = Int.Set.t String.Table.t [@@deriving sexp_of]
-
-  let supported_rpcs t =
-    let open List.Let_syntax in
-    let%bind name, versions = Hashtbl.to_alist t in
-    let%map version = Set.to_list versions in
-    { Description.name; version }
-  ;;
-
-  let supported_versions t ~rpc_name =
-    Option.value ~default:Int.Set.empty (Hashtbl.find t rpc_name)
-  ;;
-
-  let of_entries entries =
-    Hashtbl.map ~f:Int.Set.of_list (String.Table.of_alist_multi entries)
+    let menu =
+      List.map impls ~f:(fun implementation ->
+        Implementation.description implementation, Implementation.digests implementation)
+    in
+    let implementation =
+      { Implementation_types.Implementation.tag =
+          Protocol.Rpc_tag.of_string (Rpc.name rpc)
+      ; version = Rpc.version rpc
+      ; f = Legacy_menu_rpc menu
+      ; shapes =
+          lazy
+            (Rpc_shapes.Rpc
+               { query = (Rpc.bin_query rpc).shape
+               ; response = (Rpc.bin_response rpc).shape
+               }
+             |> fun shapes -> shapes, Rpc_shapes.eval_to_digest shapes)
+      ; on_exception = { callback = None; close_connection_if_no_return_value = false }
+      }
+    in
+    impls @ [ implementation ]
   ;;
 
   let aux_request dispatch conn =
-    let%map result = dispatch Current_version.rpc conn () in
-    Result.map result ~f:of_entries
+    let%map result = dispatch rpc conn () in
+    Result.map result ~f:of_v1_response
   ;;
 
-  let request conn = aux_request Rpc.dispatch conn
-  let request' conn = aux_request Rpc.dispatch' conn
-
-  let create descriptions =
-    List.map descriptions ~f:(fun { Description.name; version } -> name, version)
-    |> of_entries
+  let request conn =
+    match%bind Connection.peer_menu conn with
+    | Some menu -> return (Ok menu)
+    | None -> aux_request Rpc.dispatch conn
   ;;
+
+  let request' conn =
+    match%bind Connection.peer_menu conn with
+    | Some menu -> return (Ok menu)
+    | None -> aux_request Rpc.dispatch' conn
+  ;;
+
+  let implement f = Rpc.implement rpc f
 
   module With_shapes = struct
     module Model = struct
@@ -772,53 +734,6 @@ module Connection_with_menu = struct
 end
 
 module Caller_converts = struct
-  let most_recent_common_version ~rpc_name ~caller_versions ~callee_versions ~callee_menu =
-    match Set.max_elt (Set.inter callee_versions caller_versions) with
-    | Some version -> Ok version
-    | None ->
-      error_s
-        [%message
-          "caller and callee share no common versions for rpc"
-            (rpc_name : string)
-            (caller_versions : Int.Set.t)
-            (callee_versions : Int.Set.t)
-            (callee_menu : Menu.t)]
-  ;;
-
-  let%expect_test "highest version number is taken in most_recent_common_version" =
-    let rpc_name = "the-rpc" in
-    let menu = Menu.of_entries [ rpc_name, 2 ] in
-    let result =
-      most_recent_common_version
-        ~rpc_name
-        ~caller_versions:(Int.Set.of_list [ 1; 2; 3 ])
-        ~callee_versions:(Int.Set.of_list [ 2 ])
-        ~callee_menu:menu
-    in
-    print_s [%sexp (result : int Or_error.t)];
-    [%expect {| (Ok 2) |}]
-  ;;
-
-  let%expect_test "error from most_recent_common_version looks reasonable" =
-    let the_rpc = "the-rpc" in
-    let not_the_rpc = "other-rpc" in
-    let menu = Menu.of_entries [ not_the_rpc, 1; not_the_rpc, 2 ] in
-    let result =
-      most_recent_common_version
-        ~rpc_name:the_rpc
-        ~caller_versions:(Int.Set.of_list [ 1; 2; 3 ])
-        ~callee_versions:(Menu.supported_versions menu ~rpc_name:the_rpc)
-        ~callee_menu:menu
-    in
-    print_s [%sexp (result : int Or_error.t)];
-    [%expect
-      {|
-      (Error
-       ("caller and callee share no common versions for rpc" (rpc_name the-rpc)
-        (caller_versions (1 2 3)) (callee_versions ())
-        (callee_menu ((other-rpc (1 2))))))|}]
-  ;;
-
   module Dispatch = struct
     module Make (M : Monad) = struct
       open M
@@ -846,14 +761,9 @@ module Caller_converts = struct
         ~registry
         ~dispatcher
         =
-        let callee_versions = Menu.supported_versions menu ~rpc_name:name in
         let caller_versions = versions () in
         match
-          most_recent_common_version
-            ~rpc_name:name
-            ~caller_versions
-            ~callee_versions
-            ~callee_menu:menu
+          Menu.highest_shared_version ~rpc_name:name ~callee_menu:menu ~caller_versions
         with
         | Error e -> return (Error e)
         | Ok version ->

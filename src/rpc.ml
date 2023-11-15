@@ -12,6 +12,7 @@ module Connection = Connection
 (* The Result monad is also used. *)
 let ( >>=~ ) = Result.( >>= )
 let ( >>|~ ) = Result.( >>| )
+let and_digest shapes = shapes, Rpc_shapes.eval_to_digest shapes
 
 let message_too_big_message message_too_big ~connection =
   [%sexp
@@ -64,8 +65,7 @@ module Rpc_common = struct
     | Ok result -> Ok result
     | Error Closed -> Error Rpc_error.Connection_closed
     | Error (Message_too_big message_too_big) ->
-      Error
-        (Rpc_error.Uncaught_exn (message_too_big_message message_too_big ~connection:conn))
+      Error (Rpc_error.Message_too_big message_too_big)
   ;;
 
   let dispatch_raw ?metadata conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
@@ -125,6 +125,8 @@ module Rpc = struct
     Rpc_shapes.Rpc { query = t.bin_query.shape; response = t.bin_response.shape }
   ;;
 
+  let shapes_and_digest t = shapes t |> and_digest
+
   let blocking_no_authorization f state query =
     Or_not_authorized.Authorized (f state query)
   ;;
@@ -142,7 +144,7 @@ module Rpc = struct
           , t.bin_response.writer
           , deferred_no_authorization f
           , Deferred )
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
@@ -151,7 +153,7 @@ module Rpc = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
@@ -165,7 +167,7 @@ module Rpc = struct
           , t.bin_response.writer
           , blocking_no_authorization f
           , Blocking )
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
@@ -174,7 +176,7 @@ module Rpc = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
@@ -336,7 +338,7 @@ module Rpc = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (deferred_no_authorization f, Deferred)
-      ; shapes = lazy (shapes t)
+      ; shapes = lazy (shapes_and_digest t)
       ; on_exception
       }
     ;;
@@ -345,7 +347,7 @@ module Rpc = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (blocking_no_authorization f, Blocking)
-      ; shapes = lazy (shapes t)
+      ; shapes = lazy (shapes_and_digest t)
       ; on_exception
       }
     ;;
@@ -359,7 +361,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (deferred_no_authorization f, Deferred)
-      ; shapes = lazy Rpc_shapes.Unknown
+      ; shapes = lazy (Unknown, Unknown)
       ; on_exception
       }
     ;;
@@ -373,7 +375,7 @@ module Rpc = struct
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (blocking_no_authorization f, Blocking)
-      ; shapes = lazy Rpc_shapes.Unknown
+      ; shapes = lazy (Unknown, Unknown)
       ; on_exception
       }
     ;;
@@ -397,6 +399,7 @@ module One_way = struct
   ;;
 
   let shapes t = Rpc_shapes.One_way { msg = t.bin_msg.shape }
+  let shapes_and_digest t = shapes t |> and_digest
   let description t = { Description.name = name t; version = version t }
   let msg_type_id t = t.msg_type_id
 
@@ -408,7 +411,7 @@ module One_way = struct
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = One_way (t.bin_msg.reader, no_authorization f)
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
@@ -447,7 +450,7 @@ module One_way = struct
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = One_way_expert (no_authorization f)
-      ; shapes = lazy (shapes t)
+      ; shapes = lazy (shapes_and_digest t)
       ; on_exception
       }
     ;;
@@ -604,6 +607,8 @@ module Streaming_rpc = struct
       }
   ;;
 
+  let shapes_and_digest t = shapes t |> and_digest
+
   let implement_gen t ?(on_exception = On_exception.continue) impl =
     let bin_init_writer =
       Initial_message.bin_writer_t
@@ -619,7 +624,7 @@ module Streaming_rpc = struct
           ; bin_update_writer = t.bin_update_response.writer
           ; impl
           }
-    ; shapes = lazy (shapes t)
+    ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;

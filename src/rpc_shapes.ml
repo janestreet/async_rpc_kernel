@@ -38,6 +38,48 @@ module Stable = struct
       | Unknown
     [@@deriving bin_io, sexp]
   end
+
+  module Just_digests = struct
+    module Digest = struct
+      module V1 = struct
+        type t = Bin_shape.Digest.t [@@deriving sexp, compare]
+
+        let equal t1 t2 = [%compare.equal: t] t1 t2
+        let hash_fold_t s t = Core.Md5.hash_fold_t s (Bin_shape.Digest.to_md5 t)
+
+        include
+          Binable.Of_binable.V2
+            (Bin_prot.Md5.Stable.V1)
+            (struct
+              type nonrec t = t
+
+              let to_binable = Bin_shape.Digest.to_md5
+              let of_binable = Bin_shape.Digest.of_md5
+
+              let caller_identity =
+                Bin_prot.Shape.Uuid.of_string "d8669bfc-1cdf-11ee-9283-aa42dc4c5cc4"
+              ;;
+            end)
+      end
+    end
+
+    module V1 = struct
+      type t =
+        | Rpc of
+            { query : Digest.V1.t
+            ; response : Digest.V1.t
+            }
+        | One_way of { msg : Digest.V1.t }
+        | Streaming_rpc of
+            { query : Digest.V1.t
+            ; initial_response : Digest.V1.t
+            ; update_response : Digest.V1.t
+            ; error : Digest.V1.t
+            }
+        | Unknown
+      [@@deriving bin_io, equal, compare, hash, sexp]
+    end
+  end
 end
 
 open! Core
@@ -64,3 +106,37 @@ type t = Stable.V1.t =
       }
   | Unknown
 [@@deriving sexp_of]
+
+module Just_digests = struct
+  type t = Stable.Just_digests.V1.t =
+    | Rpc of
+        { query : Bin_shape.Digest.t
+        ; response : Bin_shape.Digest.t
+        }
+    | One_way of { msg : Bin_shape.Digest.t }
+    | Streaming_rpc of
+        { query : Bin_shape.Digest.t
+        ; initial_response : Bin_shape.Digest.t
+        ; update_response : Bin_shape.Digest.t
+        ; error : Bin_shape.Digest.t
+        }
+    | Unknown
+  [@@deriving sexp_of, variants]
+
+  let same_kind = Comparable.lift [%equal: int] ~f:Variants.to_rank
+end
+
+let eval_to_digest (t : t) : Just_digests.t =
+  let digest shape = Bin_prot.Shape.eval_to_digest shape in
+  match t with
+  | Rpc { query; response } -> Rpc { query = digest query; response = digest response }
+  | One_way { msg } -> One_way { msg = digest msg }
+  | Streaming_rpc { query; initial_response; update_response; error } ->
+    Streaming_rpc
+      { query = digest query
+      ; initial_response = digest initial_response
+      ; update_response = digest update_response
+      ; error = digest error
+      }
+  | Unknown -> Unknown
+;;

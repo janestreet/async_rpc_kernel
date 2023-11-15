@@ -21,7 +21,7 @@ module rec Implementation : sig
     module Responder : sig
       type t =
         { query_id : Query_id.t
-        ; writer : Transport.Writer.t
+        ; writer : Protocol_writer.t
         ; mutable responded : bool
         }
     end
@@ -86,13 +86,21 @@ module rec Implementation : sig
       | Streaming_rpc :
           ('connection_state, 'query, 'init, 'update) streaming_rpc
           -> 'connection_state t
+      (* [Legacy_menu_rpc] is a hack in order to allow us to share the versioned menu in
+         connection metadata. Old clients still require the [__Versioned_rpc.Menu] rpc to
+         exist and the menu sent in the metadata must match whatever existed beforehand
+         when calling [Menu.add] so we created a custom implementation type that is used
+         in [Menu.add] that lets us dispatch the rpc without a ['connection_state].
+         Externally this looks and acts like a [Menu.Stable.V1.response]-returning server.
+      *)
+      | Legacy_menu_rpc : Menu.Stable.V2.response -> 'connection_state t
   end
 
   type 'connection_state t =
     { tag : Rpc_tag.t
     ; version : int
     ; f : 'connection_state F.t
-    ; shapes : Rpc_shapes.t Lazy.t
+    ; shapes : (Rpc_shapes.t * Rpc_shapes.Just_digests.t) Lazy.t
     ; on_exception : On_exception.t
     }
 end =
@@ -133,7 +141,7 @@ and Implementations : sig
 
     type 'a unpacked =
       { implementations : 'a implementations
-      ; writer : Transport.Writer.t
+      ; writer : Protocol_writer.t
       ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
       ; open_streaming_responses : (Query_id.t, streaming_response) Hashtbl.t
       ; mutable stopped : bool

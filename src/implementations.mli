@@ -79,7 +79,7 @@ val instantiate
   -> connection_description:Info.t
   -> connection_close_started:Info.t Deferred.t
   -> connection_state:'a
-  -> writer:Transport.Writer.t
+  -> writer:Protocol_writer.t
   -> events:((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
   -> Instance.t
 
@@ -107,7 +107,22 @@ val add_exn
   -> 'connection_state Implementation.t
   -> 'connection_state t
 
+val remove_exn
+  :  'connection_state t
+  -> Description.t
+  -> 'connection_state Implementation.t * 'connection_state t
+
+val find
+  :  'connection_state t
+  -> Description.t
+  -> 'connection_state Implementation.t option
+
 val descriptions : _ t -> Description.t list
+
+val descriptions_and_shapes
+  :  ?exclude_name:string
+  -> _ t
+  -> (Description.t * Rpc_shapes.Just_digests.t) list
 
 module Expert : sig
   module Responder = Implementation.Expert.Responder

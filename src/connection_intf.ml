@@ -56,7 +56,12 @@ module type S = sig
       connections in your program, this can be useful for distinguishing them.
 
       [time_source] can be given to define the time_source for which the heartbeating
-      events will be scheduled. Defaults to wall-clock. *)
+      events will be scheduled. Defaults to wall-clock.
+
+      [identification] can be used to send an additional information to the peer. This is
+      intended to be used for identifying the identity of the /process/ as opposed to the
+      identity of the user. We use a bigstring to leave the option for clients to
+      interpret as structured data of their choosing. *)
   val create
     :  ?implementations:'s Implementations.t
     -> connection_state:(t -> 's)
@@ -65,6 +70,7 @@ module type S = sig
     -> ?max_metadata_size:Byte_units.t
     -> ?description:Info.t
     -> ?time_source:Synchronous_time_source.t
+    -> ?identification:Bigstring.t
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -131,6 +137,16 @@ module type S = sig
   val bytes_read : t -> Int63.t
 
   val flushed : t -> unit Deferred.t
+
+  (** Peer menu will become determined before any other messages are received. The menu is
+      sent automatically on creation of a connection. If the peer is using an older
+      version, the value is immediately determined to be [None] *)
+  val peer_menu : t -> Menu.t option Deferred.t
+
+  (** Peer identification will become determined before any other messages are received.
+      If the peer is using an older version, the peer id is immediately determined to be
+      [None] *)
+  val peer_identification : t -> Bigstring.t option Deferred.t
 
   (** [with_close] tries to create a [t] using the given transport.  If a handshake error
       is the result, it calls [on_handshake_error], for which the default behavior is to
@@ -240,10 +256,11 @@ module type S_private = sig
 
   module For_testing : sig
     module Header : sig
-      type t [@@deriving bin_io]
+      type t [@@deriving bin_io, sexp_of]
 
       val v1 : t
       val v2 : t
+      val v3 : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

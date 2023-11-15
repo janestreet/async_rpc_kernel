@@ -5,6 +5,7 @@ type 'a t = 'a Protocol.Rpc_result.t
 
 val uncaught_exn : location:string -> exn -> 'a t
 val bin_io_exn : location:string -> exn -> 'a t
+val authorization_error : location:string -> exn -> 'a t
 
 val try_with
   :  ?on_background_exception:(exn -> unit)

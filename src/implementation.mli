@@ -9,12 +9,12 @@ module Expert : sig
   module Responder : sig
     type t = Expert.Responder.t =
       { query_id : Query_id.t
-      ; writer : Transport.Writer.t
+      ; writer : Protocol_writer.t
       ; mutable responded : bool
       }
     [@@deriving sexp_of]
 
-    val create : Query_id.t -> Transport.Writer.t -> t
+    val create : Query_id.t -> Protocol_writer.t -> t
   end
 
   type implementation_result = Expert.implementation_result =
@@ -78,6 +78,7 @@ module F : sig
     | Streaming_rpc :
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
+    | Legacy_menu_rpc : Menu.Stable.V2.response -> 'connection_state t
 
   val lift : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
   val lift_deferred : 'a t -> f:('b -> 'a Or_not_authorized.t Deferred.t) -> 'b t
@@ -87,13 +88,14 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
-  ; shapes : Rpc_shapes.t Lazy.t
+  ; shapes : (Rpc_shapes.t * Rpc_shapes.Just_digests.t) Lazy.t
   ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 val description : _ t -> Description.t
 val shapes : _ t -> Rpc_shapes.t
+val digests : _ t -> Rpc_shapes.Just_digests.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
 val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t

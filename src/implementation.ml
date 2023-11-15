@@ -7,7 +7,7 @@ module Expert = struct
   module Responder = struct
     type t = Expert.Responder.t =
       { query_id : Query_id.t
-      ; writer : Transport.Writer.t
+      ; writer : Protocol_writer.t
       ; mutable responded : bool
       }
     [@@deriving sexp_of]
@@ -76,10 +76,11 @@ module F = struct
     | Streaming_rpc :
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
+    | Legacy_menu_rpc : Menu.Stable.V2.response -> 'connection_state t
 
   let sexp_of_t _ = function
     | One_way_expert _ | One_way _ -> [%message "one-way"]
-    | Rpc_expert _ | Rpc _ -> [%message "rpc"]
+    | Rpc_expert _ | Rpc _ | Legacy_menu_rpc _ -> [%message "rpc"]
     | Streaming_rpc _ -> [%message "streaming-rpc"]
   ;;
 
@@ -108,6 +109,7 @@ module F = struct
           impl authorized_state q)
       in
       Rpc (bin_query, bin_response, impl, Deferred)
+    | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
     | Rpc_expert (impl, Blocking) ->
       let impl state resp buf ~pos ~len =
         Or_not_authorized.bind (f state) ~f:(fun authorized_state ->
@@ -164,6 +166,7 @@ module F = struct
         , bin_response
         , (fun state q -> lift_and_bind state ~f:(fun state -> impl state q))
         , Deferred )
+    | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
     | Rpc_expert (impl, Deferred) ->
       Rpc_expert
         ( (fun state resp buf ~pos ~len ->
@@ -186,17 +189,26 @@ module F = struct
   ;;
 end
 
+module Shapes_and_digests = struct
+  (* The sexp of Rpc_shapes is the same as the sexp of the digests, so only include them
+     once *)
+  type t = Rpc_shapes.t * Rpc_shapes.Just_digests.t
+
+  let sexp_of_t ((_, digests) : t) = [%sexp_of: Rpc_shapes.Just_digests.t] digests
+end
+
 type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t
-  ; shapes : Rpc_shapes.t Lazy.t
+  ; shapes : Shapes_and_digests.t Lazy.t
   ; on_exception : On_exception.t
   }
 [@@deriving sexp_of]
 
 let description t = { Description.name = Rpc_tag.to_string t.tag; version = t.version }
-let shapes t = force t.shapes
+let shapes t = fst (force t.shapes)
+let digests t = snd (force t.shapes)
 
 let lift (type a b) (t : a t) ~(f : b -> a) : b t =
   { t with f = F.lift t.f ~f:(fun b -> Or_not_authorized.Authorized (f b)) }

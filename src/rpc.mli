@@ -31,6 +31,8 @@ module Description : sig
   include Hashable.S_plain with type t := t
 
   val summarize : t list -> Int.Set.t String.Map.t
+  val of_alist : (string * int) list -> t list
+  val to_alist : t list -> (string * int) list
 
   module Stable : sig
     module V1 : sig
@@ -68,9 +70,10 @@ end
     structure.  This way, [Implementation.t]s can be created without having the master
     structure in your hands. *)
 module Implementation : sig
-  type 'connection_state t [@@deriving sexp_of]
+  type 'connection_state t = 'connection_state Implementation.t [@@deriving sexp_of]
 
   val description : _ t -> Description.t
+  val digests : _ t -> Rpc_shapes.Just_digests.t
   val shapes : _ t -> Rpc_shapes.t
 
   (** We may want to use an ['a t] implementation (perhaps provided by someone else) in a

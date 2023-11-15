@@ -15,7 +15,10 @@ let sexp_of_t t ~get_connection_close_reason =
   | Write_error _
   | Uncaught_exn _
   | Unimplemented_rpc _
-  | Unknown_query_id _ -> sexp_of_t t
+  | Unknown_query_id _
+  | Authorization_failure _
+  | Message_too_big _
+  | Unknown _ -> sexp_of_t t
 ;;
 
 (* it would make sense to just take a [Connection.t], but we take its pieces instead to

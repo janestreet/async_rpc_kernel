@@ -1,5 +1,6 @@
 module Rpc = Rpc
 module Versioned_rpc = Versioned_rpc
+module Menu = Menu
 module Persistent_connection = Persistent_connection
 module Pipe_transport = Pipe_transport
 module Rpc_error = Rpc_error

@@ -18,8 +18,36 @@ type t =
   | Unknown
 [@@deriving sexp_of]
 
+module Just_digests : sig
+  type t =
+    | Rpc of
+        { query : Bin_shape.Digest.t
+        ; response : Bin_shape.Digest.t
+        }
+    | One_way of { msg : Bin_shape.Digest.t }
+    | Streaming_rpc of
+        { query : Bin_shape.Digest.t
+        ; initial_response : Bin_shape.Digest.t
+        ; update_response : Bin_shape.Digest.t
+        ; error : Bin_shape.Digest.t
+        }
+    | Unknown
+  [@@deriving sexp_of, variants]
+
+  (** True if the variants are the same, e.g. both are [Rpc _] *)
+  val same_kind : t -> t -> bool
+end
+
+val eval_to_digest : t -> Just_digests.t
+
 module Stable : sig
   module V1 : sig
     type nonrec t = t [@@deriving bin_io, sexp]
+  end
+
+  module Just_digests : sig
+    module V1 : sig
+      type t = Just_digests.t [@@deriving bin_io, compare, equal, hash, sexp]
+    end
   end
 end

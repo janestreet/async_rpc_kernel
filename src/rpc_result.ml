@@ -5,7 +5,7 @@ type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
 
 let%expect_test _ =
   print_endline [%bin_digest: unit t];
-  [%expect {| 58734a63a5c83c1b7cbfc3fedfa3ae82 |}]
+  [%expect {| 106a55f7c7d8cf06dd3f4a8e759329f3 |}]
 ;;
 
 type located_error =
@@ -20,6 +20,10 @@ let uncaught_exn ~location exn =
 
 let bin_io_exn ~location exn =
   Error (Rpc_error.Bin_io_exn (sexp_of_located_error { location; exn }))
+;;
+
+let authorization_error ~location exn =
+  Error (Rpc_error.Authorization_failure (sexp_of_located_error { location; exn }))
 ;;
 
 let try_with ?on_background_exception ?run ~location f =

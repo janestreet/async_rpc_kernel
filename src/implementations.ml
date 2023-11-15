@@ -4,7 +4,6 @@ open Async_kernel
 open Util
 open Implementation_types.Implementations
 module P = Protocol
-module Writer = Transport.Writer
 
 (* The Result monad is also used. *)
 let ( >>|~ ) = Result.( >>| )
@@ -56,6 +55,13 @@ type 'connection_state implementations = 'connection_state t
 
 let descriptions t = Hashtbl.keys t.implementations
 
+let descriptions_and_shapes ?exclude_name t =
+  Hashtbl.fold t.implementations ~init:[] ~f:(fun ~key ~data acc ->
+    match exclude_name with
+    | Some name when String.equal name key.name -> acc
+    | _ -> (key, Implementation.digests data) :: acc)
+;;
+
 module Instance = struct
   type streaming_response = Instance.streaming_response =
     | Pipe : _ Pipe.Reader.t -> streaming_response
@@ -69,7 +75,7 @@ module Instance = struct
 
   type 'a unpacked = 'a Instance.unpacked =
     { implementations : ('a implementations[@sexp.opaque])
-    ; writer : Writer.t
+    ; writer : Protocol_writer.t
     ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
     ; open_streaming_responses : streaming_responses
     ; mutable stopped : bool
@@ -90,8 +96,12 @@ module Instance = struct
   let sexp_of_t (T t) = [%sexp_of: _ unpacked] t
 
   let send_write_error t id sexp =
-    let data : _ P.Message.t = Response { id; data = Error (Write_error sexp) } in
-    match Writer.send_bin_prot t.writer P.Message.bin_writer_nat0_t data with
+    match
+      Protocol_writer.send_response
+        t.writer
+        { id; data = Error (Write_error sexp) }
+        ~bin_writer_response:Nothing.bin_writer_t
+    with
     | Sent { result = (); bytes = _ } | Closed -> ()
     | Message_too_big _ as r ->
       raise_s
@@ -146,30 +156,27 @@ module Instance = struct
            ([%globalize: unit Transport.Send_result.t] r))
   ;;
 
-  let write_message t bin_writer x ~id ~rpc ~kind =
-    if not t.stopped
-    then Writer.send_bin_prot t.writer bin_writer x |> handle_send_result t id rpc kind;
-    ()
-  ;;
-
-  let write_message_expert t bin_writer x ~buf ~pos ~len ~id ~rpc ~kind =
+  let unsafe_write_message_for_cached_bin_writer t bin_writer x ~id ~rpc ~kind =
     if not t.stopped
     then
-      Writer.send_bin_prot_and_bigstring t.writer bin_writer x ~buf ~pos ~len
+      Protocol_writer.Unsafe_for_cached_bin_writer.send_bin_prot t.writer bin_writer x
       |> handle_send_result t id rpc kind;
     ()
   ;;
 
   let write_response t id bin_writer_data data ~rpc ~ok_kind =
-    let bin_writer =
-      P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_data)
-    in
-    let kind =
-      match data with
-      | Ok _ -> ok_kind
-      | Error _ -> Tracing_event.Sent_response_kind.Single_or_streaming_error
-    in
-    write_message t ~id bin_writer (Response { id; data }) ~kind ~rpc
+    if not t.stopped
+    then (
+      let kind =
+        match data with
+        | Ok _ -> ok_kind
+        | Error _ -> Tracing_event.Sent_response_kind.Single_or_streaming_error
+      in
+      (Protocol_writer.send_response
+         t.writer
+         { id; data }
+         ~bin_writer_response:bin_writer_data
+       |> handle_send_result t id rpc kind) [@nontail])
   ;;
 
   module Cached_bin_writer : sig
@@ -199,7 +206,7 @@ module Instance = struct
     let bin_size_void Void = 0
     let bin_write_void _buf ~pos Void = pos
 
-    type void_message = void P.Message.needs_length [@@deriving bin_write]
+    type void_message = void P.Message.maybe_needs_length [@@deriving bin_write]
 
     type void_stream_response_data = void P.Stream_response_data.needs_length
     [@@deriving bin_write]
@@ -350,7 +357,7 @@ module Instance = struct
 
     let flushed t =
       let (T instance) = t.instance in
-      Transport.Writer.flushed instance.writer
+      Protocol_writer.flushed instance.writer
     ;;
 
     let bin_writer t = t.stream_writer.bin_writer
@@ -373,7 +380,7 @@ module Instance = struct
         Cached_bin_writer.prep_write_string t.stream_writer x
       in
       let (T instance) = t.instance in
-      write_message
+      unsafe_write_message_for_cached_bin_writer
         instance
         ~id:t.query_id
         ~rpc:t.rpc
@@ -385,7 +392,7 @@ module Instance = struct
     let write_message t x =
       let bin_writer_message = Cached_bin_writer.prep_write t.stream_writer x in
       let (T instance) = t.instance in
-      write_message
+      unsafe_write_message_for_cached_bin_writer
         instance
         ~id:t.query_id
         ~rpc:t.rpc
@@ -397,16 +404,17 @@ module Instance = struct
     let write_message_expert t ~buf ~pos ~len =
       let bin_writer_message = Cached_bin_writer.prep_write_expert t.stream_writer ~len in
       let (T instance) = t.instance in
-      write_message_expert
-        instance
-        ~id:t.query_id
-        ~rpc:t.rpc
-        ~kind:Streaming_update
-        bin_writer_message
-        t.stream_writer
-        ~buf
-        ~pos
-        ~len
+      if not instance.stopped
+      then
+        Protocol_writer.Unsafe_for_cached_bin_writer.send_bin_prot_and_bigstring
+          instance.writer
+          bin_writer_message
+          t.stream_writer
+          ~buf
+          ~pos
+          ~len
+        |> handle_send_result instance t.query_id t.rpc Streaming_update;
+      ()
     ;;
 
     let close_without_removing_from_instance t =
@@ -446,7 +454,7 @@ module Instance = struct
     let write ({ instance = T instance; _ } as t) x =
       match write_without_pushback t x with
       | `Closed -> `Closed
-      | `Ok -> `Flushed (Writer.flushed instance.writer)
+      | `Ok -> `Flushed (Protocol_writer.flushed instance.writer)
     ;;
 
     module Expert = struct
@@ -464,7 +472,7 @@ module Instance = struct
       let write ({ instance = T instance; _ } as t) ~buf ~pos ~len =
         match write_without_pushback t ~buf ~pos ~len with
         | `Closed -> `Closed
-        | `Ok -> `Flushed (Writer.flushed instance.writer)
+        | `Ok -> `Flushed (Protocol_writer.flushed instance.writer)
       ;;
     end
 
@@ -493,7 +501,7 @@ module Instance = struct
 
   let authorization_failure_result error ~rpc_kind =
     let exn = Error.to_exn error in
-    Rpc_result.uncaught_exn
+    Rpc_result.authorization_error
       exn
       ~location:[%string "server-side %{rpc_kind} authorization"]
   ;;
@@ -598,9 +606,12 @@ module Instance = struct
         (fun pipe_r ->
           Hashtbl.set t.open_streaming_responses ~key:id ~data:(Pipe pipe_r);
           don't_wait_for
-            (Writer.transfer t.writer pipe_r (fun data ->
+            (Protocol_writer.Unsafe_for_cached_bin_writer.transfer
+               t.writer
+               pipe_r
+               (fun data ->
                let bin_writer_message = Cached_bin_writer.prep_write stream_writer data in
-               write_message
+               unsafe_write_message_for_cached_bin_writer
                  instance
                  ~id
                  ~rpc
@@ -802,6 +813,49 @@ module Instance = struct
          (match Deferred.peek result with
           | None -> result >>> handle_result
           | Some result -> handle_result result));
+      Continue
+    | Implementation.F.Legacy_menu_rpc menu ->
+      let query_contents =
+        bin_read_from_bigstring
+          Menu.Stable.V1.bin_reader_query
+          read_buffer
+          ~pos_ref:read_buffer_pos_ref
+          ~len:query.data
+          ~location:"server-side rpc query un-bin-io'ing"
+      in
+      (try
+         Result.map query_contents ~f:(fun () ->
+           (* We have to map down to the V1 menu since that's the type that old clients
+              are expecting (but we need to be able to self-dispatch the menu to get the
+              V2 response for connection metadata). *)
+           menu |> List.map ~f:fst |> Menu.Stable.V1.response_of_model)
+         |> write_response
+              t
+              id
+              Menu.Stable.V1.bin_writer_response
+              ~rpc
+              ~ok_kind:Single_succeeded
+       with
+       | exn ->
+         (* In the [Deferred] branch for [Rpc], we use [Monitor.try_with], which includes
+            backtraces when it catches an exception. For consistency, we also get
+            backtraces here. *)
+         let backtrace = Backtrace.Exn.most_recent () in
+         let sexp =
+           [%sexp
+             { location = "server-side blocking rpc computation"
+             ; exn : exn
+             ; backtrace : Backtrace.t
+             }]
+         in
+         write_response
+           t
+           id
+           Menu.Stable.V1.bin_writer_response
+           (Error (Rpc_error.Uncaught_exn sexp))
+           ~rpc
+           ~ok_kind:Single_or_streaming_error;
+         On_exception.handle_exn on_exception ~close_connection_monitor exn);
       Continue
     | Implementation.F.Rpc_expert (f, result_mode) ->
       let responder = Implementation.Expert.Responder.create query.id t.writer in
@@ -1066,7 +1120,7 @@ module Instance = struct
     ~read_buffer_pos_ref
     ~close_connection_monitor
     =
-    if t.stopped || Writer.is_closed t.writer
+    if t.stopped || Protocol_writer.is_closed t.writer
     then Transport.Handler_result.Stop (Ok ())
     else
       Rpc_metadata.Private.with_metadata query.metadata ~f:(fun () ->
@@ -1143,6 +1197,15 @@ let add_exn t (implementation : _ Implementation.t) =
 
 let add t implementation = Or_error.try_with (fun () -> add_exn t implementation)
 
+let remove_exn t description =
+  let implementations = Hashtbl.copy t.implementations in
+  let implementation = Hashtbl.find_exn implementations description in
+  Hashtbl.remove implementations description;
+  implementation, { t with implementations }
+;;
+
+let find t description = Hashtbl.find t.implementations description
+
 let lift { implementations; on_unknown_rpc } ~f =
   let implementations = Hashtbl.map implementations ~f:(Implementation.lift ~f) in
   let on_unknown_rpc =
@@ -1176,17 +1239,15 @@ module Expert = struct
 
     let schedule (t : t) buf ~pos ~len =
       mark_responded t;
-      let header : Nat0.t P.Message.t =
-        Response { id = t.query_id; data = Ok (Nat0.of_int_exn len) }
-      in
       match
-        Writer.send_bin_prot_and_bigstring_non_copying
+        Protocol_writer.send_expert_response
           t.writer
-          P.Message.bin_writer_nat0_t
-          header
+          t.query_id
           ~buf
           ~pos
           ~len
+          ~send_bin_prot_and_bigstring:
+            Transport.Writer.send_bin_prot_and_bigstring_non_copying
       with
       | Sent { result = d; bytes = (_ : int) } -> `Flushed d
       | Closed -> `Connection_closed
@@ -1202,16 +1263,13 @@ module Expert = struct
 
     let write_bigstring (t : t) buf ~pos ~len =
       mark_responded t;
-      let header : Nat0.t P.Message.t =
-        Response { id = t.query_id; data = Ok (Nat0.of_int_exn len) }
-      in
-      Writer.send_bin_prot_and_bigstring
+      Protocol_writer.send_expert_response
         t.writer
-        P.Message.bin_writer_nat0_t
-        header
+        t.query_id
         ~buf
         ~pos
         ~len
+        ~send_bin_prot_and_bigstring:Transport.Writer.send_bin_prot_and_bigstring
       |> handle_send_result;
       ()
     ;;
@@ -1223,20 +1281,20 @@ module Expert = struct
           ~location:"server-side raw rpc computation"
           (Error.to_exn error)
       in
-      Writer.send_bin_prot
+      Protocol_writer.send_response
         t.writer
-        P.Message.bin_writer_nat0_t
-        (Response { id = t.query_id; data })
+        { id = t.query_id; data }
+        ~bin_writer_response:Nothing.bin_writer_t
       |> handle_send_result;
       ()
     ;;
 
     let write_bin_prot (t : t) bin_writer_a a =
       mark_responded t;
-      Writer.send_bin_prot
+      Protocol_writer.send_response
         t.writer
-        (P.Message.bin_writer_needs_length (Writer_with_length.of_writer bin_writer_a))
-        (Response { id = t.query_id; data = Ok a })
+        { id = t.query_id; data = Ok a }
+        ~bin_writer_response:bin_writer_a
       |> handle_send_result;
       ()
     ;;

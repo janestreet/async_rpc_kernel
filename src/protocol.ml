@@ -33,6 +33,9 @@ module Rpc_error : sig
     | Uncaught_exn of Sexp.t
     | Unimplemented_rpc of Rpc_tag.t * [ `Version of int ]
     | Unknown_query_id of Query_id.t
+    | Authorization_failure of Sexp.t
+    | Message_too_big of Transport.Send_result.message_too_big
+    | Unknown of Sexp.t
   [@@deriving bin_io, sexp, compare]
 
   include Comparable.S with type t := t
@@ -45,11 +48,14 @@ end = struct
       | Uncaught_exn of Core.Sexp.t
       | Unimplemented_rpc of Rpc_tag.t * [ `Version of Core.Int.Stable.V1.t ]
       | Unknown_query_id of Query_id.t
+      | Authorization_failure of Core.Sexp.t
+      | Message_too_big of Transport.Send_result.message_too_big
+      | Unknown of Core.Sexp.t
     [@@deriving bin_io, sexp, compare]
 
     let%expect_test "stable" =
       print_endline [%bin_digest: t];
-      [%expect {| 8cc766befa2cf565ea147d9fcd5eaaab |}]
+      [%expect {| 7393bbbb2d57fff150d0e2b37cf022f3 |}]
     ;;
   end
 
@@ -62,8 +68,18 @@ module Rpc_result = struct
 
   let%expect_test _ =
     print_endline [%bin_digest: unit t];
-    [%expect {| 58734a63a5c83c1b7cbfc3fedfa3ae82 |}]
+    [%expect {| 106a55f7c7d8cf06dd3f4a8e759329f3 |}]
   ;;
+end
+
+module Connection_metadata = struct
+  module V1 = struct
+    type t =
+      { identification : Core.Bigstring.Stable.V1.t option
+      ; menu : Menu.Stable.V2.response option
+      }
+    [@@deriving bin_io, sexp_of]
+  end
 end
 
 module Header = Protocol_version_header
@@ -120,7 +136,7 @@ module Response = struct
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
-    [%expect {| a22a76f192b3a4ec1c37117c6bb252f5 |}]
+    [%expect {| 0829b98561f5b848c3be1921db7969a8 |}]
   ;;
 
   type 'a t = 'a needs_length [@@deriving bin_read]
@@ -172,20 +188,21 @@ module Stream_response_data = struct
 end
 
 module Message = struct
-  type 'a needs_length =
+  type 'a maybe_needs_length =
     | Heartbeat
     | Query_v1 of 'a Query_v1.needs_length
     | Response of 'a Response.needs_length
     | Query of 'a Query.needs_length
+    | Metadata of Connection_metadata.V1.t
   [@@deriving bin_io, sexp_of]
 
   let%expect_test _ =
-    print_endline [%bin_digest: unit needs_length];
-    [%expect {| f60ce2d104e2f0d9271f622ecd97cea8 |}]
+    print_endline [%bin_digest: unit maybe_needs_length];
+    [%expect {| 421d39a5ff4a0dd5182cc00f63b3ddab |}]
   ;;
 
-  type 'a t = 'a needs_length [@@deriving bin_read, sexp_of]
-  type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
+  type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
+  type nat0_t = Nat0.t maybe_needs_length [@@deriving bin_read, bin_write]
 end
 
 let%test "v1 message compatibility" =
@@ -198,7 +215,7 @@ let%test "v1 message compatibility" =
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
-      [%expect {| 14965b0db9844e6b376151dd890808e8 |}]
+      [%expect {| b5514da32c3863fcbb1c2229b877cc6f |}]
     ;;
   end
   in
@@ -215,7 +232,7 @@ let%test "v1 message compatibility" =
   in
   let v2_str =
     Core_for_testing.Bin_prot.Writer.to_string
-      [%bin_writer: unit Message.needs_length list]
+      [%bin_writer: unit Message.maybe_needs_length list]
       v2
   in
   String.equal v1_str v2_str

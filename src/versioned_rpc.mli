@@ -70,18 +70,17 @@ open Rpc
     This is used by the [dispatch_multi] functions in [Caller_converts] and [Both_convert]
     to dynamically determine the most appropriate version to use. *)
 module Menu : sig
-  (** A directory of supported rpc names and versions. *)
-  type t
+  include module type of Menu with type t = Menu.t (** @inline *)
 
   (** [add impls] extends a list of rpc implementations with an additional rpc
       implementation for providing a [Menu.t] when one is requested via [Menu.request]. *)
   val add : 's Implementation.t list -> 's Implementation.t list
 
   (** Specifies directly how to handle the version menu rpc. *)
-  val implement_multi
-    :  ?log_not_previously_seen_version:(name:string -> int -> unit)
-    -> ('s -> version:int -> unit -> Description.t list Deferred.t)
-    -> 's Implementation.t list
+  val implement : ('s -> unit -> Stable.V1.response Deferred.t) -> 's Implementation.t
+    [@@deprecated
+      "[since 2023-06] If you use [implement], strange inconsistencies may happen as the \
+       v3 protocol sends a menu automatically and [Menu.request] gives that one"]
 
   (** Requests an rpc version menu from an rpc connection. *)
   val request : Connection.t -> t Or_error.t Deferred.t
@@ -105,18 +104,8 @@ module Menu : sig
     val request : Connection.t -> t Or_error.t Deferred.t
   end
 
-  (** Finds what rpcs are supported. *)
-  val supported_rpcs : t -> Description.t list
-
-  (** Finds what versions of a particular rpc are supported. *)
-  val supported_versions : t -> rpc_name:string -> Int.Set.t
-
   (** Creates a menu directly -- generally you should use [request] instead. *)
   val create : Description.t list -> t
-
-  (** The internal name of this RPC -- for example to be used in [Rpc.Expert] to
-      distinguish it from other queries. *)
-  val rpc_name : string
 end
 
 module Connection_with_menu : sig

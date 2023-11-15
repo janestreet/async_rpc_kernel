@@ -131,7 +131,7 @@ and parse_tuple contents rows buf ~pos ~level ~prefix =
   match contents with
   | [ shape ] ->
     (* We often end up here for a variant with one arg *)
-    parse shape rows buf ~pos ~level:(level + 1) ~prefix
+    parse shape rows buf ~pos ~level ~prefix
   | contents ->
     let first_prefix = (level, "1.") :: prefix in
     List.iteri contents ~f:(fun i shape ->
@@ -199,6 +199,11 @@ let add_base_handlers () =
          (if String.length str > 10 then String.prefix str 7 ^ "..." else str)
          (String.length str)));
   handlecopy "bigstring" ~from:"string";
+  (* MD5: *)
+  handle0 "f6bdcdd0-9f75-11e6-9a7e-d3020428efed" (fun rows buf ~pos ~level ~prefix ->
+    let start = !pos in
+    let (_ : Md5.t) = Md5.bin_read_t buf ~pos_ref:pos in
+    row rows buf ~start ~pos ~level ~prefix "(md5)");
   let list_or_array name =
     let item_count n = sprintf "%s: %d items" name n in
     fun shape rows buf ~pos ~level ~prefix ->

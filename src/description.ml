@@ -6,7 +6,7 @@ module Stable = struct
       { name : string [@global]
       ; version : int
       }
-    [@@deriving bin_io, equal, compare, hash, sexp, globalize]
+    [@@deriving bin_io, equal, compare ~localize, hash, sexp, globalize]
 
     let%expect_test _ =
       print_endline [%bin_digest: t];
@@ -19,9 +19,11 @@ include Stable.V1
 include Comparable.Make (Stable.V1)
 include Hashable.Make (Stable.V1)
 
+let to_alist ts = List.map ts ~f:(fun { name; version } -> name, version)
+let of_alist list = List.map list ~f:(fun (name, version) -> { name; version })
+
 let summarize ts =
-  List.map ts ~f:(fun { name; version } -> name, version)
-  |> String.Map.of_alist_fold ~init:Int.Set.empty ~f:Core.Set.add
+  to_alist ts |> String.Map.of_alist_fold ~init:Int.Set.empty ~f:Core.Set.add
 ;;
 
 let%expect_test _ =

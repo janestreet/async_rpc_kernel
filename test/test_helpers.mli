@@ -9,6 +9,8 @@ val one_way_rpc : Bigstring.t Rpc.One_way.t
 val pipe_rpc : (Bigstring.t, Bigstring.t, Error.t) Rpc.Pipe_rpc.t
 val state_rpc : (Bigstring.t, Bigstring.t, Bigstring.t, Error.t) Rpc.State_rpc.t
 val sort_rpc : (int array, int array) Rpc.Rpc.t
+val server_identification : Bigstring.t
+val client_identification : Bigstring.t
 
 (** Records a copy of bytes passed through a connection and exposes functions for tests to
     provide a way to interpret the bytes and pretty print them *)
@@ -42,5 +44,5 @@ val with_rpc_server_connection
         -> server:Rpc.Connection.t
         -> s_to_c:Tap.t
         -> c_to_s:Tap.t
-        -> unit Deferred.t)
-  -> unit Deferred.t
+        -> 'a Deferred.t)
+  -> 'a Deferred.t
