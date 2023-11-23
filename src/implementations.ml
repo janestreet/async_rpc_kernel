@@ -828,7 +828,7 @@ module Instance = struct
            (* We have to map down to the V1 menu since that's the type that old clients
               are expecting (but we need to be able to self-dispatch the menu to get the
               V2 response for connection metadata). *)
-           menu |> List.map ~f:fst |> Menu.Stable.V1.response_of_model)
+           menu |> force |> List.map ~f:fst |> Menu.Stable.V1.response_of_model)
          |> write_response
               t
               id

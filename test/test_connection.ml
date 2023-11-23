@@ -64,8 +64,12 @@ let connection_test_id ~client ~server ~s_to_c ~c_to_s =
 let connection_test_menu ~client ~server ~s_to_c:_ ~c_to_s:_ =
   let%bind client_menu = Rpc.Connection.peer_menu server in
   let%map server_menu = Rpc.Connection.peer_menu client in
-  print_s [%message (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)];
-  print_s [%message (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)]
+  print_s
+    [%message
+      (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option Or_error.t)];
+  print_s
+    [%message
+      (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option Or_error.t)]
 ;;
 
 let connection_test ~server_header ~client_header ~f : unit Deferred.t =
@@ -84,43 +88,45 @@ let%expect_test "V3 send versioned menu automatically" =
   in
   [%expect
     {|
-    (client_menu (()))
+    (client_menu (Ok (())))
     (server_menu
-     ((((name sort)
-        (versions
-         (((version 1)
-           (digest
-            (Rpc (query 4c138035aa69ec9dd8b7a7119090f84a)
-             (response 4c138035aa69ec9dd8b7a7119090f84a)))))))
-       ((name test-one-way-rpc)
-        (versions
-         (((version 1) (digest (One_way (msg e2d261c6c291b94bf6aa68ec2b08cb00)))))))
-       ((name test-pipe-rpc)
-        (versions
-         (((version 1)
-           (digest
-            (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
-             (initial_response 86ba5df747eec837f0b391dd49f33f9e)
-             (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
-             (error 52966f4a49a77bfdff668e9cc61511b3)))))))
-       ((name test-rpc)
-        (versions
-         (((version 1)
-           (digest
-            (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
-             (response e2d261c6c291b94bf6aa68ec2b08cb00))))
-          ((version 2)
-           (digest
-            (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
-             (response e2d261c6c291b94bf6aa68ec2b08cb00)))))))
-       ((name test-state-rpc)
-        (versions
-         (((version 1)
-           (digest
-            (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
-             (initial_response e2d261c6c291b94bf6aa68ec2b08cb00)
-             (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
-             (error 52966f4a49a77bfdff668e9cc61511b3)))))))))) |}];
+     (Ok
+      ((((name sort)
+         (versions
+          (((version 1)
+            (digest
+             (Rpc (query 4c138035aa69ec9dd8b7a7119090f84a)
+              (response 4c138035aa69ec9dd8b7a7119090f84a)))))))
+        ((name test-one-way-rpc)
+         (versions
+          (((version 1)
+            (digest (One_way (msg e2d261c6c291b94bf6aa68ec2b08cb00)))))))
+        ((name test-pipe-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (initial_response 86ba5df747eec837f0b391dd49f33f9e)
+              (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (error 52966f4a49a77bfdff668e9cc61511b3)))))))
+        ((name test-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (response e2d261c6c291b94bf6aa68ec2b08cb00))))
+           ((version 2)
+            (digest
+             (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (response e2d261c6c291b94bf6aa68ec2b08cb00)))))))
+        ((name test-state-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (initial_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (error 52966f4a49a77bfdff668e9cc61511b3))))))))))) |}];
   let%bind () =
     connection_test
       ~server_header:Test_helpers.Header.v3
@@ -128,8 +134,8 @@ let%expect_test "V3 send versioned menu automatically" =
       ~f:connection_test_menu
   in
   [%expect {|
-    (client_menu ())
-    (server_menu ()) |}];
+    (client_menu (Ok ()))
+    (server_menu (Ok ())) |}];
   return ()
 ;;
 

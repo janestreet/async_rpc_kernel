@@ -140,12 +140,21 @@ module type S = sig
 
   (** Peer menu will become determined before any other messages are received. The menu is
       sent automatically on creation of a connection. If the peer is using an older
-      version, the value is immediately determined to be [None] *)
-  val peer_menu : t -> Menu.t option Deferred.t
+      version, the value is immediately determined to be [None]. If the connection is
+      closed before the menu is received, an error is returned.
+
+      It is expected that one will call {!Versioned_rpc.Connection_with_menu.create}
+      instead of this function and that will request the menu via rpc if it gets [None].
+  *)
+  val peer_menu : t -> Menu.t option Or_error.t Deferred.t
+
+  (** Like {!peer_menu} but returns an rpc result  *)
+  val peer_menu' : t -> Menu.t option Rpc_result.t Deferred.t
 
   (** Peer identification will become determined before any other messages are received.
       If the peer is using an older version, the peer id is immediately determined to be
-      [None] *)
+      [None]. If the connection is closed before the menu is received, [None] is returned.
+  *)
   val peer_identification : t -> Bigstring.t option Deferred.t
 
   (** [with_close] tries to create a [t] using the given transport.  If a handshake error

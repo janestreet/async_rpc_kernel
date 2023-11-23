@@ -76,7 +76,7 @@ module F = struct
     | Streaming_rpc :
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
-    | Legacy_menu_rpc : Menu.Stable.V2.response -> 'connection_state t
+    | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
 
   let sexp_of_t _ = function
     | One_way_expert _ | One_way _ -> [%message "one-way"]

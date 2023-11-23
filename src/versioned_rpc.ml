@@ -623,8 +623,10 @@ module Menu = struct
 
   let add impls =
     let menu =
-      List.map impls ~f:(fun implementation ->
-        Implementation.description implementation, Implementation.digests implementation)
+      lazy
+        (List.map impls ~f:(fun implementation ->
+           ( Implementation.description implementation
+           , Implementation.digests implementation )))
     in
     let implementation =
       { Implementation_types.Implementation.tag =
@@ -650,13 +652,13 @@ module Menu = struct
   ;;
 
   let request conn =
-    match%bind Connection.peer_menu conn with
+    match%bind.Eager_deferred.Or_error Connection.peer_menu conn with
     | Some menu -> return (Ok menu)
     | None -> aux_request Rpc.dispatch conn
   ;;
 
   let request' conn =
-    match%bind Connection.peer_menu conn with
+    match%bind.Eager_deferred.Result Connection.peer_menu' conn with
     | Some menu -> return (Ok menu)
     | None -> aux_request Rpc.dispatch' conn
   ;;

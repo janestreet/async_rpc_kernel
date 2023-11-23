@@ -50,6 +50,14 @@ end = struct
   ;;
 end
 
+module Peer_metadata = struct
+  type t =
+    | Unsupported
+    | Expected of
+        (Bigstring.t option * Menu.t option, [ `Connection_closed ]) Result.t Ivar.t
+  [@@deriving sexp_of]
+end
+
 module Heartbeat_config = struct
   type t =
     { timeout : Time_ns.Span.t
@@ -113,11 +121,9 @@ type t =
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
   *)
-  ; peer_metadata :
-      [ `Unsupported | `Requested of (Bigstring.t option * Menu.t option) Ivar.t ]
-      Set_once.t
+  ; peer_metadata : Peer_metadata.t Set_once.t
       (* responses to queries are written by the implementations instance. Other events
-           are written by this module. *)
+     are written by this module. *)
   }
 [@@deriving sexp_of]
 
@@ -129,19 +135,44 @@ let sexp_of_t_hum_writer t =
 let description t = t.description
 let is_closed t = Ivar.is_full t.close_started
 
-let unwrap_metadata metadata ~f =
-  match Set_once.get metadata with
-  | Some `Unsupported | None -> return None
-  | Some (`Requested ivar) ->
-    let%bind metadata = Ivar.read ivar in
-    return (Some (f metadata))
+let map_metadata t ~kind_of_metadata ~f =
+  match Set_once.get t.peer_metadata with
+  | Some Unsupported -> f (Error `Unsupported)
+  | None -> f (Error `No_handshake)
+  | Some (Expected result) ->
+    (match%bind.Eager_deferred Ivar.read result with
+     | Ok md -> f (Ok md)
+     | Error `Connection_closed ->
+       f
+         (Error
+            (`Closed
+              [%lazy_message
+                "Connection closed before we could get peer metadata"
+                  ~trying_to_get:kind_of_metadata
+                  ~connection_description:(t.description : Info.t)
+                  ~close_reason:(Ivar.peek t.close_started : Info.t option)])))
 ;;
 
 let peer_identification t =
-  Deferred.map (unwrap_metadata t.peer_metadata ~f:fst) ~f:Option.join
+  map_metadata t ~kind_of_metadata:"peer_identification" ~f:(function
+    | Ok (id, (_ : Menu.t option)) -> return id
+    | Error `Unsupported | Error `No_handshake | Error (`Closed (_ : Sexp.t lazy_t)) ->
+      return None)
 ;;
 
-let peer_menu t = Deferred.map (unwrap_metadata t.peer_metadata ~f:snd) ~f:Option.join
+let peer_menu t =
+  map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
+    | Ok ((_ : Bigstring.t option), menu) -> return (Ok menu)
+    | Error `Unsupported | Error `No_handshake -> return (Ok None)
+    | Error (`Closed info) -> return (Error (Error.of_lazy_sexp info)))
+;;
+
+let peer_menu' t =
+  map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
+    | Ok ((_ : Bigstring.t option), menu) -> return (Ok menu)
+    | Error `Unsupported | Error `No_handshake -> return (Ok None)
+    | Error (`Closed (_ : Sexp.t lazy_t)) -> return (Error Rpc_error.Connection_closed))
+;;
 
 let writer t =
   if is_closed t || not (Protocol_writer.can_send t.writer)
@@ -373,15 +404,17 @@ let handle_msg
   match msg with
   | Metadata metadata ->
     (match Set_once.get t.peer_metadata with
-     | None | Some `Unsupported ->
+     | None | Some Unsupported ->
        raise_s
          [%message
            "Inconsistent state: receiving a metadata message is unsupported, but a \
             metadata message was received"]
-     | Some (`Requested ivar) ->
-       Ivar.fill_exn
-         ivar
-         (metadata.identification, Option.map metadata.menu ~f:Menu.of_v2_response));
+     | Some (Expected ivar) ->
+       if Ivar.is_empty t.close_started
+       then
+         Ivar.fill_exn
+           ivar
+           (Ok (metadata.identification, Option.map metadata.menu ~f:Menu.of_v2_response)));
     Continue
   | Heartbeat ->
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
@@ -644,9 +677,12 @@ let negotiate t ?identification ~header ~peer ~writer ~menu () =
   | Ok version ->
     if version >= 3
     then (
-      Set_once.set_exn t.peer_metadata [%here] (`Requested (Ivar.create ()));
+      let ivar = Ivar.create () in
+      upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
+        Ivar.fill_if_empty ivar (Error `Connection_closed));
+      Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
       send_metadata t writer ~menu ?identification ())
-    else Set_once.set_exn t.peer_metadata [%here] `Unsupported;
+    else Set_once.set_exn t.peer_metadata [%here] Unsupported;
     return negotiate_result
   | Error (_ : Handshake_error.t) -> return negotiate_result
 ;;
@@ -759,7 +795,7 @@ let create
       (* 1. There exists a default menu rpc. We can dispatch it to retrieve the menu then
          include this in the metadata. menu rpc or a custom rpc to figure out whether we
          can dispatch it to retrieve the menu. *)
-      Some menu, implementations
+      Some (force menu), implementations
     | Some (_ : _ Implementation.t) ->
       (* 2. There was a custom menu rpc implemented. We cannot include a menu in the
          metadata. *)
@@ -777,7 +813,7 @@ let create
           { Implementation_types.Implementation.tag =
               Protocol.Rpc_tag.of_string Menu.version_menu_rpc_name
           ; version = 1
-          ; f = Legacy_menu_rpc menu
+          ; f = Legacy_menu_rpc (lazy menu)
           ; shapes =
               lazy
                 (Rpc_shapes.Rpc

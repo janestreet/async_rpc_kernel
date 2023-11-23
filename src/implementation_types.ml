@@ -93,7 +93,7 @@ module rec Implementation : sig
          in [Menu.add] that lets us dispatch the rpc without a ['connection_state].
          Externally this looks and acts like a [Menu.Stable.V1.response]-returning server.
       *)
-      | Legacy_menu_rpc : Menu.Stable.V2.response -> 'connection_state t
+      | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
   end
 
   type 'connection_state t =
