@@ -36,6 +36,13 @@ module Just_digests : sig
 
   (** True if the variants are the same, e.g. both are [Rpc _] *)
   val same_kind : t -> t -> bool
+
+  module Strict_comparison : sig
+    (** Total order on [t]. [Unknown] is equal only to [Unknown]. You might not want this
+        kind of comparison for things other than e.g. making a [Map.t] *)
+
+    type nonrec t = t [@@deriving compare]
+  end
 end
 
 val eval_to_digest : t -> Just_digests.t

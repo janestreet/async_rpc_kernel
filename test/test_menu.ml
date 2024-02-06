@@ -89,7 +89,8 @@ module type Menu_intf = sig
   val of_v1_or_v2 : V1_or_v2.t -> t
   val supported_rpcs : t -> Description.t list
   val supported_versions : t -> rpc_name:string -> Int.Set.t
-  val mem : t -> (Description.t[@local]) -> bool
+  val mem : t -> Description.t -> bool
+  val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t option
 
   val highest_available_version
     :  t
@@ -130,6 +131,10 @@ module Reference_menu : Menu_intf = struct
       (supported_rpcs t)
       ([%globalize: Description.t] desc)
       ~equal:Description.equal
+  ;;
+
+  let shape_digests t desc =
+    List.Assoc.find t ([%globalize: Description.t] desc) ~equal:[%equal: Description.t]
   ;;
 
   let highest_available_version (t : t) ~rpc_name ~from_set =
@@ -290,7 +295,48 @@ let%expect_test "mem" =
        ((name q) (kind One_way) (versions (0)))
        ((name s) (kind Streaming_rpc) (versions (-1)))
        ((name x) (kind Streaming_rpc) (versions (1)))))
-     (result (false (x 8)))) |}]
+     (result (true (, 4)))) |}]
+;;
+
+let%expect_test "shape_digests" =
+  do_test
+    [%sexp_of: Rpc_shapes.Just_digests.t option * (string * int)]
+    [%compare: Rpc_shapes.Just_digests.Strict_comparison.t option * _]
+    ~seed:8069
+    ~f:(fun (module M) x state ->
+    let t = M.of_v1_or_v2 x in
+    let name = choose_rpc_name x state in
+    let versions = t |> M.supported_versions ~rpc_name:name in
+    let version =
+      if Random.State.bool state || Set.is_empty versions
+      then
+        (* arbitrary value that may/may not be in the menu, or before/after all elts *)
+        8
+      else
+        Set.nth versions (Random.State.int state (Set.length versions))
+        |> Option.value_exn
+    in
+    M.shape_digests t { name; version }, (name, version));
+  [%expect
+    {|
+    ("500th example"
+     (menu
+      (((name /) (kind Streaming_rpc) (versions (8)))
+       ((name 7) (kind Unknown) (versions (1)))
+       ((name 9w) (kind Unknown) (versions (2)))
+       ((name Foo) (kind One_way) (versions (-1)))
+       ((name Foo) (kind Streaming_rpc) (versions (2)))
+       ((name Foo) (kind Unknown) (versions (10)))
+       ((name Foo) (kind Streaming_rpc) (versions (17)))
+       ((name K) (kind One_way) (versions (2)))
+       ((name Q) (kind Unknown) (versions (7)))
+       ((name bar) (kind Streaming_rpc) (versions (0)))
+       ((name c) (kind Streaming_rpc) (versions (3)))
+       ((name foo) (kind One_way) (versions (7)))
+       ((name foo) (kind Streaming_rpc) (versions (14)))
+       ((name foo) (kind One_way) (versions (16)))
+       ((name k) (kind Rpc) (versions (3)))))
+     (result (() (Q 8)))) |}]
 ;;
 
 let%expect_test "highest_available_version" =
@@ -313,7 +359,7 @@ let%expect_test "highest_available_version" =
      (menu
       (((name FOO) (kind Unknown) (versions (6)))
        ((name Mi) (kind Rpc) (versions (2)))))
-     (result ((Error No_rpcs_with_this_name) (not-in-menu (2))))) |}]
+     (result ((Ok 2) (Mi (2))))) |}]
 ;;
 
 let%expect_test "highest_available_version 2" =

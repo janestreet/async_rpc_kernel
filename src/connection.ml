@@ -117,7 +117,7 @@ type t =
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
   ; negotiated_protocol_version : int Set_once.t
-  ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
+  ; events : (Tracing_event.t -> unit) Bus.Read_write.t
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
   *)
@@ -186,7 +186,7 @@ let bytes_read t = Reader.bytes_read t.reader
 let flushed t = Protocol_writer.flushed t.writer
 let events t = (t.events :> _ Bus.Read_only.t)
 
-let write_event t (event [@ocaml.local]) =
+let write_event t event =
   if not (Bus.is_closed t.events) then Bus.write_local t.events event
 ;;
 
@@ -200,9 +200,9 @@ end
 let handle_send_result :
       'a.
       t
-      -> ('a Transport.Send_result.t[@local])
-      -> rpc:(Description.t[@ocaml.local])
-      -> id:(P.Query_id.t[@ocaml.local])
+      -> 'a Transport.Send_result.t
+      -> rpc:Description.t
+      -> id:P.Query_id.t
       -> ('a, Dispatch_error.t) Result.t
   =
   fun t r ~rpc ~id ->
@@ -230,7 +230,7 @@ let handle_send_result :
 ;;
 
 (* Used for heartbeats and protocol negotiation *)
-let handle_special_send_result t ((result : unit Transport.Send_result.t) [@local]) =
+let handle_special_send_result t (result : unit Transport.Send_result.t) =
   match result with
   | Sent { result = (); bytes = (_ : int) } -> ()
   | Closed ->
@@ -250,9 +250,7 @@ let send_query_with_registered_response_handler
   t
   (query : 'query P.Query.t)
   ~response_handler
-  ~send_query:
-    ((send_query : 'query P.Query.t -> ('response Transport.Send_result.t[@local])) [@local
-                                                                                      ])
+  ~(send_query : 'query P.Query.t -> 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
   let registered_response_handler =
@@ -291,9 +289,7 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
       t
       query
       ~response_handler
-      ~send_query:
-        ( (fun query ->
-            (Protocol_writer.send_query writer query ~bin_writer_query)))
+      ~send_query:(fun query -> Protocol_writer.send_query writer query ~bin_writer_query) 
     [@nontail]
 ;;
 
@@ -317,16 +313,14 @@ let make_dispatch_bigstring
       t
       query
       ~response_handler
-      ~send_query:
-        ( (fun query ->
-           
-             (Protocol_writer.send_expert_query
-                writer
-                query
-                ~buf
-                ~pos
-                ~len
-                ~send_bin_prot_and_bigstring:do_send))) [@nontail]
+      ~send_query:(fun query ->
+      Protocol_writer.send_expert_query
+        writer
+        query
+        ~buf
+        ~pos
+        ~len
+        ~send_bin_prot_and_bigstring:do_send) [@nontail]
 ;;
 
 let dispatch_bigstring = make_dispatch_bigstring Writer.send_bin_prot_and_bigstring

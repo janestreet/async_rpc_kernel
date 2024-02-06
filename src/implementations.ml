@@ -76,7 +76,7 @@ module Instance = struct
   type 'a unpacked = 'a Instance.unpacked =
     { implementations : ('a implementations[@sexp.opaque])
     ; writer : Protocol_writer.t
-    ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
+    ; events : (Tracing_event.t -> unit) Bus.Read_write.t
     ; open_streaming_responses : streaming_responses
     ; mutable stopped : bool
     ; connection_state : 'a
@@ -114,17 +114,11 @@ module Instance = struct
             }]
   ;;
 
-  let write_event t (event [@ocaml.local]) =
+  let write_event t event =
     if not (Bus.is_closed t.events) then Bus.write_local t.events event
   ;;
 
-  let handle_send_result
-    t
-    (qid [@ocaml.local])
-    (rpc [@ocaml.local])
-    (kind [@ocaml.local])
-    ((result : _ Transport.Send_result.t) [@ocaml.local])
-    =
+  let handle_send_result t qid rpc kind (result : _ Transport.Send_result.t) =
     let id = (qid : P.Query_id.t :> Int63.t) in
     match result with
     | Sent { result = (); bytes } ->
@@ -967,7 +961,24 @@ module Instance = struct
           | `Query (len : Nat0.t) -> (len :> int))
       in
       (match stream_query with
-       | Error _err -> ()
+       | Error _ as error ->
+         (* There are roughly four things that can happen here:
+            1. The client thinks they are sending a regular rpc so we fail to parse
+            2. The client sent a streaming rpc but the message was corrupted
+            3. The client sent an abort but the message was corrupted
+            4. The client thinks they are sending a one-way rpc so we fail to parse
+
+            In cases 1 and 2, the client will expect a response and in cases 3 and 4 they
+            won’t. We do send a response here with an error. In case 1 and 2 this is
+            returned to the caller. In case 3 and 4 the client closes its connection
+            complaining about the error or an unknown query id. *)
+         write_response
+           t
+           id
+           Nothing.bin_writer_t
+           error
+           ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+           ~ok_kind:Single_or_streaming_error
        | Ok `Abort ->
          (* Note that there's some delay between when we receive a pipe RPC query and
             when we put something in [open_streaming_responses] (we wait for
@@ -1255,7 +1266,7 @@ module Expert = struct
         cannot_send ([%globalize: unit Transport.Send_result.t] r)
     ;;
 
-    let handle_send_result : (unit Transport.Send_result.t[@local]) -> unit = function
+    let handle_send_result : unit Transport.Send_result.t -> unit = function
       | Sent { result = (); bytes = (_ : int) } | Closed -> ()
       | Message_too_big _ as r ->
         cannot_send ([%globalize: unit Transport.Send_result.t] r)

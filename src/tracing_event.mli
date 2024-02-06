@@ -101,3 +101,4 @@ type t =
       async-rpc messages. This includes the bytes specifying the rpc name/version or query
       id. This will be 0 in some cases where nothing is sent. *)
   }
+[@@deriving sexp_of, globalize]

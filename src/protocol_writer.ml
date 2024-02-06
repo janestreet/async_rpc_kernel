@@ -24,29 +24,26 @@ let query_message t query : _ Protocol.Message.t =
 
 let send_query t query ~bin_writer_query =
   let message = query_message t query in
-  
-    (Transport.Writer.send_bin_prot
-       t.writer
-       (Protocol.Message.bin_writer_maybe_needs_length
-          (Writer_with_length.of_writer bin_writer_query))
-       message)
+  Transport.Writer.send_bin_prot
+    t.writer
+    (Protocol.Message.bin_writer_maybe_needs_length
+       (Writer_with_length.of_writer bin_writer_query))
+    message
 ;;
 
 let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
   let header = query_message t { query with data = Nat0.of_int_exn len } in
-  
-    (send_bin_prot_and_bigstring
-       t.writer
-       Protocol.Message.bin_writer_nat0_t
-       header
-       ~buf
-       ~pos
-       ~len)
+  send_bin_prot_and_bigstring
+    t.writer
+    Protocol.Message.bin_writer_nat0_t
+    header
+    ~buf
+    ~pos
+    ~len
 ;;
 
 let send_heartbeat t =
-  
-    (Transport.Writer.send_bin_prot t.writer Protocol.Message.bin_writer_nat0_t Heartbeat)
+  Transport.Writer.send_bin_prot t.writer Protocol.Message.bin_writer_nat0_t Heartbeat
 ;;
 
 let response_message (type a) t (response : a Protocol.Response.t) : a Protocol.Message.t =
@@ -71,24 +68,22 @@ let response_message (type a) t (response : a Protocol.Response.t) : a Protocol.
 
 let send_response t response ~bin_writer_response =
   let message = response_message t response in
-  
-    (Transport.Writer.send_bin_prot
-       t.writer
-       (Protocol.Message.bin_writer_maybe_needs_length
-          (Writer_with_length.of_writer bin_writer_response))
-       message)
+  Transport.Writer.send_bin_prot
+    t.writer
+    (Protocol.Message.bin_writer_maybe_needs_length
+       (Writer_with_length.of_writer bin_writer_response))
+    message
 ;;
 
 let send_expert_response t query_id ~buf ~pos ~len ~send_bin_prot_and_bigstring =
   let header = response_message t { id = query_id; data = Ok (Nat0.of_int_exn len) } in
-  
-    (send_bin_prot_and_bigstring
-       t.writer
-       Protocol.Message.bin_writer_nat0_t
-       header
-       ~buf
-       ~pos
-       ~len)
+  send_bin_prot_and_bigstring
+    t.writer
+    Protocol.Message.bin_writer_nat0_t
+    header
+    ~buf
+    ~pos
+    ~len
 ;;
 
 let of_writer f t = f t.writer
@@ -101,13 +96,10 @@ let close = of_writer Transport.Writer.close
 let is_closed = of_writer Transport.Writer.is_closed
 
 module Unsafe_for_cached_bin_writer = struct
-  let send_bin_prot t bin_writer a =
-     (Transport.Writer.send_bin_prot t.writer bin_writer a)
-  ;;
+  let send_bin_prot t bin_writer a = Transport.Writer.send_bin_prot t.writer bin_writer a
 
   let send_bin_prot_and_bigstring t bin_writer a ~buf ~pos ~len =
-    
-      (Transport.Writer.send_bin_prot_and_bigstring t.writer bin_writer a ~buf ~pos ~len)
+    Transport.Writer.send_bin_prot_and_bigstring t.writer bin_writer a ~buf ~pos ~len
   ;;
 
   let transfer t pipe_reader f = Transport.Writer.transfer t.writer pipe_reader f

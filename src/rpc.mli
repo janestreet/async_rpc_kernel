@@ -22,7 +22,7 @@ open! Async_kernel
 
 module Description : sig
   type t = Description.t =
-    { name : string [@global]
+    { name : string
     ; version : int
     }
   [@@deriving compare, equal, hash, sexp_of, globalize]
@@ -447,9 +447,13 @@ module Pipe_message : sig
     | Closed of [ `By_remote_side | `Error of Error.t ]
 end
 
-(** The output type of the [f] passed to [dispatch_iter]. This is analagous to a simple
+(** The output type of the [f] passed to [dispatch_iter]. This is analogous to a simple
     [unit Deferred.t], with [Continue] being like [Deferred.unit], but it is made
-    explicit when no waiting should occur. *)
+    explicit when no waiting should occur.
+
+    When [Wait ready] is returned, no data will be read from the [Connection.t] until
+    [ready] becomes determined
+*)
 module Pipe_response : sig
   type t =
     | Continue
@@ -478,10 +482,10 @@ module Pipe_rpc : sig
         discussed next.
 
         If [client_pushes_back] is set, the client side of the connection will stop
-        reading elements from the underlying file descriptor when the client's pipe has
-        a sufficient number of elements enqueued, rather than reading elements eagerly.
-        This will eventually cause writes on the server's side to block, indicating to
-        the server it should slow down.
+        reading from the underlying file descriptor when the client's pipe has more
+        elements enqueued than its [size_budget], waiting until [Pipe.downstream_flushed].
+        This will eventually cause writes on the server's side to block, indicating to the
+        server it should slow down.
 
         There are some drawbacks to using [client_pushes_back]:
 
@@ -497,6 +501,11 @@ module Pipe_rpc : sig
           elements on its side of the connection, rather than on the client's side,
           meaning a slow client can make the server run out of memory.
 
+        - NOTE that the client only resumes once [Pipe.downstream_flushed] completes,
+          which is a stronger condition than just waiting on [Pipe.pushback]. This can be
+          especially unintuitive if [Pipe.fork] is used on the response pipe, as
+          [downstream_flushed] on [Pipe.fork] only becomes determined once both of the
+          downstream pipes flush the elements.
     *)
     -> name:string
     -> version:int
@@ -512,7 +521,13 @@ module Pipe_rpc : sig
   val shapes : (_, _, _) t -> Rpc_shapes.t
 
   (** The pipe returned by the implementation function will be closed automatically when
-      either the connection to the client is closed or the client closes their pipe. *)
+      either the connection to the client is closed or the client closes their pipe.
+
+      As described in [create], elements in the returned pipe will be transferred to the
+      underlying connection, waiting after each batch of elements in the pipe until those
+      bytes have been flushed to the connection. Slow connections or [client_pushes_back]
+      can cause elements to buffer in the pipe if the server doesn't respect pushback on
+      the pipe. *)
   val implement
     :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
     -> ('query, 'response, 'error) t
@@ -737,6 +752,9 @@ module Pipe_rpc : sig
         - [f] completes, returning [Wait d], and [d] becomes determined
 
         [closed] will be called once, after which [f] will not be called.
+
+        Like the non-expert [dispatch_iter], nothing will be read from the [Connection.t]
+        between [f] returning [wait d] and [d] becoming determined.
 
         Note that unlike the non-expert [dispatch_iter], exceptions from [f] are caught,
         resulting in [closed] being invoked, instead of terminating the connection. *)

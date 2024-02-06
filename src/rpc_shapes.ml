@@ -121,7 +121,11 @@ module Just_digests = struct
         ; error : Bin_shape.Digest.t
         }
     | Unknown
-  [@@deriving sexp_of, variants]
+  [@@deriving sexp_of, compare, variants]
+
+  module Strict_comparison = struct
+    type nonrec t = t [@@deriving compare]
+  end
 
   let same_kind = Comparable.lift [%equal: int] ~f:Variants.to_rank
 end

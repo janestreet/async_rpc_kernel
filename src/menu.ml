@@ -102,7 +102,7 @@ let supported_versions t ~rpc_name =
       ~f:(fun i -> t.descriptions.(lb + i).version)
 ;;
 
-let mem t (description [@local]) =
+let index t description =
   match
     Array.binary_search_segmented
       t.descriptions
@@ -110,8 +110,26 @@ let mem t (description [@local]) =
         if [%compare_local: Description.t] d description <= 0 then `Left else `Right)
       `Last_on_left
   with
+  | None -> None
+  | Some i ->
+    if [%compare_local.equal: Description.t] t.descriptions.(i) description
+    then Some i
+    else None
+;;
+
+let mem t description =
+  match index t description with
+  | Some (_ : int) -> true
   | None -> false
-  | Some i -> [%compare_local.equal: Description.t] t.descriptions.(i) description
+;;
+
+let shape_digests t description =
+  match index t description with
+  | None -> None
+  | Some i ->
+    (match t.digests with
+     | Some digests -> Some digests.(i)
+     | None -> Some Unknown)
 ;;
 
 (* This function is a bit ugly. We want to (a) reasonably avoid allocations, (b) be fast

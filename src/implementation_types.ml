@@ -142,7 +142,7 @@ and Implementations : sig
     type 'a unpacked =
       { implementations : 'a implementations
       ; writer : Protocol_writer.t
-      ; events : ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_write.t
+      ; events : (Tracing_event.t -> unit) Bus.Read_write.t
       ; open_streaming_responses : (Query_id.t, streaming_response) Hashtbl.t
       ; mutable stopped : bool
       ; connection_state : 'a

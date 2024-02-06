@@ -261,7 +261,7 @@ module type S_private = sig
 
   (** Allows getting information from the RPC that may be used for tracing or metrics. The
       interface is not yet stable. *)
-  val events : t -> ((Tracing_event.t[@ocaml.local]) -> unit) Bus.Read_only.t
+  val events : t -> (Tracing_event.t -> unit) Bus.Read_only.t
 
   module For_testing : sig
     module Header : sig

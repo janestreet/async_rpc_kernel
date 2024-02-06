@@ -11,7 +11,7 @@ val send_query
   :  t
   -> 'query Protocol.Query.t
   -> bin_writer_query:'query Bin_prot.Type_class.writer
-  -> (unit Transport.Send_result.t[@local])
+  -> unit Transport.Send_result.t
 
 val send_expert_query
   :  t
@@ -26,14 +26,14 @@ val send_expert_query
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> ('result Transport.Send_result.t[@local]))
-  -> ('result Transport.Send_result.t[@local])
+        -> 'result Transport.Send_result.t)
+  -> 'result Transport.Send_result.t
 
 val send_response
   :  t
   -> 'response Protocol.Response.t
   -> bin_writer_response:'response Bin_prot.Type_class.writer
-  -> (unit Transport.Send_result.t[@local])
+  -> unit Transport.Send_result.t
 
 val send_expert_response
   :  t
@@ -48,10 +48,10 @@ val send_expert_response
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> ('result Transport.Send_result.t[@local]))
-  -> ('result Transport.Send_result.t[@local])
+        -> 'result Transport.Send_result.t)
+  -> 'result Transport.Send_result.t
 
-val send_heartbeat : t -> (unit Transport.Send_result.t[@local])
+val send_heartbeat : t -> unit Transport.Send_result.t
 val can_send : t -> bool
 val bytes_to_write : t -> int
 val bytes_written : t -> Int63.t
@@ -65,7 +65,7 @@ module Unsafe_for_cached_bin_writer : sig
     :  t
     -> 'a Bin_prot.Type_class.writer
     -> 'a
-    -> (unit Transport.Send_result.t[@local])
+    -> unit Transport.Send_result.t
 
   val send_bin_prot_and_bigstring
     :  t
@@ -74,7 +74,7 @@ module Unsafe_for_cached_bin_writer : sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> (unit Transport.Send_result.t[@local])
+    -> unit Transport.Send_result.t
 
   val transfer : t -> 'a Pipe.Reader.t -> ('a -> unit) -> unit Deferred.t
 end

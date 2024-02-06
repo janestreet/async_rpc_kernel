@@ -29,7 +29,7 @@ module Make_with_length (Length : sig
   val bin_size_t : t -> int
 end) =
 struct
-  type 'a t = 'a
+  type 'a t = 'a [@@deriving sexp]
 
   module Bin = struct
     type 'a t =

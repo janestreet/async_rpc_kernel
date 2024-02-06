@@ -1,2 +1,8 @@
-(library (name async_rpc_kernel_bench) (c_names stubs) (libraries async)
- (preprocess (pps ppx_jane)))
+(library
+ (foreign_stubs
+  (language c)
+  (names stubs))
+ (name async_rpc_kernel_bench)
+ (libraries async)
+ (preprocess
+  (pps ppx_jane)))

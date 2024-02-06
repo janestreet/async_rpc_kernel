@@ -147,7 +147,7 @@ module Stream_query = struct
     [ `Query of 'a
     | `Abort
     ]
-  [@@deriving bin_io]
+  [@@deriving bin_io, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -176,14 +176,14 @@ module Stream_response_data = struct
     [ `Ok of 'a
     | `Eof
     ]
-  [@@deriving bin_io]
+  [@@deriving bin_io, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
     [%expect {| c1dbcdcfe2b12e797ec64f0d74df1811 |}]
   ;;
 
-  type 'a t = 'a needs_length [@@deriving bin_read]
+  type 'a t = 'a needs_length [@@deriving bin_read, sexp_of]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end
 

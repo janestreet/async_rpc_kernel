@@ -48,3 +48,6 @@ type t =
   ; id : Int63.t (* Protocol.Query_id.t is not exposed. *)
   ; payload_bytes : int
   }
+[@@deriving sexp_of]
+
+let globalize x = x

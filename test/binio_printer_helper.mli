@@ -9,7 +9,7 @@ end
 (** A wrapper type to generate a bin_io deserializer that first reads an [int] length
     header *)
 module With_length : sig
-  type 'a t = 'a [@@deriving bin_io]
+  type 'a t = 'a [@@deriving bin_io, sexp]
 end
 
 (** Assuming that the binary data follows the given bin shape, tries to produce some

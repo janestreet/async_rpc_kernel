@@ -41,7 +41,7 @@ module Send_result = struct
 
   type 'a t =
     | Sent of
-        { result : 'a [@global]
+        { result : 'a
         ; bytes : int
             (** Bytes should equal the size of the bin_prot rpc message and data. The total
             bytes written on the network in the standard protocol (which has 8-bytes sizes
@@ -84,11 +84,7 @@ module type Writer = sig
 
   (** All the following functions send exactly one message. *)
 
-  val send_bin_prot
-    :  t
-    -> 'a Bin_prot.Type_class.writer
-    -> 'a
-    -> (unit Send_result.t[@local])
+  val send_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit Send_result.t
 
   val send_bin_prot_and_bigstring
     :  t
@@ -97,7 +93,7 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> (unit Send_result.t[@local])
+    -> unit Send_result.t
 
   (** Same as [send_bin_prot_and_bigstring] but the bigstring can't be modified until the
       returned deferred becomes determined.  This can be used to avoid copying the
@@ -109,5 +105,5 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> (unit Deferred.t Send_result.t[@local])
+    -> unit Deferred.t Send_result.t
 end
