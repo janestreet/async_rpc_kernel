@@ -22,6 +22,7 @@ let rpc =
     ~name:"my-rpc"
     ~bin_query:Bin_prot.Type_class.bin_unit
     ~bin_response:Bin_prot.Type_class.bin_int
+    ~include_in_error_count:Only_on_exn
 ;;
 
 let state_rpc =

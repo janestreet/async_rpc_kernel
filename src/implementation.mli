@@ -23,6 +23,13 @@ module Expert : sig
 end
 
 module F : sig
+  type 'a error_mode = 'a F.error_mode =
+    | Always_ok : _ error_mode
+    | Using_result : (_, _) Result.t error_mode
+    | Using_result_result : ((_, _) Result.t, _) Result.t error_mode
+    | Is_error : ('a -> bool) -> 'a error_mode
+    | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
+
   type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
     | Blocking : ('a, 'a Or_not_authorized.t) result_mode
     | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
@@ -46,6 +53,7 @@ module F : sig
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
+    ; error_mode : 'init error_mode
     }
 
   type 'connection_state t = 'connection_state F.t =
@@ -64,6 +72,7 @@ module F : sig
         'query Bin_prot.Type_class.reader
         * 'response Bin_prot.Type_class.writer
         * ('connection_state -> 'query -> 'result)
+        * 'response error_mode
         * ('response, 'result) result_mode
         -> 'connection_state t
     | Rpc_expert :

@@ -2,20 +2,21 @@ open! Core
 open! Async
 open Import
 
-let rpc' ~bin_response sexp_of_response =
+let rpc' ~print_impl ~bin_response ~include_in_error_count sexp_of_response =
   let rpc =
     Async_rpc_kernel.Rpc.Rpc.create
       ~name:"rpc"
       ~version:1
       ~bin_query:[%bin_type_class: string]
       ~bin_response
+      ~include_in_error_count
   in
   let response1 = Ivar.create () in
   let response2 = Ivar.create () in
   let responses = Queue.of_list [ response1; response2 ] in
   let impl =
     Async_rpc_kernel.Rpc.Rpc.implement rpc (fun mock q ->
-      print_s [%message "Implementation_called" q];
+      if print_impl then print_s [%message "Implementation_called" q];
       let response = Queue.dequeue_exn responses in
       let%map.Eager_deferred r = Ivar.read response in
       Mock_peer.expect_message mock bin_response.reader [%sexp_of: response];
@@ -31,7 +32,9 @@ let rpc' ~bin_response sexp_of_response =
 
 let rpc () =
   rpc'
+    ~print_impl:true
     ~bin_response:[%bin_type_class: (string, string) Result.t]
+    ~include_in_error_count:Result
     [%sexp_of: (string, string) Result.t]
 ;;
 
@@ -102,8 +105,8 @@ let%expect_test "Single successful rpc implementation, returning user-defined er
     {|
     (Send (Response ((id 123) (data (Ok (Error "user error"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
-      (id 123) (payload_bytes 1))) |}];
+     ((event (Sent (Response Single_or_streaming_user_defined_error)))
+      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1))) |}];
   return ()
 ;;
 
@@ -133,7 +136,7 @@ let%expect_test "Single raising rpc implementation" =
             (monitor.ml.Error (Failure "injected exn")
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
-     ((event (Sent (Response Single_or_streaming_error)))
+     ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
       (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1))) |}];
   return ()
 ;;
@@ -167,7 +170,7 @@ let%expect_test "Single rpc implementation raising rpc error" =
             (monitor.ml.Error (rpc_error.ml.Rpc (Unknown "injected exn") info)
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
-     ((event (Sent (Response Single_or_streaming_error)))
+     ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
       (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1))) |}];
   return ()
 ;;
@@ -259,7 +262,9 @@ let%expect_test "Single rpc implementation fails to send user-defined error once
     {|
     (Send (Response ((id 123) (data (Ok (Error "user error"))))))
     (Tracing_event
-     ((event (Failed_to_send (Response Single_succeeded) Too_large))
+     ((event
+       (Failed_to_send (Response Single_or_streaming_user_defined_error)
+        Too_large))
       (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
     (Send
      (Response
@@ -291,7 +296,9 @@ let%expect_test "Single rpc implementation fails to send twice" =
     {|
     (Send (Response ((id 123) (data (Ok (Error "user error"))))))
     (Tracing_event
-     ((event (Failed_to_send (Response Single_succeeded) Too_large))
+     ((event
+       (Failed_to_send (Response Single_or_streaming_user_defined_error)
+        Too_large))
       (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
     (Send
      (Response
@@ -333,8 +340,8 @@ let%expect_test "two rpcs in one batch" =
     {|
     (Send (Response ((id 75) (data (Ok (Error "example error 2"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
-      (id 75) (payload_bytes 1)))
+     ((event (Sent (Response Single_or_streaming_user_defined_error)))
+      (rpc (((name rpc) (version 1)))) (id 75) (payload_bytes 1)))
     (Send (Response ((id 25) (data (Ok (Ok "example response 1"))))))
     (Tracing_event
      ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
@@ -364,9 +371,182 @@ let%expect_test "two immediately-returning rpcs in one batch" =
     (Implementation_called "example query (id = 75)")
     (Send (Response ((id 75) (data (Ok (Error "example error 2"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
-      (id 75) (payload_bytes 1))) |}];
+     ((event (Sent (Response Single_or_streaming_user_defined_error)))
+      (rpc (((name rpc) (version 1)))) (id 75) (payload_bytes 1))) |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| |}];
+  return ()
+;;
+
+let%expect_test "recognising errors in responses" =
+  let test bin_response sexp_of_response include_in_error_count response =
+    Backtrace.elide := true;
+    let response1, (_response2 : (_, exn) Result.t Ivar.t), implementations =
+      rpc' ~print_impl:false ~bin_response ~include_in_error_count sexp_of_response
+    in
+    let%bind t = Mock_peer.create_and_connect' ~implementations default_config in
+    Ivar.fill_exn
+      response1
+      (match response with
+       | `Return r -> Ok r
+       | `Raise -> Error (Failure "exn"));
+    let print_part = printf "%-22s" in
+    Mock_peer.set_on_emit t (function
+      | Tracing_event { rpc = _; id = _; payload_bytes = _; event = Sent (Response kind) }
+        -> print_part (Sexp.to_string [%sexp (kind : Tracing_event.Sent_response_kind.t)])
+      | Tracing_event { rpc = _; id = _; payload_bytes = _; event = Received Query } ->
+        (* For the test, queries are not important to print out. *)
+        ()
+      | Write ev ->
+        let bs = Mock_peer.Write_event.bigstring_written ev in
+        let data =
+          Bin_prot.Reader.of_bigstring
+            (Protocol.Message.bin_reader_t
+               (Binio_printer_helper.With_length.bin_reader_t bin_response.reader))
+            bs
+        in
+        (match data with
+         | Response { id = _; data = Ok x } ->
+           print_part (Sexp.to_string [%message "sent" ~_:(x : response)])
+         | Response { id = _; data = Error (Uncaught_exn _) } ->
+           print_part "sent Uncaught_exn"
+         | data ->
+           print_endline "";
+           print_s [%message "unexpected write" ~_:(data : response Protocol.Message.t)])
+      | e ->
+        print_endline "";
+        print_s [%message "unexpected event" ~_:(e : Mock_peer.Event.t)]);
+    write_query t;
+    let%map () = Scheduler.yield_until_no_jobs_remain () in
+    Backtrace.elide := false
+  in
+  let f e = test [%bin_type_class: string] [%sexp_of: string] e in
+  let%bind () = f Only_on_exn (`Return "x") in
+  [%expect {| (sent x)              Single_succeeded |}];
+  let%bind () = f Only_on_exn `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (Custom { is_error = String.is_empty }) `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (Custom { is_error = String.is_empty }) (`Return "x") in
+  [%expect {| (sent x)              Single_succeeded |}];
+  let%bind () = f (Custom { is_error = String.is_empty }) (`Return "") in
+  [%expect {| (sent"")              Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Custom { is_error = failwith }) (`Return "x") in
+  [%expect {| (sent x)              Single_or_streaming_rpc_error_or_exn |}];
+  let error = error_s [%sexp ()] in
+  let f = test [%bin_type_class: bool Or_error.t] [%sexp_of: bool Or_error.t] in
+  let%bind () = f Only_on_exn (`Return error) in
+  [%expect {| (sent(Error()))       Single_succeeded |}];
+  let%bind () = f Or_error (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_succeeded |}];
+  let%bind () = f Or_error (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Or_error `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f Result (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_succeeded |}];
+  let%bind () = f Result (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Result `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (Generic_or_error Only_on_exn) (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_succeeded |}];
+  let%bind () = f (Generic_or_error Only_on_exn) (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Generic_or_error Only_on_exn) `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (Generic_or_error (Custom { is_error = Fn.id })) (`Return (Ok false)) in
+  [%expect {| (sent(Ok false))      Single_succeeded |}];
+  let%bind () = f (Generic_or_error (Custom { is_error = Fn.id })) (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Generic_or_error (Custom { is_error = Fn.id })) (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Generic_result Only_on_exn) (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_succeeded |}];
+  let%bind () = f (Generic_result Only_on_exn) (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Generic_result Only_on_exn) `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (Generic_result (Custom { is_error = Fn.id })) (`Return (Ok false)) in
+  [%expect {| (sent(Ok false))      Single_succeeded |}];
+  let%bind () = f (Generic_result (Custom { is_error = Fn.id })) (`Return (Ok true)) in
+  [%expect {| (sent(Ok true))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f (Generic_result (Custom { is_error = Fn.id })) (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let f =
+    test
+      [%bin_type_class: bool Or_error.t Or_error.t]
+      [%sexp_of: bool Or_error.t Or_error.t]
+  in
+  let%bind () = f Result (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_succeeded |}];
+  let%bind () = f Or_error_or_error `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f Or_error_or_error (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Or_error_or_error (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f Or_error_or_error (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_succeeded |}];
+  let%bind () = f Or_error_or_error (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_succeeded |}];
+  let%bind () = f Or_error_result `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f Or_error_result (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Or_error_result (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f Or_error_result (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_succeeded |}];
+  let%bind () = f Result_or_error `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f Result_or_error (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Result_or_error (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f Result_or_error (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_succeeded |}];
+  let%bind () = f Result_result `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f Result_result (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f Result_result (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f Result_result (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_succeeded |}];
+  let f2 x = f (Generic_or_error (Generic_or_error (Custom { is_error = Fn.id }))) x in
+  let%bind () = f2 `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f2 (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok (Ok false))) in
+  [%expect {| (sent(Ok(Ok false)))  Single_succeeded |}];
+  let f2 x = f (Generic_result (Generic_result (Custom { is_error = Fn.id }))) x in
+  let%bind () = f2 `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f2 (`Return error) in
+  [%expect {| (sent(Error()))       Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok error)) in
+  [%expect {| (sent(Ok(Error())))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok (Ok true))) in
+  [%expect {| (sent(Ok(Ok true)))   Single_or_streaming_user_defined_error |}];
+  let%bind () = f2 (`Return (Ok (Ok false))) in
+  [%expect {| (sent(Ok(Ok false)))  Single_succeeded |}];
+  let f =
+    test
+      [%bin_type_class: int * unit Or_error.t]
+      [%sexp_of: int * unit Or_error.t]
+      (Embedded (snd, Or_error))
+  in
+  let%bind () = f `Raise in
+  [%expect {| sent Uncaught_exn     Single_or_streaming_rpc_error_or_exn |}];
+  let%bind () = f (`Return (1, Ok ())) in
+  [%expect {| (sent(1(Ok())))       Single_succeeded |}];
+  let%bind () = f (`Return (1, error)) in
+  [%expect {| (sent(1(Error())))    Single_or_streaming_user_defined_error |}];
   return ()
 ;;

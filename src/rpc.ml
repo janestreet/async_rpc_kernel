@@ -8,6 +8,7 @@ module Implementation = Implementation
 module Implementations = Implementations
 module Transport = Transport
 module Connection = Connection
+module How_to_recognise_errors = How_to_recognise_errors
 
 (* The Result monad is also used. *)
 let ( >>=~ ) = Result.( >>= )
@@ -95,9 +96,10 @@ module Rpc = struct
     ; bin_response : 'response Bin_prot.Type_class.t
     ; query_type_id : 'query Type_equal.Id.t
     ; response_type_id : 'response Type_equal.Id.t
+    ; has_errors : 'response Implementation.F.error_mode
     }
 
-  let create ~name ~version ~bin_query ~bin_response =
+  let aux_create ~name ~version ~bin_query ~bin_response ~has_errors =
     let query_type_id =
       Type_equal.Id.create ~name:[%string "%{name}:query"] sexp_of_opaque
     in
@@ -110,7 +112,16 @@ module Rpc = struct
     ; bin_response
     ; query_type_id
     ; response_type_id
+    ; has_errors
     }
+  ;;
+
+  let[@inline] create ~name ~version ~bin_query ~bin_response ~include_in_error_count =
+    (* We hope to inline the below call as it is normally trivial *)
+    let has_errors =
+      How_to_recognise_errors.Private.to_error_mode include_in_error_count
+    in
+    aux_create ~name ~version ~bin_query ~bin_response ~has_errors
   ;;
 
   let name t = P.Rpc_tag.to_string t.tag
@@ -143,6 +154,7 @@ module Rpc = struct
           ( t.bin_query.reader
           , t.bin_response.writer
           , deferred_no_authorization f
+          , t.has_errors
           , Deferred )
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
@@ -152,7 +164,7 @@ module Rpc = struct
   let implement_with_auth ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Deferred)
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Deferred)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
@@ -166,6 +178,7 @@ module Rpc = struct
           ( t.bin_query.reader
           , t.bin_response.writer
           , blocking_no_authorization f
+          , t.has_errors
           , Blocking )
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
@@ -175,7 +188,7 @@ module Rpc = struct
   let implement_with_auth' ?(on_exception = On_exception.continue) t f =
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, Blocking)
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Blocking)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
@@ -623,6 +636,7 @@ module Streaming_rpc = struct
           ; bin_init_writer
           ; bin_update_writer = t.bin_update_response.writer
           ; impl
+          ; error_mode = Streaming_initial_message
           }
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception

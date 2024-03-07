@@ -114,12 +114,26 @@ module Callee_converts = struct
       ;;
 
       let add_version t ~version ~bin_query ~bin_response upgrade downgrade =
-        let rpc = Rpc.create ~name:t.name ~version ~bin_query ~bin_response in
+        let rpc =
+          Rpc.create
+            ~name:t.name
+            ~version
+            ~bin_query
+            ~bin_response
+            ~include_in_error_count:Only_on_exn
+        in
         add_rpc_version t rpc upgrade downgrade
       ;;
 
       let add_version_with_failure t ~version ~bin_query ~bin_response upgrade downgrade =
-        let rpc = Rpc.create ~name:t.name ~version ~bin_query ~bin_response in
+        let rpc =
+          Rpc.create
+            ~name:t.name
+            ~version
+            ~bin_query
+            ~bin_response
+            ~include_in_error_count:Result
+        in
         add_rpc_version_with_failure t rpc upgrade downgrade
       ;;
 
@@ -180,7 +194,14 @@ module Callee_converts = struct
       struct
         open Version_i
 
-        let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
+        let rpc =
+          Rpc.create
+            ~name
+            ~version
+            ~bin_query
+            ~bin_response
+            ~include_in_error_count:Only_on_exn
+        ;;
 
         let () =
           let implement ~log_version f =
@@ -617,6 +638,7 @@ module Menu = struct
       ~version:1
       ~bin_query:[%bin_type_class: Stable.V1.query]
       ~bin_response:[%bin_type_class: Stable.V1.response]
+      ~include_in_error_count:Only_on_exn
   ;;
 
   let supported_versions = Menu.supported_versions
@@ -849,7 +871,14 @@ module Caller_converts = struct
       struct
         open Version_i
 
-        let rpc = Rpc.create ~name ~version ~bin_query ~bin_response
+        let rpc =
+          Rpc.create
+            ~name
+            ~version
+            ~bin_query
+            ~bin_response
+            ~include_in_error_count:Only_on_exn
+        ;;
 
         let () =
           let dispatch ?metadata conn mq =

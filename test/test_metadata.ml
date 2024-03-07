@@ -7,6 +7,7 @@ let rpc =
     ~version:1
     ~bin_query:bin_unit
     ~bin_response:String.Stable.V1.bin_t
+    ~include_in_error_count:Only_on_exn
 ;;
 
 let implementations =

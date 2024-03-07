@@ -158,19 +158,74 @@ module Instance = struct
     ()
   ;;
 
-  let write_response t id bin_writer_data data ~rpc ~ok_kind =
+  let write_response'
+    (type a)
+    t
+    id
+    bin_writer_data
+    (data : a Rpc_result.t)
+    ~rpc
+    ~(error_mode : a Implementation.F.error_mode)
+    ~ok_kind
+    =
     if not t.stopped
     then (
-      let kind =
-        match data with
-        | Ok _ -> ok_kind
-        | Error _ -> Tracing_event.Sent_response_kind.Single_or_streaming_error
+      let kind : Tracing_event.Sent_response_kind.t =
+        (* We skip trying to determine if the response is an error if there are no
+           subscribers as calling arbitrary functions may be expensive. *)
+        if Bus.num_subscribers t.events = 0
+        then ok_kind
+        else (
+          match error_mode, data with
+          | _, Error _ -> Single_or_streaming_rpc_error_or_exn
+          | Always_ok, Ok _ -> ok_kind
+          | Using_result, Ok (Ok _) -> ok_kind
+          | Using_result, Ok (Error _) -> Single_or_streaming_user_defined_error
+          | Using_result_result, Ok (Ok (Ok _)) -> ok_kind
+          | Using_result_result, Ok (Ok (Error _)) ->
+            Single_or_streaming_user_defined_error
+          | Using_result_result, Ok (Error _) -> Single_or_streaming_user_defined_error
+          | Is_error is_error, Ok x ->
+            (match is_error x with
+             | true -> Single_or_streaming_user_defined_error
+             | false -> ok_kind
+             | exception (_ : exn) -> Single_or_streaming_rpc_error_or_exn)
+          | ( Streaming_initial_message
+            , Ok { initial = Ok _; unused_query_id = (_ : P.Unused_query_id.t) } ) ->
+            ok_kind
+          | ( Streaming_initial_message
+            , Ok { initial = Error _; unused_query_id = (_ : P.Unused_query_id.t) } ) ->
+            Single_or_streaming_user_defined_error)
       in
       (Protocol_writer.send_response
          t.writer
          { id; data }
          ~bin_writer_response:bin_writer_data
        |> handle_send_result t id rpc kind) [@nontail])
+  ;;
+
+  let write_streaming_eof t id bin_writer_data data ~rpc =
+    write_response'
+      t
+      id
+      bin_writer_data
+      data
+      ~rpc
+      ~error_mode:Always_ok
+      ~ok_kind:Streaming_closed
+  ;;
+
+  let write_streaming_initial t id bin_writer_data data is_final ~rpc ~error_mode =
+    let ok_kind : Tracing_event.Sent_response_kind.t =
+      match is_final with
+      | `Final -> Single_or_streaming_rpc_error_or_exn
+      | `Will_stream -> Streaming_initial
+    in
+    write_response' t id bin_writer_data data ~rpc ~error_mode ~ok_kind
+  ;;
+
+  let write_single_response t id bin_writer_data data ~rpc ~error_mode =
+    write_response' t id bin_writer_data data ~rpc ~error_mode ~ok_kind:Single_succeeded
   ;;
 
   module Cached_bin_writer : sig
@@ -357,13 +412,12 @@ module Instance = struct
     let bin_writer t = t.stream_writer.bin_writer
 
     let write_eof { instance = T instance; query_id; rpc; _ } =
-      write_response
+      write_streaming_eof
         instance
         query_id
         P.Stream_response_data.bin_writer_nat0_t
         (Ok `Eof)
         ~rpc
-        ~ok_kind:Streaming_closed
     ;;
 
     (* [write_message_string] and [write_message] both allocate 3 words for the tuples.
@@ -502,7 +556,12 @@ module Instance = struct
 
   let apply_streaming_implementation
     t
-    { Implementation.F.bin_query_reader; bin_init_writer; bin_update_writer; impl }
+    { Implementation.F.bin_query_reader
+    ; bin_init_writer
+    ; bin_update_writer
+    ; impl
+    ; error_mode
+    }
     ~len
     ~read_buffer
     ~read_buffer_pos_ref
@@ -549,47 +608,37 @@ module Instance = struct
       Eager_deferred.upon result (function
         | Error (Rpc_error.Uncaught_exn sexp as err) ->
           Hashtbl.remove t.open_streaming_responses id;
-          write_response
-            t
-            id
-            bin_init_writer
-            (Error err)
-            ~rpc
-            ~ok_kind:Single_or_streaming_error;
+          write_streaming_initial t id bin_init_writer (Error err) `Final ~rpc ~error_mode;
           On_exception.handle_exn
             on_exception
             ~close_connection_monitor
             (Exn.create_s sexp)
         | Error err ->
           Hashtbl.remove t.open_streaming_responses id;
-          write_response
-            t
-            id
-            bin_init_writer
-            (Error err)
-            ~rpc
-            ~ok_kind:Single_or_streaming_error
+          write_streaming_initial t id bin_init_writer (Error err) `Final ~rpc ~error_mode
         | Ok (Or_not_authorized.Not_authorized error) ->
           Hashtbl.remove t.open_streaming_responses id;
-          write_response
+          write_streaming_initial
             t
             id
             bin_init_writer
             (authorization_failure_result error ~rpc_kind:"pipe_rpc")
+            `Final
             ~rpc
-            ~ok_kind:Single_or_streaming_error
+            ~error_mode
         | Ok (Authorized (Error error)) ->
           Hashtbl.remove t.open_streaming_responses id;
-          write_response
+          write_streaming_initial t id bin_init_writer (Ok error) `Final ~rpc ~error_mode
+        | Ok (Authorized (Ok ok)) ->
+          let initial, rest = split_ok ok in
+          write_streaming_initial
             t
             id
             bin_init_writer
-            (Ok error)
+            (Ok initial)
+            `Will_stream
             ~rpc
-            ~ok_kind:Single_or_streaming_error
-        | Ok (Authorized (Ok ok)) ->
-          let initial, rest = split_ok ok in
-          write_response t id bin_init_writer (Ok initial) ~rpc ~ok_kind:Streaming_initial;
+            ~error_mode;
           handle_ok rest)
     in
     match impl_with_state with
@@ -617,13 +666,12 @@ module Instance = struct
           Pipe.upstream_flushed pipe_r
           >>> function
           | `Ok | `Reader_closed ->
-            write_response
+            write_streaming_eof
               t
               id
               P.Stream_response_data.bin_writer_nat0_t
               (Ok `Eof)
-              ~rpc
-              ~ok_kind:Streaming_closed;
+              ~rpc;
             Hashtbl.remove t.open_streaming_responses id)
     | `Direct (f, writer) ->
       run_impl
@@ -716,7 +764,8 @@ module Instance = struct
         ; payload_bytes = 0
         };
       result
-    | Implementation.F.Rpc (bin_query_reader, bin_response_writer, f, result_mode) ->
+    | Implementation.F.Rpc
+        (bin_query_reader, bin_response_writer, f, error_mode, result_mode) ->
       let query_contents =
         bin_read_from_bigstring
           bin_query_reader
@@ -736,13 +785,7 @@ module Instance = struct
               f t.connection_state query |> or_not_authorized_to_rpc_result)
           with
           | response ->
-            write_response
-              t
-              id
-              bin_response_writer
-              response
-              ~rpc
-              ~ok_kind:Single_succeeded
+            write_single_response t id bin_response_writer response ~rpc ~error_mode
           | exception exn ->
             (* In the [Deferred] branch we use [Monitor.try_with], which includes
                backtraces when it catches an exception. For consistency, we also get
@@ -755,13 +798,13 @@ module Instance = struct
                 ; backtrace : Backtrace.t
                 }]
             in
-            write_response
+            write_single_response
               t
               id
               bin_response_writer
               (Error (Rpc_error.Uncaught_exn sexp))
               ~rpc
-              ~ok_kind:Single_or_streaming_error;
+              ~error_mode;
             On_exception.handle_exn on_exception ~close_connection_monitor exn)
        | Implementation.F.Deferred ->
          let result =
@@ -784,13 +827,7 @@ module Instance = struct
          in
          let handle_result result =
            let write_response response =
-             write_response
-               t
-               id
-               bin_response_writer
-               response
-               ~rpc
-               ~ok_kind:Single_succeeded
+             write_single_response t id bin_response_writer response ~rpc ~error_mode
            in
            match result with
            | Error error as result ->
@@ -817,18 +854,14 @@ module Instance = struct
           ~len:query.data
           ~location:"server-side rpc query un-bin-io'ing"
       in
+      let error_mode = Implementation.F.Always_ok in
       (try
          Result.map query_contents ~f:(fun () ->
            (* We have to map down to the V1 menu since that's the type that old clients
               are expecting (but we need to be able to self-dispatch the menu to get the
               V2 response for connection metadata). *)
            menu |> force |> List.map ~f:fst |> Menu.Stable.V1.response_of_model)
-         |> write_response
-              t
-              id
-              Menu.Stable.V1.bin_writer_response
-              ~rpc
-              ~ok_kind:Single_succeeded
+         |> write_single_response t id Menu.Stable.V1.bin_writer_response ~rpc ~error_mode
        with
        | exn ->
          (* In the [Deferred] branch for [Rpc], we use [Monitor.try_with], which includes
@@ -842,13 +875,13 @@ module Instance = struct
              ; backtrace : Backtrace.t
              }]
          in
-         write_response
+         write_single_response
            t
            id
            Menu.Stable.V1.bin_writer_response
            (Error (Rpc_error.Uncaught_exn sexp))
            ~rpc
-           ~ok_kind:Single_or_streaming_error;
+           ~error_mode;
          On_exception.handle_exn on_exception ~close_connection_monitor exn);
       Continue
     | Implementation.F.Rpc_expert (f, result_mode) ->
@@ -879,13 +912,13 @@ module Instance = struct
           if responder.responded
           then result
           else (
-            write_response
+            write_single_response
               t
               id
               bin_writer_unit
               result
               ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
-              ~ok_kind:Single_or_streaming_error;
+              ~error_mode:Always_ok;
             Ok ())
         in
         result
@@ -972,13 +1005,14 @@ module Instance = struct
             won’t. We do send a response here with an error. In case 1 and 2 this is
             returned to the caller. In case 3 and 4 the client closes its connection
             complaining about the error or an unknown query id. *)
-         write_response
+         write_streaming_initial
            t
            id
-           Nothing.bin_writer_t
+           [%bin_writer: Nothing.t]
            error
+           `Final
            ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
-           ~ok_kind:Single_or_streaming_error
+           ~error_mode:Always_ok
        | Ok `Abort ->
          (* Note that there's some delay between when we receive a pipe RPC query and
             when we put something in [open_streaming_responses] (we wait for
@@ -1114,13 +1148,13 @@ module Instance = struct
             if Deferred.is_determined d then Continue else Wait d
           | (`Continue | `Raise | `Close_connection | `Call _) as on_unknown_rpc ->
             let error = Rpc_error.Unimplemented_rpc (query.tag, `Version query.version) in
-            write_response
+            write_single_response
               t
               query.id
               P.Message.bin_writer_nat0_t
               (Error error)
               ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
-              ~ok_kind:Single_or_streaming_error;
+              ~error_mode:Always_ok;
             handle_unknown_rpc on_unknown_rpc error t query))
   ;;
 

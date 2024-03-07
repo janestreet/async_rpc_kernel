@@ -4,7 +4,8 @@ module Sent_response_kind = struct
   type t =
     | One_way_so_no_response
     | Single_succeeded
-    | Single_or_streaming_error
+    | Single_or_streaming_rpc_error_or_exn
+    | Single_or_streaming_user_defined_error
     | Expert_single_succeeded_or_failed
     | Streaming_initial
     | Streaming_update

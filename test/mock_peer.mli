@@ -10,6 +10,8 @@ open! Import
 
 module Write_event : sig
   type t [@@deriving sexp_of]
+
+  val bigstring_written : t -> Bigstring.t
 end
 
 module Event : sig
@@ -98,3 +100,9 @@ val enqueue_send_result : t -> unit Rpc.Transport.Send_result.t -> unit
 
 (** Cause all of the connections attempts to flush the writer up to flush N to be done. *)
 val mark_flushed_up_to : t -> int -> unit
+
+(** [set_quiet t true] silences future messages and [false] the opposite. *)
+val set_quiet : t -> bool -> unit
+
+(** Set the function to be called on events *)
+val set_on_emit : t -> (Event.t -> unit) -> unit

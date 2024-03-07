@@ -6,7 +6,7 @@ open Bin_prot.Std
 open Sexplib.Std
 module Core_for_testing = Core
 module Rpc_tag : Core.Identifiable = Core.String
-module Query_id = Core.Unique_id.Int63 (struct end)
+module Query_id = Core.Unique_id.Int63 ()
 
 module Unused_query_id : sig
   type t [@@deriving bin_io, sexp_of]

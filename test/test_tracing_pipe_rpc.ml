@@ -100,7 +100,7 @@ let%expect_test "Single pipe-rpc implementation returning error" =
       ((id 55)
        (data (Ok ((unused_query_id 0) (initial (Error "example error"))))))))
     (Tracing_event
-     ((event (Sent (Response Single_or_streaming_error)))
+     ((event (Sent (Response Single_or_streaming_user_defined_error)))
       (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1))) |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   return ()
@@ -134,7 +134,7 @@ let%expect_test "Single pipe-rpc implementation raising" =
             (monitor.ml.Error (Failure "injected error")
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
-     ((event (Sent (Response Single_or_streaming_error)))
+     ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
       (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1))) |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   return ()
@@ -226,7 +226,7 @@ let%expect_test "Malformed query for pipe-rpc" =
             (common.ml.Read_error
              "Variant / protocol.ml.Stream_query.needs_length" 18)))))))))
     (Tracing_event
-     ((event (Sent (Response Single_or_streaming_error)))
+     ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
       (rpc (((name pipe-rpc) (version 1)))) (id 99) (payload_bytes 1))) |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| |}];
@@ -274,6 +274,7 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
       ~version:1
       ~bin_query:[%bin_type_class: string]
       ~bin_response:[%bin_type_class: unit]
+      ~include_in_error_count:Only_on_exn
   in
   Mock_peer.expect_message t [%bin_reader: string] [%sexp_of: string];
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
@@ -318,7 +319,10 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
     (Send (Query ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc (((name rpc) (version 1)))) (id 1)
-      (payload_bytes 1))) |}];
+      (payload_bytes 1)))
+    (Tracing_event
+     ((event (Received (Response One_way_so_no_response)))
+      (rpc (((name rpc) (version 1)))) (id 1) (payload_bytes 1))) |}];
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
   [%expect {| (Ok ()) |}];
   Mock_peer.write_message
@@ -372,7 +376,10 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
     (Send (Query ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data Abort))))
     (Tracing_event
      ((event (Sent Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1)
-      (payload_bytes 1))) |}];
+      (payload_bytes 1)))
+    (Tracing_event
+     ((event (Received (Response One_way_so_no_response)))
+      (rpc (((name pipe-rpc) (version 1)))) (id 1) (payload_bytes 1))) |}];
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]

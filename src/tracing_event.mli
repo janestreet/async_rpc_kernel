@@ -12,9 +12,12 @@ open Core
     {- For one-way queries, the result is synthetic in that nothing is sent over the
     network}
     {- For an ordinary RPC, the responses may be [Single_succeeded],
-    [Single_or_streaming_error], or in rare cases, [Expert_single_succeeded_or_failed]}
-    {- If a streaming RPC (e.g. a pipe or state RPC) fails, there is a single
-    [Single_or_streaming_error] response}}}
+    [Single_or_streaming_rpc_error_or_exn], [Single_or_streaming_user_defined_error], or
+    in rare cases, [Expert_single_succeeded_or_failed]}
+    {- If a streaming RPC (e.g. a pipe or state RPC) fails (e.g. an exn or authorization
+    failure), there is a single [Single_or_streaming_rpc_error_or_exn] response. If it
+    returns an initial error, there is a single [Single_or_streaming_user_defined_error]
+    response}}}
 
     {- Received query and many streaming responses sent, all with the same description and
     id. {ol
@@ -30,6 +33,12 @@ open Core
     {- In exceptional cases, there will be no response. For example, if there is some kind
     of critical error that closes the connection, or if an expert unknown rpc handler
     fires.} }
+
+    The difference between a [Single_or_streaming_rpc_error_or_exn] and
+    [Single_or_streaming_user_defined_error] is that the former comes from errors like an
+    implementation raising or returning unauthorized whereas the latter comes from an
+    implementation returning an [Error _] response, for those created with
+    {!Rpc.Rpc.create_result}.
 
     The flow for sent queries -> received responses should look like one of the following:
 
@@ -48,7 +57,8 @@ module Sent_response_kind : sig
         (** If the handler of a one-way RPC uses Async, this response message may be sent when
         that handler first calls [bind] rather than when it finishes its work. *)
     | Single_succeeded
-    | Single_or_streaming_error
+    | Single_or_streaming_rpc_error_or_exn
+    | Single_or_streaming_user_defined_error
     | Expert_single_succeeded_or_failed
         (** We can't always tell if an Expert response was successful so sometimes use this
         variant. *)

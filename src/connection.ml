@@ -203,13 +203,19 @@ let handle_send_result :
       -> 'a Transport.Send_result.t
       -> rpc:Description.t
       -> id:P.Query_id.t
+      -> sending_one_way_rpc:bool
       -> ('a, Dispatch_error.t) Result.t
   =
-  fun t r ~rpc ~id ->
+  fun t r ~rpc ~id ~sending_one_way_rpc ->
   let id = (id :> Int63.t) in
   match r with
   | Sent { result = x; bytes } ->
-    write_event t { event = Sent Query; rpc = Some rpc; id; payload_bytes = bytes };
+    let ev : Tracing_event.t =
+      { event = Sent Query; rpc = Some rpc; id; payload_bytes = bytes }
+    in
+    write_event t ev;
+    if sending_one_way_rpc
+    then write_event t { ev with event = Received (Response One_way_so_no_response) };
     Ok x
   | Closed ->
     write_event
@@ -266,6 +272,7 @@ let send_query_with_registered_response_handler
          t
          ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
          ~id:query.id
+         ~sending_one_way_rpc:(Option.is_none response_handler)
   in
   if registered_response_handler && Result.is_error result
   then Hashtbl.remove t.open_queries query.id;

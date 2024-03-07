@@ -25,7 +25,8 @@ let rpc ?on_exception () =
          ~name:"plain"
          ~version:1
          ~bin_query:[%bin_type_class: int]
-         ~bin_response:[%bin_type_class: int])
+         ~bin_response:[%bin_type_class: int]
+         ~include_in_error_count:Only_on_exn)
       (fun (_ : Mock_peer.t) q ->
         print_s [%message "Implementation_called" [%string "plain %{Int.to_string q}"]];
         Deferred.never ())

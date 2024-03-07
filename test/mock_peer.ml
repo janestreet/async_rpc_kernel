@@ -19,6 +19,17 @@ module Write_event = struct
     | Send _ -> Sexp.Atom "Send"
     | Send_with_bigstring _ -> Atom "Send_with_bigstring"
   ;;
+
+  let bigstring_written t =
+    match t with
+    | Send (w, x) -> Bin_prot.Writer.to_bigstring w x
+    | Send_with_bigstring { writer; data; buf; pos; len; non_copying = _ } ->
+      let base = Bin_prot.Writer.to_bigstring writer data in
+      let out = Bigstring.create (Bigstring.length base + len) in
+      Bigstring.blit ~src:base ~dst:out ~src_pos:0 ~dst_pos:0 ~len:(Bigstring.length base);
+      Bigstring.blit ~src:buf ~dst:out ~src_pos:(Bigstring.length base) ~dst_pos:pos ~len;
+      out
+  ;;
 end
 
 module Expected_message = struct
@@ -78,6 +89,7 @@ type t =
       (* transferred to expected_messages when that queue is empty *)
   ; later_expected_messages : (Expected_message.t[@sexp.opaque]) Queue.t
   ; mutable quiet : bool
+  ; mutable on_emit : t -> Event.t -> unit
   }
 [@@deriving sexp_of]
 
@@ -91,7 +103,7 @@ let next_expected_message t =
   Queue.dequeue t.expected_messages
 ;;
 
-let emit t event =
+let default_on_emit t event =
   let should_print =
     match (event : Event.t) with
     | Close_reader ->
@@ -101,31 +113,14 @@ let emit t event =
       Ivar.fill_if_empty t.writer_close_finished ();
       true
     | Write ev ->
-      let kind, bs =
+      let kind =
         match ev with
-        | Send (w, x) -> "Send", Bin_prot.Writer.to_bigstring w x
-        | Send_with_bigstring { writer; data; buf; pos; len; non_copying } ->
-          let kind =
-            if non_copying
-            then "Send_with_bigstring_non_copying"
-            else "Send_with_bigstring"
-          in
-          let base = Bin_prot.Writer.to_bigstring writer data in
-          let out = Bigstring.create (Bigstring.length base + len) in
-          Bigstring.blit
-            ~src:base
-            ~dst:out
-            ~src_pos:0
-            ~dst_pos:0
-            ~len:(Bigstring.length base);
-          Bigstring.blit
-            ~src:buf
-            ~dst:out
-            ~src_pos:(Bigstring.length base)
-            ~dst_pos:pos
-            ~len;
-          kind, out
+        | Send (_, _) -> "Send"
+        | Send_with_bigstring
+            { writer = _; data = _; buf = _; pos = _; len = _; non_copying } ->
+          if non_copying then "Send_with_bigstring_non_copying" else "Send_with_bigstring"
       in
+      let bs = Write_event.bigstring_written ev in
       if Bigstring.length bs = 1 && Char.( = ) '\000' (Bigstring.get bs 0)
       then (
         print_s [%message kind "Heartbeat"];
@@ -150,7 +145,7 @@ let emit t event =
   if should_print then print_s ([%sexp_of: Event.t] event)
 ;;
 
-let emit t event = if t.quiet then () else emit t event
+let emit t event = if t.quiet then () else t.on_emit t event
 
 module Reader : Rpc.Transport.Reader.S with type t = t = struct
   type nonrec t = t [@@deriving sexp_of]
@@ -334,6 +329,7 @@ let create ?(time_source = Synchronous_time_source.wall_clock ()) config =
   ; expected_messages = Queue.create ()
   ; later_expected_messages = Queue.create ()
   ; quiet = false
+  ; on_emit = default_on_emit
   }
 ;;
 
@@ -468,3 +464,6 @@ let mark_flushed_up_to t n =
     ~while_:(fun (i, (_ : unit Ivar.t)) -> i <= n)
     ~f:(fun ((_ : int), iv) -> Ivar.fill_exn iv ())
 ;;
+
+let set_quiet t q = t.quiet <- q
+let set_on_emit t f = t.on_emit <- (fun (_ : t) event -> f event)

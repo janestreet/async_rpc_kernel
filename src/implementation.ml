@@ -21,6 +21,13 @@ module Expert = struct
 end
 
 module F = struct
+  type 'a error_mode = 'a F.error_mode =
+    | Always_ok : _ error_mode
+    | Using_result : (_, _) Result.t error_mode
+    | Using_result_result : ((_, _) Result.t, _) Result.t error_mode
+    | Is_error : ('a -> bool) -> 'a error_mode
+    | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
+
   type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
     | Blocking : ('a, 'a Or_not_authorized.t) result_mode
     | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
@@ -44,6 +51,7 @@ module F = struct
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
+    ; error_mode : 'init error_mode
     }
 
   type 'connection_state t = 'connection_state F.t =
@@ -62,6 +70,7 @@ module F = struct
         'query Bin_prot.Type_class.reader
         * 'response Bin_prot.Type_class.writer
         * ('connection_state -> 'query -> 'result)
+        * 'response error_mode
         * ('response, 'result) result_mode
         -> 'connection_state t
     | Rpc_expert :
@@ -97,18 +106,18 @@ module F = struct
         (fun state buf ~pos ~len ->
           Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
             impl authorized_state buf ~pos ~len))
-    | Rpc (bin_query, bin_response, impl, Blocking) ->
+    | Rpc (bin_query, bin_response, impl, error, Blocking) ->
       let impl state q =
         Or_not_authorized.bind (f state) ~f:(fun authorized_state ->
           impl authorized_state q)
       in
-      Rpc (bin_query, bin_response, impl, Blocking)
-    | Rpc (bin_query, bin_response, impl, Deferred) ->
+      Rpc (bin_query, bin_response, impl, error, Blocking)
+    | Rpc (bin_query, bin_response, impl, error, Deferred) ->
       let impl state q =
         Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
           impl authorized_state q)
       in
-      Rpc (bin_query, bin_response, impl, Deferred)
+      Rpc (bin_query, bin_response, impl, error, Deferred)
     | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
     | Rpc_expert (impl, Blocking) ->
       let impl state resp buf ~pos ~len =
@@ -122,7 +131,8 @@ module F = struct
           impl authorized_state resp buf ~pos ~len)
       in
       Rpc_expert (impl, Deferred)
-    | Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl } ->
+    | Streaming_rpc
+        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -136,7 +146,8 @@ module F = struct
               Or_not_authorized.bind_deferred (f state) ~f:(fun authorized_state ->
                 impl authorized_state q w))
       in
-      Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
+      Streaming_rpc
+        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode }
   ;;
 
   let lift_deferred (type a b) (t : b t) ~f:(lift : a -> b Or_not_authorized.t Deferred.t)
@@ -154,17 +165,19 @@ module F = struct
       One_way_expert
         (fun state buf ~pos ~len ->
           lift_and_bind state ~f:(fun state -> impl state buf ~pos ~len))
-    | Rpc (bin_query, bin_response, impl, Blocking) ->
+    | Rpc (bin_query, bin_response, impl, error, Blocking) ->
       Rpc
         ( bin_query
         , bin_response
         , (fun state q -> lift_and_bind state ~f:(fun state -> return (impl state q)))
+        , error
         , Deferred )
-    | Rpc (bin_query, bin_response, impl, Deferred) ->
+    | Rpc (bin_query, bin_response, impl, error, Deferred) ->
       Rpc
         ( bin_query
         , bin_response
         , (fun state q -> lift_and_bind state ~f:(fun state -> impl state q))
+        , error
         , Deferred )
     | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
     | Rpc_expert (impl, Deferred) ->
@@ -177,7 +190,8 @@ module F = struct
         ( (fun state resp buf ~pos ~len ->
             lift_and_bind state ~f:(fun state -> return (impl state resp buf ~pos ~len)))
         , Deferred )
-    | Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl } ->
+    | Streaming_rpc
+        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -185,7 +199,8 @@ module F = struct
         | Direct impl ->
           Direct (fun state q w -> lift_and_bind state ~f:(fun state -> impl state q w))
       in
-      Streaming_rpc { bin_query_reader; bin_init_writer; bin_update_writer; impl }
+      Streaming_rpc
+        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode }
   ;;
 end
 
