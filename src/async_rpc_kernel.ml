@@ -9,6 +9,10 @@ module Rpc_shapes = Rpc_shapes
 module Tracing_event = Tracing_event
 module Or_not_authorized = Or_not_authorized
 
+open struct
+  module Rpc_metadata_private = Rpc_metadata
+end
+
 module Rpc_metadata :
   module type of Rpc_metadata with module Private := Rpc_metadata.Private =
   Rpc_metadata
@@ -18,6 +22,9 @@ module Async_rpc_kernel_stable = struct
 end
 
 module Async_rpc_kernel_private = struct
+  module Rpc_metadata : module type of Rpc_metadata_private with type t = Rpc_metadata.t =
+    Rpc_metadata_private
+
   module Connection : Connection_intf.S_private with type t = Rpc.Connection.t =
     Connection
 

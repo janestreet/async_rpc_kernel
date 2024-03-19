@@ -27,7 +27,7 @@ module Write_event = struct
       let base = Bin_prot.Writer.to_bigstring writer data in
       let out = Bigstring.create (Bigstring.length base + len) in
       Bigstring.blit ~src:base ~dst:out ~src_pos:0 ~dst_pos:0 ~len:(Bigstring.length base);
-      Bigstring.blit ~src:buf ~dst:out ~src_pos:(Bigstring.length base) ~dst_pos:pos ~len;
+      Bigstring.blit ~src:buf ~dst:out ~src_pos:pos ~dst_pos:(Bigstring.length base) ~len;
       out
   ;;
 end
@@ -81,7 +81,7 @@ type t =
   ; writer_close_finished : unit Ivar.t
   ; mutable flush_counter : int
   ; writer_flushes : (int * unit Ivar.t) Queue.t
-  ; mutable writes_allowed : [ `Wait of unit Ivar.t | `Ready | `Flushed ]
+  ; mutable writes_allowed : [ `Wait of unit Deferred.t | `Ready | `Flushed ]
   ; send_result_queue : unit Rpc.Transport.Send_result.t Queue.t
   ; mutable default_send_result : unit Rpc.Transport.Send_result.t
   ; writer_monitor : Monitor.t
@@ -271,7 +271,7 @@ module Writer : Rpc.Transport.Writer.S with type t = t = struct
     match t.writes_allowed with
     | `Ready -> return ()
     | `Flushed -> flushed' t ~do_emit:false
-    | `Wait iv -> Ivar.read iv
+    | `Wait d -> d
   ;;
 
   let send_result t =
@@ -341,6 +341,27 @@ let write_bigstring ?don't_read_yet t bigstring =
     (match t.read_forever_state with
      | `Waiting_for_message f -> f ()
      | `Running | `Waiting_for_mock_scheduling _ | `None | `Waiting _ -> ())
+;;
+
+let close_reader t =
+  t.reader_close_started <- true;
+  let rec reader_closed () =
+    match t.read_forever_state with
+    | `Waiting_for_message f ->
+      f ();
+      reader_closed ()
+    | `Waiting_for_mock_scheduling f ->
+      f ();
+      reader_closed ()
+    | `Running ->
+      let%bind () = Scheduler.yield () in
+      reader_closed ()
+    | `Waiting d ->
+      let%bind () = d in
+      reader_closed ()
+    | `None -> return ()
+  in
+  upon (reader_closed ()) (Ivar.fill_if_empty t.reader_close_finished)
 ;;
 
 let write ?don't_read_yet t writer x =
@@ -463,6 +484,14 @@ let mark_flushed_up_to t n =
     t.writer_flushes
     ~while_:(fun (i, (_ : unit Ivar.t)) -> i <= n)
     ~f:(fun ((_ : int), iv) -> Ivar.fill_exn iv ())
+;;
+
+let scheduled_writes_must_wait_for t deferred =
+  t.writes_allowed <- `Wait deferred;
+  upon deferred (fun () ->
+    match t.writes_allowed with
+    | `Wait d when phys_equal d deferred -> t.writes_allowed <- `Ready
+    | _ -> ())
 ;;
 
 let set_quiet t q = t.quiet <- q

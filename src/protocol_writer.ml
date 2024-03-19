@@ -102,5 +102,15 @@ module Unsafe_for_cached_bin_writer = struct
     Transport.Writer.send_bin_prot_and_bigstring t.writer bin_writer a ~buf ~pos ~len
   ;;
 
+  let send_bin_prot_and_bigstring_non_copying t bin_writer a ~buf ~pos ~len =
+    Transport.Writer.send_bin_prot_and_bigstring_non_copying
+      t.writer
+      bin_writer
+      a
+      ~buf
+      ~pos
+      ~len
+  ;;
+
   let transfer t pipe_reader f = Transport.Writer.transfer t.writer pipe_reader f
 end

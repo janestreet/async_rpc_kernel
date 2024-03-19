@@ -56,7 +56,8 @@ let%expect_test _ =
   test_type_id_similarity rpc ~f:Rpc.response_type_id;
   [%expect {|
     my-rpc:query
-    my-rpc:response |}];
+    my-rpc:response
+    |}];
   (* state rpc *)
   test_type_id_similarity state_rpc ~f:State_rpc.query_type_id;
   test_type_id_similarity state_rpc ~f:State_rpc.error_type_id;
@@ -67,7 +68,8 @@ let%expect_test _ =
     my-state-rpc:query
     my-state-rpc:error
     my-state-rpc:state
-    my-state-rpc:update |}];
+    my-state-rpc:update
+    |}];
   (* pipe rpc *)
   test_type_id_similarity pipe_rpc ~f:Pipe_rpc.query_type_id;
   test_type_id_similarity pipe_rpc ~f:Pipe_rpc.error_type_id;
@@ -75,7 +77,8 @@ let%expect_test _ =
   [%expect {|
     my-pipe-rpc:query
     my-pipe-rpc:error
-    my-pipe-rpc:response |}];
+    my-pipe-rpc:response
+    |}];
   (* one-way rpc *)
   test_type_id_similarity one_way_rpc ~f:One_way.msg_type_id;
   [%expect {| my-one-way-rpc:msg |}]

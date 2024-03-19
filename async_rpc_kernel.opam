@@ -14,6 +14,7 @@ depends: [
   "async_kernel"
   "core"
   "core_kernel"
+  "gel"
   "ppx_jane"
   "protocol_version_header"
   "dune"                    {>= "2.0.0"}

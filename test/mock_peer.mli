@@ -67,6 +67,9 @@ val connect
 (** Emit an event to the stream of events associated with [t] *)
 val emit : t -> Event.t -> unit
 
+(** Cause the connection’s reader to appear closed *)
+val close_reader : t -> unit
+
 (** The following functions enqueue messages for the Connection.t to read. Pass
     [~don't_read_yet:()] to batch with the next message. *)
 
@@ -100,6 +103,10 @@ val enqueue_send_result : t -> unit Rpc.Transport.Send_result.t -> unit
 
 (** Cause all of the connections attempts to flush the writer up to flush N to be done. *)
 val mark_flushed_up_to : t -> int -> unit
+
+(** When a scheduled (i.e. non-copying) write is attempted, it must wait for the given
+    ivar before the bigstring may be released. *)
+val scheduled_writes_must_wait_for : t -> unit Deferred.t -> unit
 
 (** [set_quiet t true] silences future messages and [false] the opposite. *)
 val set_quiet : t -> bool -> unit

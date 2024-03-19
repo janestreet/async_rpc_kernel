@@ -16,10 +16,21 @@ let rpc =
     ()
 ;;
 
-let with_server_and_client group ~rpc ~f =
+let rpc_with_pushback =
+  Rpc.Pipe_rpc.create
+    ~name:"test-with-pushback"
+    ~version:1
+    ~bin_query:[%bin_type_class: unit]
+    ~bin_response:[%bin_type_class: Bigstring.Stable.V1.t]
+    ~bin_error:[%bin_type_class: Nothing.t]
+    ~client_pushes_back:()
+    ()
+;;
+
+let with_server_and_client' ~rpc ~f ~on_writer =
   let implementation =
     Rpc.Pipe_rpc.implement_direct rpc (fun () () writer ->
-      Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn group writer;
+      on_writer writer;
       Deferred.Result.return ())
   in
   let implementations =
@@ -43,6 +54,56 @@ let with_server_and_client group ~rpc ~f =
     >>| ok_exn
   in
   Tcp.Server.close server
+;;
+
+let with_server_and_client group ~rpc ~f =
+  with_server_and_client' ~rpc ~f ~on_writer:(fun writer ->
+    Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn group writer)
+;;
+
+let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes determined \
+                 if the connection is closed"
+  =
+  let saved_writer = ref None in
+  let scheduled_response = Ivar.create () in
+  with_server_and_client'
+    ~rpc:rpc_with_pushback
+    ~on_writer:(fun writer ->
+      saved_writer := Some writer;
+      (* We want a big enough response that just getting the pipe (and not reading any
+         elements) will leave us with bytes in the sendq. So we make a big bigstring,
+         schedule it 100 times, and keep the last deferred for when we can reuse the
+         bigstring *)
+      let response = Bigstring.create 1_000_000 in
+      let buf =
+        Bin_prot.Writer.to_bigstring [%bin_writer: Bigstring.Stable.V1.t] response
+      in
+      List.init 100 ~f:ignore
+      |> List.fold ~init:None ~f:(fun last_scheduled_response () ->
+           match
+             Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
+               writer
+               ~buf
+               ~pos:0
+               ~len:(Bigstring.length buf)
+           with
+           | `Closed -> last_scheduled_response
+           | `Flushed { g = d } -> Some d)
+      |> Ivar.fill_exn scheduled_response)
+    ~f:(fun (_ : (Socket.Address.Inet.t, int) Tcp.Server.t) connection ->
+      let%bind (_ : Bigstring.t Pipe.Reader.t), metadata =
+        Rpc.Pipe_rpc.dispatch_exn rpc_with_pushback connection ()
+      in
+      let%bind () = Rpc.Connection.close connection in
+      let writer = !saved_writer |> Option.value_exn in
+      let%bind () = Rpc.Pipe_rpc.Direct_stream_writer.closed writer in
+      let%bind scheduled_response = Ivar.read scheduled_response in
+      print_s ([%sexp_of: unit Deferred.t option] scheduled_response);
+      [%expect {| (Empty) |}];
+      let%bind reason = Rpc.Pipe_rpc.close_reason metadata in
+      print_s ([%sexp_of: Rpc.Pipe_close_reason.t] reason);
+      [%expect {| (Error (Connection_closed (Rpc.Connection.close))) |}];
+      return ())
 ;;
 
 let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] sends values \

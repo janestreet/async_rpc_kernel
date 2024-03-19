@@ -19,16 +19,17 @@ let%expect_test "connect and close" =
   [%expect
     {|
     (Send (4411474 1 2 3))
-    (Send (Metadata ((identification ()) (menu (()))))) |}];
+    (Send (Metadata ((identification ()) (menu (())))))
+    |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  [%expect {|
-    (Send Heartbeat) |}];
+  [%expect {| (Send Heartbeat) |}];
   let%bind () = Async_rpc_kernel.Rpc.Connection.close conn in
   [%expect
     {|
     (Close_started Rpc.Connection.close)
     Close_writer
     Close_reader
-    Close_finished |}];
+    Close_finished
+    |}];
   return ()
 ;;

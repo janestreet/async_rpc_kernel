@@ -26,7 +26,7 @@ module Handshake_error = struct
 end
 
 module Header : sig
-  type t [@@deriving bin_io, sexp_of]
+  type t = Protocol_version_header.t [@@deriving bin_io, sexp_of]
 
   val v1 : t
   val v2 : t
@@ -89,15 +89,28 @@ module Heartbeat_config = struct
   let to_runtime { timeout; send_every } = { Runtime.timeout; send_every }
 end
 
+(* We put Expert in the names of a few variants because these variants lead to ‘expert’
+   tracing events which we document as only being caused by expert dispatches. If we
+   change non-expert dispatches to use the variants we’ll need to change the doc or the
+   code. *)
+type response_with_determinable_status =
+  | Pipe_eof
+  | Expert_indeterminate
+  | Determinable :
+      'a Rpc_result.t * 'a Implementation.F.error_mode
+      -> response_with_determinable_status
+
+type response_handler_action =
+  | Keep
+  | Wait of unit Deferred.t
+  | Remove of (response_with_determinable_status, Rpc_error.t Gel.t) result
+  | Expert_remove_and_wait of unit Deferred.t
+
 type response_handler =
   Nat0.t P.Response.t
   -> read_buffer:Bigstring.t
   -> read_buffer_pos_ref:int ref
-  -> [ `keep
-     | `wait of unit Deferred.t
-     | `remove of unit Rpc_result.t
-     | `remove_and_wait of unit Deferred.t
-     ]
+  -> response_handler_action
 
 type t =
   { description : Info.t
@@ -117,13 +130,24 @@ type t =
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
   ; negotiated_protocol_version : int Set_once.t
-  ; events : (Tracing_event.t -> unit) Bus.Read_write.t
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
   *)
+  ; events : (Tracing_event.t -> unit) Bus.Read_write.t
+  ; metadata_for_dispatch :
+      (Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
   ; peer_metadata : Peer_metadata.t Set_once.t
       (* responses to queries are written by the implementations instance. Other events
      are written by this module. *)
+  ; metadata_on_receive_to_add_to_implementations_instance :
+      (Description.t
+       -> query_id:P.Query_id.t
+       -> Rpc_metadata.t option
+       -> Execution_context.t
+       -> Execution_context.t)
+      Set_once.t
+      (* this is used if [set_metadata_hooks] is called before we have filled
+           [implementations_instance]. *)
   }
 [@@deriving sexp_of]
 
@@ -185,9 +209,41 @@ let bytes_written t = Protocol_writer.bytes_written t.writer
 let bytes_read t = Reader.bytes_read t.reader
 let flushed t = Protocol_writer.flushed t.writer
 let events t = (t.events :> _ Bus.Read_only.t)
+let have_metadata_hooks_been_set t = Moption.is_some t.metadata_for_dispatch
+
+let set_metadata_hooks t ~when_sending ~on_receive =
+  (* We only allow metadata hooks to be set once to simplify the possible misconfiguration
+     issues with either overwriting or supporting multiple metadata hooks. *)
+  if have_metadata_hooks_been_set t
+  then `Already_set
+  else (
+    Moption.set_some t.metadata_for_dispatch when_sending;
+    let on_receive =
+      (on_receive
+        : _ -> query_id:Int63.t -> _ -> _ -> _
+        :> _ -> query_id:P.Query_id.t -> _ -> _ -> _)
+    in
+    (match Set_once.get t.implementations_instance with
+     | Some instance -> Implementations.Instance.set_on_receive instance on_receive
+     | None ->
+       Set_once.set_exn
+         t.metadata_on_receive_to_add_to_implementations_instance
+         [%here]
+         on_receive);
+    `Ok)
+;;
 
 let write_event t event =
   if not (Bus.is_closed t.events) then Bus.write_local t.events event
+;;
+
+let compute_metadata t description query_id =
+  if Moption.is_some t.metadata_for_dispatch
+  then
+    (Moption.unsafe_get t.metadata_for_dispatch)
+      description
+      ~query_id:(query_id : P.Query_id.t :> Int63.t)
+  else None
 ;;
 
 module Dispatch_error = struct
@@ -202,16 +258,17 @@ let handle_send_result :
       t
       -> 'a Transport.Send_result.t
       -> rpc:Description.t
+      -> kind:_ Tracing_event.Kind.t
       -> id:P.Query_id.t
       -> sending_one_way_rpc:bool
       -> ('a, Dispatch_error.t) Result.t
   =
-  fun t r ~rpc ~id ~sending_one_way_rpc ->
+  fun t r ~rpc ~kind ~id ~sending_one_way_rpc ->
   let id = (id :> Int63.t) in
   match r with
   | Sent { result = x; bytes } ->
     let ev : Tracing_event.t =
-      { event = Sent Query; rpc = Some rpc; id; payload_bytes = bytes }
+      { event = Sent kind; rpc = Some rpc; id; payload_bytes = bytes }
     in
     write_event t ev;
     if sending_one_way_rpc
@@ -220,12 +277,12 @@ let handle_send_result :
   | Closed ->
     write_event
       t
-      { event = Failed_to_send (Query, Closed); rpc = Some rpc; id; payload_bytes = 0 };
+      { event = Failed_to_send (kind, Closed); rpc = Some rpc; id; payload_bytes = 0 };
     Error Dispatch_error.Closed
   | Message_too_big err ->
     write_event
       t
-      { event = Failed_to_send (Query, Too_large)
+      { event = Failed_to_send (kind, Too_large)
       ; rpc = Some rpc
       ; id
       ; payload_bytes = err.size
@@ -256,6 +313,7 @@ let send_query_with_registered_response_handler
   t
   (query : 'query P.Query.t)
   ~response_handler
+  ~kind
   ~(send_query : 'query P.Query.t -> 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
@@ -271,6 +329,7 @@ let send_query_with_registered_response_handler
     |> handle_send_result
          t
          ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+         ~kind
          ~id:query.id
          ~sending_one_way_rpc:(Option.is_none response_handler)
   in
@@ -279,7 +338,7 @@ let send_query_with_registered_response_handler
   result
 ;;
 
-let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
+let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
@@ -296,16 +355,18 @@ let dispatch t ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
       t
       query
       ~response_handler
+      ~kind
       ~send_query:(fun query -> Protocol_writer.send_query writer query ~bin_writer_query) 
     [@nontail]
 ;;
 
 let make_dispatch_bigstring
   do_send
-  ?metadata
+  ~compute_metadata
   t
   ~tag
   ~version
+  ~metadata
   buf
   ~pos
   ~len
@@ -315,11 +376,13 @@ let make_dispatch_bigstring
   | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
     let id = P.Query_id.create () in
+    let metadata = compute_metadata t ~tag ~version ~id ~metadata in
     let query : unit P.Query.t = { tag; version; id; metadata; data = () } in
     send_query_with_registered_response_handler
       t
       query
       ~response_handler
+      ~kind:Query
       ~send_query:(fun query ->
       Protocol_writer.send_expert_query
         writer
@@ -330,10 +393,24 @@ let make_dispatch_bigstring
         ~send_bin_prot_and_bigstring:do_send) [@nontail]
 ;;
 
-let dispatch_bigstring = make_dispatch_bigstring Writer.send_bin_prot_and_bigstring
+let dispatch_bigstring =
+  make_dispatch_bigstring
+    Writer.send_bin_prot_and_bigstring
+    ~compute_metadata:(fun t ~tag ~version ~id ~metadata:() ->
+    compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
+;;
 
 let schedule_dispatch_bigstring =
-  make_dispatch_bigstring Writer.send_bin_prot_and_bigstring_non_copying
+  make_dispatch_bigstring
+    Writer.send_bin_prot_and_bigstring_non_copying
+    ~compute_metadata:(fun t ~tag ~version ~id ~metadata:() ->
+    compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
+;;
+
+let schedule_dispatch_bigstring_with_metadata =
+  make_dispatch_bigstring
+    Writer.send_bin_prot_and_bigstring_non_copying
+    ~compute_metadata:(fun _ ~tag:_ ~version:_ ~id:_ ~metadata -> metadata)
 ;;
 
 let handle_response
@@ -365,22 +442,67 @@ let handle_response
       ()
     in
     (match response_handler response ~read_buffer ~read_buffer_pos_ref with
-     | `keep ->
+     | Keep ->
        response_event Partial_response ~payload_bytes;
        Continue
-     | `wait wait ->
+     | Wait wait ->
        response_event Partial_response ~payload_bytes;
        Wait wait
-     | `remove_and_wait wait ->
-       response_event Response_finished ~payload_bytes;
+     | Expert_remove_and_wait wait ->
+       response_event
+         (if Result.is_error response.data
+          then Response_finished_rpc_error_or_exn
+          else Response_finished_expert_uninterpreted)
+         ~payload_bytes;
        Hashtbl.remove t.open_queries response.id;
        Wait wait
-     | `remove removal_circumstances ->
-       response_event Response_finished ~payload_bytes;
+     | Remove removal_circumstances ->
        Hashtbl.remove t.open_queries response.id;
        (match removal_circumstances with
-        | Ok () -> Continue
-        | Error e ->
+        | Ok (Determinable (result, error_mode)) ->
+          if Bus.num_subscribers t.events > 0
+          then (
+            let kind : Tracing_event.Received_response_kind.t =
+              match error_mode, result with
+              | _, Error _ -> Response_finished_rpc_error_or_exn
+              | Always_ok, Ok _ -> Response_finished_ok
+              | Using_result, Ok (Ok _) -> Response_finished_ok
+              | Using_result, Ok (Error _) -> Response_finished_user_defined_error
+              | Using_result_result, Ok (Ok (Ok _)) -> Response_finished_ok
+              | Using_result_result, Ok (Ok (Error _)) ->
+                Response_finished_user_defined_error
+              | Using_result_result, Ok (Error _) -> Response_finished_user_defined_error
+              | Is_error is_error, Ok x ->
+                (match is_error x with
+                 | true -> Response_finished_user_defined_error
+                 | false -> Response_finished_ok
+                 | exception (_ : exn) -> Response_finished_rpc_error_or_exn)
+              | ( Streaming_initial_message
+                , Ok { initial = Error _; unused_query_id = (_ : P.Unused_query_id.t) } )
+                -> Response_finished_user_defined_error
+              | ( Streaming_initial_message
+                , Ok { initial = Ok _; unused_query_id = (_ : P.Unused_query_id.t) } ) ->
+                (* This case should be impossible: we never remove after streaming begins *)
+                Response_finished_ok
+            in
+            response_event kind ~payload_bytes);
+          Continue
+        | Ok Pipe_eof ->
+          response_event
+            (if Result.is_error response.data
+             then Response_finished_rpc_error_or_exn
+             else Response_finished_ok)
+            ~payload_bytes;
+          Continue
+        | Ok Expert_indeterminate ->
+          response_event
+            (if Result.is_error response.data
+             then Response_finished_rpc_error_or_exn
+             else Response_finished_expert_uninterpreted)
+            ~payload_bytes;
+          Continue
+        | Error { g = e } ->
+          response_event Response_finished_rpc_error_or_exn ~payload_bytes;
           (match e with
            | Unimplemented_rpc _ -> Continue
            | Bin_io_exn _
@@ -424,28 +546,15 @@ let handle_msg
     handle_response t response ~read_buffer ~read_buffer_pos_ref ~protocol_message_len
   | Query query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
-    write_event
-      t
-      { event = Received Query
-      ; rpc = Some { name = P.Rpc_tag.to_string query.tag; version = query.version }
-      ; id = (query.id :> Int63.t)
-      ; payload_bytes = protocol_message_len + (query.data :> int)
-      };
     Implementations.Instance.handle_query
       instance
       ~close_connection_monitor
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
+      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
   | Query_v1 query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
-    write_event
-      t
-      { event = Received Query
-      ; rpc = Some { name = P.Rpc_tag.to_string query.tag; version = query.version }
-      ; id = (query.id :> Int63.t)
-      ; payload_bytes = protocol_message_len + (query.data :> int)
-      };
     let query = P.Query.of_v1 query in
     Implementations.Instance.handle_query
       instance
@@ -453,6 +562,7 @@ let handle_msg
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
+      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
 ;;
 
 let close_reason t ~on_close =
@@ -610,14 +720,7 @@ let schedule_heartbeats t =
   Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on
 ;;
 
-let run_after_handshake
-  t
-  ~negotiated_protocol_version
-  ~implementations
-  ~connection_state
-  ~writer_monitor_exns
-  =
-  Protocol_writer.set_negotiated_protocol_version t.writer negotiated_protocol_version;
+let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
   let instance =
     Implementations.instantiate
       implementations
@@ -625,8 +728,11 @@ let run_after_handshake
       ~events:t.events
       ~connection_description:t.description
       ~connection_close_started:(Ivar.read t.close_started)
-      ~connection_state:(connection_state t)
+      ~connection_state
   in
+  (match Set_once.get t.metadata_on_receive_to_add_to_implementations_instance with
+   | None -> ()
+   | Some on_receive -> Implementations.Instance.set_on_receive instance on_receive);
   Set_once.set_exn t.implementations_instance [%here] instance;
   let close_connection_monitor = Monitor.create ~name:"RPC close connection monitor" () in
   Monitor.detach_and_iter_errors close_connection_monitor ~f:(fun exn ->
@@ -663,6 +769,27 @@ let run_after_handshake
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
+let run_after_handshake
+  t
+  ~negotiated_protocol_version
+  ~implementations
+  ~connection_state
+  ~writer_monitor_exns
+  =
+  Protocol_writer.set_negotiated_protocol_version t.writer negotiated_protocol_version;
+  let connection_state = connection_state t in
+  if not (is_closed t)
+  then (
+    (* It's important that this function executes synchronously and that [close] hasn't been
+       called yet by the time it completes, as [close] does some important cleanup (like
+       stopping the heartbeat loop), and we need to ensure there isn't a race where the
+       heartbeat loop could be started without a call to [close] stopping it. *)
+    run_connection t ~implementations ~connection_state ~writer_monitor_exns;
+    assert (not (is_closed t));
+    assert (Set_once.is_some t.heartbeat_event);
+    assert (Set_once.is_some t.implementations_instance))
+;;
+
 let send_metadata t writer ~menu ?identification () =
   P.Message.Metadata { identification; menu }
   |> Writer.send_bin_prot
@@ -684,8 +811,8 @@ let negotiate t ?identification ~header ~peer ~writer ~menu () =
       Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
       send_metadata t writer ~menu ?identification ())
     else Set_once.set_exn t.peer_metadata [%here] Unsupported;
-    return negotiate_result
-  | Error (_ : Handshake_error.t) -> return negotiate_result
+    negotiate_result
+  | Error (_ : Handshake_error.t) -> negotiate_result
 ;;
 
 let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
@@ -717,7 +844,8 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
       return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
     | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
     | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
-    | `Result (Ok (Ok peer)) -> negotiate t ?identification ~writer ~peer ~header ~menu ())
+    | `Result (Ok (Ok peer)) ->
+      return (negotiate t ?identification ~writer ~peer ~header ~menu ()))
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
@@ -734,6 +862,7 @@ let get_handshake_header () =
 
 let create
   ?implementations
+  ?protocol_version_headers
   ~connection_state
   ?(handshake_timeout = default_handshake_timeout)
   ?(heartbeat_config = Heartbeat_config.create ())
@@ -769,7 +898,9 @@ let create
           Arity1_local
           ~on_subscription_after_first_write:Allow
           ~on_callback_raise:Error.raise
+    ; metadata_for_dispatch = Moption.create ()
     ; peer_metadata = Set_once.create ()
+    ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
@@ -826,7 +957,13 @@ let create
               { callback = None; close_connection_if_no_return_value = false }
           } )
   in
-  match%map do_handshake t writer ~handshake_timeout ~header ~menu ?identification () with
+  let negotiated_protocol_version =
+    match protocol_version_headers with
+    | None -> do_handshake t writer ~handshake_timeout ~header ~menu ?identification ()
+    | Some { Protocol_version_header.Pair.us = header; peer } ->
+      return (negotiate t ~writer ~header ~peer ~menu ?identification ())
+  in
+  match%map negotiated_protocol_version with
   | Ok negotiated_protocol_version ->
     run_after_handshake
       t
@@ -841,6 +978,7 @@ let create
 
 let with_close
   ?implementations
+  ?protocol_version_headers
   ?handshake_timeout
   ?heartbeat_config
   ?description
@@ -858,6 +996,7 @@ let with_close
   let%bind t =
     create
       ?implementations
+      ?protocol_version_headers
       ?handshake_timeout
       ?heartbeat_config
       ?description

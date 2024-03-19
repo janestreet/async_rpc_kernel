@@ -23,8 +23,10 @@ open Core
     id. {ol
     {- The first response would be marked as [Streaming_initial]}
     {- Followed by zero or more responses marked [Streaming_update]}
-    {- A second query with the same id is a request to abort the streaming}
-    {- And finished by a response marked [Streaming_closed]}}}
+    {- And finished by a response marked [Streaming_closed]}
+    {- An [Abort_streaming_rpc_query] with the same id is a request from the client to
+    stop streaming early and may arrive at any time after the [Streaming_initial]
+    message}}}
 
     {- In exceptional circumstances, e.g. if the response would be too large, there will
     be a [Failed_to_send] error and this may, for example, also lead to no
@@ -46,7 +48,8 @@ open Core
     {- Sent query immediately followed by a received [One_way_so_no_response] which is
     synthetic in that no response is received over the wire.}
     {- Sent query followed by zero or more [Partial_response] events followed by one
-    [Response_finished] event.}
+    finished event, either [Response_finished_ok], [Response_finished_rpc_error_or_exn],
+    [Response_finished_user_defined_error], or [Response_finished_expert_uninterpreted].}
     {- In exceptional circumstances, there will be no corresponding [Response] to a
     [Query], for example if the connection is lost or if the server never responds.}}
 *)
@@ -72,13 +75,23 @@ module Received_response_kind : sig
   type t =
     | One_way_so_no_response
     | Partial_response
-    | Response_finished
+    | Response_finished_ok (** The response was interpreted as successful  *)
+    | Response_finished_rpc_error_or_exn
+        (** The response was an rpc-level error, e.g. the implementation raised or its
+        response was too large to send. *)
+    | Response_finished_user_defined_error
+        (** The response was successfully deserialized and determined to be some
+        applicateion-specific error *)
+    | Response_finished_expert_uninterpreted
+        (** For some expert dispatches, we can’t always tell if a response was successful so
+        use this variant. *)
   [@@deriving globalize, sexp]
 end
 
 module Kind : sig
   type 'response t =
     | Query
+    | Abort_streaming_rpc_query
     | Response of 'response
   [@@deriving globalize, sexp]
 end

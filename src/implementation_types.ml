@@ -129,6 +129,7 @@ and Implementations : sig
       'connection_state
       -> rpc_tag:string
       -> version:int
+      -> metadata:string option
       -> Implementation.Expert.Responder.t
       -> Bigstring.t
       -> pos:int
@@ -160,10 +161,16 @@ and Implementations : sig
       ; mutable
           last_dispatched_implementation :
           (Description.t * 'a Implementation.t) option
-      ; packed_self : t
+      ; mutable
+          on_receive :
+          Description.t
+          -> query_id:Query_id.t
+          -> string option
+          -> Execution_context.t
+          -> Execution_context.t
       }
 
-    and t = T : _ unpacked -> t
+    type t = T : _ unpacked -> t [@@unboxed]
   end
 end =
   Implementations
@@ -172,7 +179,13 @@ and Direct_stream_writer : sig
   module Pending_response : sig
     type 'a t =
       | Normal of 'a
-      | Expert of string
+      | Expert_string of string
+      | Expert_schedule_bigstring of
+          { buf : Bigstring.t
+          ; pos : int
+          ; len : int
+          ; done_ : unit Ivar.t
+          }
   end
 
   module State : sig

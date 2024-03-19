@@ -88,7 +88,8 @@ let%expect_test "Single one-way rpc call" =
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0))) |}];
+      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+    |}];
   Ivar.fill_exn rpc_response1 (Ok ());
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| |}];
@@ -125,7 +126,8 @@ let%expect_test "One-way immediately raises" =
         (exn (Failure "injected error"))))))
     Close_writer
     Close_reader
-    Close_finished |}];
+    Close_finished
+    |}];
   return ()
 ;;
 
@@ -163,7 +165,8 @@ let%expect_test "One-way asynchronously raises" =
        ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
     Close_writer
     Close_reader
-    Close_finished |}];
+    Close_finished
+    |}];
   return ()
 ;;
 
@@ -196,7 +199,8 @@ let%expect_test "One-way immediately raises, with on_exception:continue" =
     (Implementation_called "example message (id = 200)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 200) (payload_bytes 0))) |}];
+      (rpc (((name one-way) (version 1)))) (id 200) (payload_bytes 0)))
+    |}];
   return ()
 ;;
 
@@ -236,6 +240,7 @@ let%expect_test "One-way asynchronously raises, with on_exception:continue" =
        ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
     Close_writer
     Close_reader
-    Close_finished |}];
+    Close_finished
+    |}];
   return ()
 ;;

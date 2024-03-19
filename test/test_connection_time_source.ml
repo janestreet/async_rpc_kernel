@@ -91,13 +91,15 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (description server))
     ("received heartbeat"
       (now         "1970-01-01 00:00:00Z")
-      (description client)) |}];
+      (description client))
+    |}];
   print_liveness server_conn;
   print_liveness client_conn;
   [%expect
     {|
     (last_seen_alive "1970-01-01 00:00:00Z")
-    (last_seen_alive "1970-01-01 00:00:00Z") |}];
+    (last_seen_alive "1970-01-01 00:00:00Z")
+    |}];
   advance_by_span server_time_source heartbeat_every;
   advance_by_span client_time_source heartbeat_every;
   let%bind () = yield () in
@@ -108,13 +110,15 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (description client))
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
-      (description server)) |}];
+      (description server))
+    |}];
   print_liveness server_conn;
   print_liveness client_conn;
   [%expect
     {|
     (last_seen_alive "1970-01-01 00:00:02Z")
-    (last_seen_alive "1970-01-01 00:00:02Z") |}];
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    |}];
   advance_by_span server_time_source heartbeat_timeout;
   let%bind () = yield () in
   [%expect
@@ -133,13 +137,15 @@ let%expect_test "test connection with time_source <> wall_clock" =
       (description client))
     ("received heartbeat"
       (now         "1970-01-01 00:00:02Z")
-      (description client)) |}];
+      (description client))
+    |}];
   print_liveness server_conn;
   print_liveness client_conn;
   [%expect
     {|
     (last_seen_alive "1970-01-01 00:00:02Z")
-    (last_seen_alive "1970-01-01 00:00:02Z") |}];
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    |}];
   advance_by_span server_time_source heartbeat_every;
   let%bind () = yield () in
   [%expect
@@ -151,13 +157,15 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
-      (reason      "EOF or connection closed")) |}];
+      (reason      "EOF or connection closed"))
+    |}];
   print_liveness server_conn;
   print_liveness client_conn;
   [%expect
     {|
     (last_seen_alive "1970-01-01 00:00:02Z")
-    (last_seen_alive "1970-01-01 00:00:02Z") |}];
+    (last_seen_alive "1970-01-01 00:00:02Z")
+    |}];
   Deferred.all_unit
     [ Connection.close_finished server_conn; Connection.close_finished client_conn ]
 ;;

@@ -44,7 +44,8 @@ let%expect_test "test Pipe_rpc.dispatch_iter" =
   [%expect {|
     dispatch resolved
     response
-    response |}]
+    response
+    |}]
 ;;
 
 let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
@@ -96,7 +97,8 @@ let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
     ("Got buffer" (buf "\bresponse") (pos 58) (len 9))
     response
     ("Got buffer" (buf "\bresponse") (pos 32) (len 9))
-    response |}]
+    response
+    |}]
 ;;
 
 let%expect_test "test State_rpc.dispatch_fold" =
@@ -140,5 +142,6 @@ let%expect_test "test State_rpc.dispatch_fold" =
     ((acc 0) (message update))
     ((acc 1) (message update))
     (closed (acc 2) (kind By_remote_side))
-    dispatch resolved |}]
+    dispatch resolved
+    |}]
 ;;

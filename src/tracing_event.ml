@@ -17,13 +17,17 @@ module Received_response_kind = struct
   type t =
     | One_way_so_no_response
     | Partial_response
-    | Response_finished
+    | Response_finished_ok
+    | Response_finished_rpc_error_or_exn
+    | Response_finished_user_defined_error
+    | Response_finished_expert_uninterpreted
   [@@deriving globalize, sexp]
 end
 
 module Kind = struct
   type 'response t =
     | Query
+    | Abort_streaming_rpc_query
     | Response of 'response
   [@@deriving globalize, sexp]
 end

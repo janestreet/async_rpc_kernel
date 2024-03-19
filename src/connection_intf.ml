@@ -37,6 +37,10 @@ module type S = sig
       bag of implementations that the calling side implements; it defaults to
       [Implementations.null] (i.e., "I implement no RPCs").
 
+      [protocol_version_headers] should contain the pre-shared protocol version headers,
+      if applicable. The client and server must agree on whether these were shared and, if
+      so, what they contained, or there may be a protocol error.
+
       [connection_state] will be called once, before [create]'s result is determined, on
       the same connection that [create] returns.  Its output will be provided to the
       [implementations] when queries arrive.
@@ -64,6 +68,7 @@ module type S = sig
       interpret as structured data of their choosing. *)
   val create
     :  ?implementations:'s Implementations.t
+    -> ?protocol_version_headers:Protocol_version_header.Pair.t
     -> connection_state:(t -> 's)
     -> ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
@@ -177,6 +182,7 @@ module type S = sig
       function like [create]. *)
   val with_close
     :  ?implementations:'s Implementations.t
+    -> ?protocol_version_headers:Protocol_version_header.Pair.t
     -> ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
     -> ?description:Info.t
@@ -209,15 +215,26 @@ module type S_private = sig
   (* Internally, we use a couple of extra functions on connections that aren't exposed to
      users. *)
 
+  val compute_metadata : t -> Description.t -> Query_id.t -> Rpc_metadata.t option
+
+  type response_with_determinable_status =
+    | Pipe_eof
+    | Expert_indeterminate
+    | Determinable :
+        'a Rpc_result.t * 'a Implementation.F.error_mode
+        -> response_with_determinable_status
+
+  type response_handler_action =
+    | Keep
+    | Wait of unit Deferred.t
+    | Remove of (response_with_determinable_status, Rpc_error.t Gel.t) result
+    | Expert_remove_and_wait of unit Deferred.t
+
   type response_handler =
     Nat0.t Response.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
-    -> [ `keep
-       | `wait of unit Deferred.t
-       | `remove of unit Rpc_result.t
-       | `remove_and_wait of unit Deferred.t
-       ]
+    -> response_handler_action
 
   val sexp_of_t_hum_writer : t -> Sexp.t
 
@@ -230,16 +247,17 @@ module type S_private = sig
 
   val dispatch
     :  t
+    -> kind:Tracing_event.Sent_response_kind.t Tracing_event.Kind.t
     -> response_handler:response_handler option
     -> bin_writer_query:'a Bin_prot.Type_class.writer
     -> query:'a Query.t
     -> (unit, Dispatch_error.t) Result.t
 
   val dispatch_bigstring
-    :  ?metadata:Rpc_metadata.t
-    -> t
+    :  t
     -> tag:Rpc_tag.t
     -> version:int
+    -> metadata:unit
     -> Bigstring.t
     -> pos:int
     -> len:int
@@ -247,10 +265,21 @@ module type S_private = sig
     -> (unit, Dispatch_error.t) Result.t
 
   val schedule_dispatch_bigstring
-    :  ?metadata:Rpc_metadata.t
-    -> t
+    :  t
     -> tag:Rpc_tag.t
     -> version:int
+    -> metadata:unit
+    -> Bigstring.t
+    -> pos:int
+    -> len:int
+    -> response_handler:response_handler option
+    -> (unit Deferred.t, Dispatch_error.t) Result.t
+
+  val schedule_dispatch_bigstring_with_metadata
+    :  t
+    -> tag:Rpc_tag.t
+    -> version:int
+    -> metadata:string option
     -> Bigstring.t
     -> pos:int
     -> len:int
@@ -262,6 +291,35 @@ module type S_private = sig
   (** Allows getting information from the RPC that may be used for tracing or metrics. The
       interface is not yet stable. *)
   val events : t -> (Tracing_event.t -> unit) Bus.Read_only.t
+
+  (** The header that would be sent at the beginning of a connection. This can be used to
+      pre-share this part of the handshake (see the [protocol_version_headers] argument to
+      [create]). *)
+  val default_handshake_header : Protocol_version_header.t
+
+  (** Allows some extra information to be passed between clients and servers (e.g. for
+      tracing). The [when_sending] function is called to compute the metadata that is sent
+      along with rpc queries. It is called in the same async context as the dispatch
+      function. The [on_receive] function is called before an rpc implementation to modify
+      the execution context for that implementation. Metadata is not sent if the server is
+      running an old version of the Async_rpc protocol. Handlers should not change the
+      monitor on the execution context (this will have no effect on where errors are sent
+      for rpc implementations).
+
+      The passed [query_id] may be used to correlate with a listener on the {!events} bus. *)
+  val set_metadata_hooks
+    :  t
+    -> when_sending:(Description.t -> query_id:Int63.t -> Rpc_metadata.t option)
+    -> on_receive:
+         (Description.t
+          -> query_id:Int63.t
+          -> Rpc_metadata.t option
+          -> Execution_context.t
+          -> Execution_context.t)
+    -> [ `Ok | `Already_set ]
+
+  (** True if future calls to [set_metadata_hooks] will return [`Already_set]. *)
+  val have_metadata_hooks_been_set : t -> bool
 
   module For_testing : sig
     module Header : sig

@@ -52,7 +52,6 @@ let rpc_result_to_or_error rpc_description conn result =
 
 module Rpc_common = struct
   let dispatch_raw'
-    ?metadata
     conn
     ~tag
     ~version
@@ -61,19 +60,31 @@ module Rpc_common = struct
     ~query_id
     ~response_handler
     =
-    let query = { P.Query.tag; version; id = query_id; metadata; data = query } in
-    match Connection.dispatch conn ~response_handler ~bin_writer_query ~query with
+    let query =
+      { P.Query.tag
+      ; version
+      ; id = query_id
+      ; metadata =
+          Connection.compute_metadata
+            conn
+            { name = P.Rpc_tag.to_string tag; version }
+            query_id
+      ; data = query
+      }
+    in
+    match
+      Connection.dispatch conn ~response_handler ~kind:Query ~bin_writer_query ~query
+    with
     | Ok result -> Ok result
     | Error Closed -> Error Rpc_error.Connection_closed
     | Error (Message_too_big message_too_big) ->
       Error (Rpc_error.Message_too_big message_too_big)
   ;;
 
-  let dispatch_raw ?metadata conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
+  let dispatch_raw conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
     let response_ivar = Ivar.create () in
     (match
        dispatch_raw'
-         ?metadata
          conn
          ~tag
          ~version
@@ -194,12 +205,13 @@ module Rpc = struct
     }
   ;;
 
-  let dispatch' ?metadata t conn query =
+  let dispatch' t conn query =
     let response_handler
       ivar
       (response : _ P.Response.t)
       ~read_buffer
       ~read_buffer_pos_ref
+      : Connection.response_handler_action
       =
       let response =
         response.data
@@ -212,11 +224,10 @@ module Rpc = struct
           ~location:"client-side rpc response un-bin-io'ing"
       in
       Ivar.fill_exn ivar response;
-      `remove (Ok ())
+      Remove (Ok (Determinable (response, t.has_errors)))
     in
     let query_id = P.Query_id.create () in
     Rpc_common.dispatch_raw
-      ?metadata
       conn
       ~tag:t.tag
       ~version:t.version
@@ -230,14 +241,12 @@ module Rpc = struct
     rpc_result_to_or_error (description t) conn result
   ;;
 
-  let dispatch ?metadata t conn query =
-    let%map result = dispatch' ?metadata t conn query in
+  let dispatch t conn query =
+    let%map result = dispatch' t conn query in
     rpc_result_to_or_error t conn result
   ;;
 
-  let dispatch_exn ?metadata t conn query =
-    dispatch ?metadata t conn query >>| Or_error.ok_exn
-  ;;
+  let dispatch_exn t conn query = dispatch t conn query >>| Or_error.ok_exn
 
   module Expert = struct
     module Responder = Implementations.Expert.Rpc_responder
@@ -247,7 +256,7 @@ module Rpc = struct
       conn
       ~rpc_tag
       ~version
-      ?metadata
+      ~metadata
       buf
       ~pos
       ~len
@@ -266,41 +275,33 @@ module Rpc = struct
                       (Deferred.peek (Connection.close_reason ~on_close:`started conn)
                         : Info.t option)])
                   e));
-          `remove (Ok ())
+          Remove (Ok Expert_indeterminate)
         | Ok len ->
           let len = (len : Nat0.t :> int) in
           let d = handle_response read_buffer ~pos:!read_buffer_pos_ref ~len in
           read_buffer_pos_ref := !read_buffer_pos_ref + len;
-          if Deferred.is_determined d then `remove (Ok ()) else `remove_and_wait d
+          if Deferred.is_determined d
+          then Remove (Ok Expert_indeterminate)
+          else Expert_remove_and_wait d
       in
       do_dispatch
-        ?metadata
         conn
         ~tag:(P.Rpc_tag.of_string rpc_tag)
         ~version
+        ~metadata
         buf
         ~pos
         ~len
         ~response_handler:(Some response_handler)
     ;;
 
-    let dispatch
-      ?metadata
-      conn
-      ~rpc_tag
-      ~version
-      buf
-      ~pos
-      ~len
-      ~handle_response
-      ~handle_error
-      =
+    let dispatch conn ~rpc_tag ~version buf ~pos ~len ~handle_response ~handle_error =
       make_dispatch
         Connection.dispatch_bigstring
-        ?metadata
         conn
         ~rpc_tag
         ~version
+        ~metadata:()
         buf
         ~pos
         ~len
@@ -310,7 +311,6 @@ module Rpc = struct
     ;;
 
     let schedule_dispatch
-      ?metadata
       conn
       ~rpc_tag
       ~version
@@ -322,10 +322,35 @@ module Rpc = struct
       =
       make_dispatch
         Connection.schedule_dispatch_bigstring
-        ?metadata
         conn
         ~rpc_tag
         ~version
+        ~metadata:()
+        buf
+        ~pos
+        ~len
+        ~handle_response
+        ~handle_error
+      |> handle_schedule_dispatch_bigstring_result_exn ~connection:conn
+    ;;
+
+    let schedule_dispatch_with_metadata
+      conn
+      ~rpc_tag
+      ~version
+      ~metadata
+      buf
+      ~pos
+      ~len
+      ~handle_response
+      ~handle_error
+      =
+      make_dispatch
+        Connection.schedule_dispatch_bigstring_with_metadata
+        conn
+        ~rpc_tag
+        ~version
+        ~metadata
         buf
         ~pos
         ~len
@@ -429,10 +454,9 @@ module One_way = struct
     }
   ;;
 
-  let dispatch' ?metadata t conn query =
+  let dispatch' t conn query =
     let query_id = P.Query_id.create () in
     Rpc_common.dispatch_raw'
-      ?metadata
       conn
       ~tag:t.tag
       ~version:t.version
@@ -446,13 +470,11 @@ module One_way = struct
     rpc_result_to_or_error (description t) conn result
   ;;
 
-  let dispatch ?metadata t conn query =
-    dispatch' ?metadata t conn query |> fun result -> rpc_result_to_or_error t conn result
+  let dispatch t conn query =
+    dispatch' t conn query |> fun result -> rpc_result_to_or_error t conn result
   ;;
 
-  let dispatch_exn ?metadata t conn query =
-    Or_error.ok_exn (dispatch ?metadata t conn query)
-  ;;
+  let dispatch_exn t conn query = Or_error.ok_exn (dispatch t conn query)
 
   module Expert = struct
     let no_authorization f state buf ~pos ~len =
@@ -468,19 +490,12 @@ module One_way = struct
       }
     ;;
 
-    let dispatch
-      ?metadata
-      { tag; version; bin_msg = _; msg_type_id = _ }
-      conn
-      buf
-      ~pos
-      ~len
-      =
+    let dispatch { tag; version; bin_msg = _; msg_type_id = _ } conn buf ~pos ~len =
       Connection.dispatch_bigstring
-        ?metadata
         conn
         ~tag
         ~version
+        ~metadata:()
         buf
         ~pos
         ~len
@@ -489,7 +504,6 @@ module One_way = struct
     ;;
 
     let schedule_dispatch
-      ?metadata
       { tag; version; bin_msg = _; msg_type_id = _ }
       conn
       buf
@@ -497,10 +511,10 @@ module One_way = struct
       ~len
       =
       Connection.schedule_dispatch_bigstring
-        ?metadata
         conn
         ~tag
         ~version
+        ~metadata:()
         buf
         ~pos
         ~len
@@ -691,6 +705,7 @@ module Streaming_rpc = struct
     ignore
       (Connection.dispatch
          conn
+         ~kind:Abort_streaming_rpc_query
          ~bin_writer_query:P.Stream_query.bin_writer_nat0_t
          ~query
          ~response_handler:None
@@ -766,17 +781,20 @@ module Streaming_rpc = struct
     ~get_connection_close_reason
     (handler : _ Response_state.Update_handler.t)
     err
+    : Connection.response_handler_action
     =
     let core_err =
       Error.t_of_sexp (Rpc_error.sexp_of_t ~get_connection_close_reason err)
     in
     handle_closed handler (`Error core_err);
-    `remove (Error err)
+    Remove (Error { g = err })
   ;;
 
-  let eof (handler : _ Response_state.Update_handler.t) =
+  let eof (handler : _ Response_state.Update_handler.t)
+    : Connection.response_handler_action
+    =
     handle_closed handler `By_remote_side;
-    `remove (Ok ())
+    Remove (Ok Pipe_eof)
   ;;
 
   let response_handler ~get_connection_close_reason initial_state
@@ -819,16 +837,16 @@ module Streaming_rpc = struct
                   | Error err -> read_error ~get_connection_close_reason handler err
                   | Ok data ->
                     (match update_handler (Update data) with
-                     | Continue -> `keep
-                     | Wait d -> `wait d))
+                     | Continue -> Keep
+                     | Wait d -> Wait d))
                | Expert { on_update; on_closed = _ } ->
                  let pos = !read_buffer_pos_ref in
                  let len = (len :> int) in
                  read_buffer_pos_ref := pos + len;
                  (try
                     match on_update read_buffer ~pos ~len with
-                    | Continue -> `keep
-                    | Wait d -> `wait d
+                    | Continue -> Keep
+                    | Wait d -> Wait d
                   with
                   | exn ->
                     read_error
@@ -842,12 +860,12 @@ module Streaming_rpc = struct
            connection should be closed, and these are "normal" errors. (In contrast, the
            errors we get in the [Writing_updates_to_pipe] case indicate more serious
            problems.) Instead, we just put errors in [ivar]. *)
-        let error err =
-          Ivar.fill_exn initial_handler.ivar (Error err);
-          `remove (Ok ())
+        let error result : Connection.response_handler_action =
+          Ivar.fill_exn initial_handler.ivar result;
+          Remove (Ok (Determinable (result, Always_ok)))
         in
         (match response.data with
-         | Error err -> error err
+         | Error _ as result -> error result
          | Ok len ->
            let initial =
              bin_read_from_bigstring
@@ -860,12 +878,12 @@ module Streaming_rpc = struct
                ~location:"client-side streaming_rpc initial_response un-bin-io'ing"
            in
            (match initial with
-            | Error err -> error err
+            | Error _ as result -> error result
             | Ok initial_msg ->
               (match initial_msg.initial with
-               | Error err ->
-                 Ivar.fill_exn initial_handler.ivar (Ok (Error err));
-                 `remove (Ok ())
+               | Error _ as result ->
+                 Ivar.fill_exn initial_handler.ivar (Ok result);
+                 Remove (Ok (Determinable (initial, Streaming_initial_message)))
                | Ok initial ->
                  let initial_response, handler =
                    initial_handler.make_update_handler initial
@@ -876,10 +894,10 @@ module Streaming_rpc = struct
                  state.state
                    <- Writing_updates
                         (initial_handler.rpc.bin_update_response.reader, handler);
-                 `keep)))
+                 Keep)))
   ;;
 
-  let dispatch_gen ?metadata t conn query make_update_handler =
+  let dispatch_gen t conn query make_update_handler =
     let bin_writer_query =
       P.Stream_query.bin_writer_needs_length
         (Writer_with_length.of_type_class t.bin_query)
@@ -887,7 +905,6 @@ module Streaming_rpc = struct
     let query = `Query query in
     let query_id = P.Query_id.create () in
     Rpc_common.dispatch_raw
-      ?metadata
       conn
       ~query_id
       ~tag:t.tag
@@ -903,10 +920,10 @@ module Streaming_rpc = struct
         { rpc = t; query_id; connection = conn; ivar; make_update_handler })
   ;;
 
-  let dispatch_fold ?metadata t conn query ~init ~f ~closed =
+  let dispatch_fold t conn query ~init ~f ~closed =
     let result = Ivar.create () in
     match%map
-      dispatch_gen ?metadata t conn query (fun state ->
+      dispatch_gen t conn query (fun state ->
         let acc = ref (init state) in
         ( ()
         , Standard
@@ -923,9 +940,9 @@ module Streaming_rpc = struct
     | Ok (Ok (id, ())) -> Ok (Ok (id, Ivar.read result))
   ;;
 
-  let dispatch' ?metadata t conn query =
+  let dispatch' t conn query =
     match%map
-      dispatch_gen ?metadata t conn query (fun init ->
+      dispatch_gen t conn query (fun init ->
         let pipe_r, pipe_w = Pipe.create () in
         (* Set a small buffer to reduce the number of pushback events *)
         Pipe.set_size_budget pipe_w 100;
@@ -966,8 +983,8 @@ module Streaming_rpc = struct
       Ok (Ok (pipe_metadata, init, pipe_r))
   ;;
 
-  let dispatch ?metadata t conn query =
-    dispatch' ?metadata t conn query >>| rpc_result_to_or_error (description t) conn
+  let dispatch t conn query =
+    dispatch' t conn query >>| rpc_result_to_or_error (description t) conn
   ;;
 end
 
@@ -1215,20 +1232,19 @@ module Pipe_rpc = struct
     Streaming_rpc.implement_direct_with_auth ?on_exception t f
   ;;
 
-  let dispatch' ?metadata t conn query =
-    let%map response = Streaming_rpc.dispatch' ?metadata t conn query in
+  let dispatch' t conn query =
+    let%map response = Streaming_rpc.dispatch' t conn query in
     response >>|~ fun x -> x >>|~ fun (metadata, (), pipe_r) -> pipe_r, metadata
   ;;
 
-  let dispatch ?metadata t conn query =
-    dispatch' ?metadata t conn query
-    >>| rpc_result_to_or_error (Streaming_rpc.description t) conn
+  let dispatch t conn query =
+    dispatch' t conn query >>| rpc_result_to_or_error (Streaming_rpc.description t) conn
   ;;
 
   exception Pipe_rpc_failed
 
-  let dispatch_exn ?metadata t conn query =
-    let%map result = dispatch ?metadata t conn query in
+  let dispatch_exn t conn query =
+    let%map result = dispatch t conn query in
     match result with
     | Error rpc_error -> raise (Error.to_exn rpc_error)
     | Ok (Error _) -> raise Pipe_rpc_failed
@@ -1238,19 +1254,17 @@ module Pipe_rpc = struct
   module Pipe_message = Pipe_message
   module Pipe_response = Pipe_response
 
-  let dispatch_iter ?metadata t conn query ~f =
-    match%map
-      Streaming_rpc.dispatch_gen ?metadata t conn query (fun () -> (), Standard f)
-    with
+  let dispatch_iter t conn query ~f =
+    match%map Streaming_rpc.dispatch_gen t conn query (fun () -> (), Standard f) with
     | (Error _ | Ok (Error _)) as e ->
       rpc_result_to_or_error (Streaming_rpc.description t) conn e
     | Ok (Ok (id, ())) -> Ok (Ok id)
   ;;
 
   module Expert = struct
-    let dispatch_iter ?metadata t conn query ~f ~closed =
+    let dispatch_iter t conn query ~f ~closed =
       match%map
-        Streaming_rpc.dispatch_gen ?metadata t conn query (fun () ->
+        Streaming_rpc.dispatch_gen t conn query (fun () ->
           (), Expert { on_update = f; on_closed = closed })
       with
       | (Error _ | Ok (Error _)) as e ->
@@ -1316,12 +1330,12 @@ module State_rpc = struct
     state, update_r, metadata
   ;;
 
-  let dispatch ?metadata t conn query =
-    Streaming_rpc.dispatch ?metadata t conn query >>| unwrap_dispatch_result
+  let dispatch t conn query =
+    Streaming_rpc.dispatch t conn query >>| unwrap_dispatch_result
   ;;
 
-  let dispatch' ?metadata t conn query =
-    Streaming_rpc.dispatch' ?metadata t conn query >>| unwrap_dispatch_result
+  let dispatch' t conn query =
+    Streaming_rpc.dispatch' t conn query >>| unwrap_dispatch_result
   ;;
 
   module Pipe_message = Pipe_message

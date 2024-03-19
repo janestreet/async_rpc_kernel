@@ -213,7 +213,8 @@ let%expect_test "supported_rpcs" =
        ((name Foo) (version 13)) ((name Foo) (version 14)) ((name K) (version 3))
        ((name S) (version 2)) ((name W) (version 5)) ((name Y) (version -1))
        ((name baz) (version 8)) ((name foo) (version -1)) ((name p) (version 7))
-       ((name "\189") (version 4))))) |}]
+       ((name "\189") (version 4)))))
+    |}]
 ;;
 
 let%expect_test "sexp_of doesn't raise" =
@@ -223,7 +224,8 @@ let%expect_test "sexp_of doesn't raise" =
     {|
     ("500th example"
      (menu (((name "qnCm[AABZ\172Oul\187a0R") (kind Unknown) (versions (8)))))
-     (result _)) |}]
+     (result _))
+    |}]
 ;;
 
 let choose_rpc_name (v1_or_v2 : V1_or_v2.t) state =
@@ -252,7 +254,8 @@ let%expect_test "supported_versions" =
       (((name 8) (kind Rpc) (versions (4)))
        ((name "JP\255") (kind One_way) (versions (8)))
        ((name "\226J\000ZPrj") (kind One_way) (versions (-1)))))
-     (result (-1))) |}]
+     (result (-1)))
+    |}]
 ;;
 
 let%expect_test "mem" =
@@ -295,7 +298,8 @@ let%expect_test "mem" =
        ((name q) (kind One_way) (versions (0)))
        ((name s) (kind Streaming_rpc) (versions (-1)))
        ((name x) (kind Streaming_rpc) (versions (1)))))
-     (result (true (, 4)))) |}]
+     (result (true (, 4))))
+    |}]
 ;;
 
 let%expect_test "shape_digests" =
@@ -336,7 +340,8 @@ let%expect_test "shape_digests" =
        ((name foo) (kind Streaming_rpc) (versions (14)))
        ((name foo) (kind One_way) (versions (16)))
        ((name k) (kind Rpc) (versions (3)))))
-     (result (() (Q 8)))) |}]
+     (result (() (Q 8))))
+    |}]
 ;;
 
 let%expect_test "highest_available_version" =
@@ -359,7 +364,8 @@ let%expect_test "highest_available_version" =
      (menu
       (((name FOO) (kind Unknown) (versions (6)))
        ((name Mi) (kind Rpc) (versions (2)))))
-     (result ((Ok 2) (Mi (2))))) |}]
+     (result ((Ok 2) (Mi (2)))))
+    |}]
 ;;
 
 let%expect_test "highest_available_version 2" =

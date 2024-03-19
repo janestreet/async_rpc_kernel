@@ -10,7 +10,5 @@ let local_storage_key =
 let get () = Async_kernel.Async_kernel_scheduler.find_local local_storage_key
 
 module Private = struct
-  let with_metadata metadata ~f =
-    Async_kernel.Async_kernel_scheduler.with_local local_storage_key metadata ~f
-  ;;
+  let set metadata ctx = Execution_context.with_local ctx local_storage_key metadata
 end

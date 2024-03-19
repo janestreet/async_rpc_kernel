@@ -52,6 +52,13 @@ module Direct_stream_writer : sig
       -> pos:int
       -> len:int
       -> [ `Ok | `Closed ]
+
+    val schedule_write
+      :  'a t
+      -> buf:Bigstring.t
+      -> pos:int
+      -> len:int
+      -> [ `Flushed of unit Deferred.t Gel.t | `Closed ]
   end
 end
 
@@ -64,6 +71,7 @@ module Instance : sig
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
     -> close_connection_monitor:Monitor.t
+    -> message_bytes_for_tracing:int
     -> unit Rpc_result.t Transport.Handler_result.t
 
   (* Flushes all open streaming responses *)
@@ -72,6 +80,15 @@ module Instance : sig
   (* Stop the instance: drop all responses to pending requests and make all further call
      to [handle_query] or [flush] to fail. *)
   val stop : t -> unit
+
+  val set_on_receive
+    :  t
+    -> (Description.t
+        -> query_id:Query_id.t
+        -> Rpc_metadata.t option
+        -> Execution_context.t
+        -> Execution_context.t)
+    -> unit
 end
 
 val instantiate
@@ -157,6 +174,7 @@ module Expert : sig
            'connection_state
            -> rpc_tag:string
            -> version:int
+           -> metadata:string option
            -> Responder.t
            -> Bigstring.t
            -> pos:int

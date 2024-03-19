@@ -2,6 +2,6 @@
  (name async_rpc_kernel_test)
  (libraries core async_kernel async_rpc_kernel expect_test_helpers_async
    expect_test_helpers_core async_kernel.eager_deferred
-   protocol_version_header core_kernel.vec)
+   protocol_version_header core_kernel.vec core_kernel.weak_pointer)
  (preprocess
   (pps ppx_jane)))

@@ -76,5 +76,14 @@ module Unsafe_for_cached_bin_writer : sig
     -> len:int
     -> unit Transport.Send_result.t
 
+  val send_bin_prot_and_bigstring_non_copying
+    :  t
+    -> 'a Bin_prot.Type_class.writer
+    -> 'a
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> unit Deferred.t Transport.Send_result.t
+
   val transfer : t -> 'a Pipe.Reader.t -> ('a -> unit) -> unit Deferred.t
 end

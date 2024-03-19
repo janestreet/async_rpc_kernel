@@ -190,6 +190,7 @@ module Implementations : sig
              'connection_state
              -> rpc_tag:string
              -> version:int
+             -> metadata:string option
              -> Responder.t
              -> Bigstring.t
              -> pos:int
@@ -270,8 +271,7 @@ module Rpc : sig
   (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
       [rpc_result_to_or_error] gives you the same result as [dispatch] *)
   val dispatch'
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response) t
+    :  ('query, 'response) t
     -> Connection.t
     -> 'query
     -> 'response Rpc_result.t Deferred.t
@@ -283,15 +283,13 @@ module Rpc : sig
     -> 'response Or_error.t
 
   val dispatch
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response) t
+    :  ('query, 'response) t
     -> Connection.t
     -> 'query
     -> 'response Or_error.t Deferred.t
 
   val dispatch_exn
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response) t
+    :  ('query, 'response) t
     -> Connection.t
     -> 'query
     -> 'response Deferred.t
@@ -325,10 +323,25 @@ module Rpc : sig
         the message header) is longer than the underlying transport's max message size.
     *)
     val schedule_dispatch
-      :  ?metadata:Rpc_metadata.t
-      -> Connection.t
+      :  Connection.t
       -> rpc_tag:string
       -> version:int
+      -> Bigstring.t
+      -> pos:int
+      -> len:int
+      -> handle_response:(Bigstring.t -> pos:int -> len:int -> unit Deferred.t)
+      -> handle_error:(Error.t -> unit)
+      -> [ `Flushed of unit Deferred.t | `Connection_closed ]
+
+    (** [schedule_dispatch_with_metadata] is like [schedule_dispatch] except that instead
+        of the rpc metadata coming from metadata hooks added to the connection, it is
+        passed directly. This is mostly useful if you are calling this function from an
+        [`Expert] [on_unknown_rpc] handler (see {!Implementations.Expert.create}). *)
+    val schedule_dispatch_with_metadata
+      :  Connection.t
+      -> rpc_tag:string
+      -> version:int
+      -> metadata:string option
       -> Bigstring.t
       -> pos:int
       -> len:int
@@ -340,8 +353,7 @@ module Rpc : sig
         message header) is longer than the underlying transport's max message size.
     *)
     val dispatch
-      :  ?metadata:Rpc_metadata.t
-      -> Connection.t
+      :  Connection.t
       -> rpc_tag:string
       -> version:int
       -> Bigstring.t
@@ -576,6 +588,18 @@ module Pipe_rpc : sig
         -> pos:int
         -> len:int
         -> [ `Ok | `Closed ]
+
+      (** Similar to [write_without_pushback] but you may not modify the written portion
+          of the bigstring until either:
+          - [schedule_write] returns [`Closed] (indicating the connection is
+            closed or the client aborted the rpc)
+          - The returned deferred in the [`Flushed] case becomes determined *)
+      val schedule_write
+        :  'a t
+        -> buf:Bigstring.t
+        -> pos:int
+        -> len:int
+        -> [ `Flushed of unit Deferred.t Gel.t | `Closed ]
     end
 
     (** Group of direct writers. Groups are optimized for sending the same message to
@@ -694,23 +718,20 @@ module Pipe_rpc : sig
 
       Closing the pipe has the effect of calling [abort]. *)
   val dispatch
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response, 'error) t
+    :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t Deferred.t
 
   (** Like {!dispatch} but gives an {!Rpc_error.t} instead of an {!Error.t}. *)
   val dispatch'
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response, 'error) t
+    :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t, 'error) Result.t Rpc_result.t Deferred.t
 
   val dispatch_exn
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response, 'error) t
+    :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t) Deferred.t
@@ -737,8 +758,7 @@ module Pipe_rpc : sig
       the implementation side. Calling it with a different [Pipe_rpc.t] or [Connection.t]
       has undefined behavior. *)
   val dispatch_iter
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'response, 'error) t
+    :  ('query, 'response, 'error) t
     -> Connection.t
     -> 'query
     -> f:('response Pipe_message.t -> Pipe_response.t)
@@ -761,8 +781,7 @@ module Pipe_rpc : sig
         Note that unlike the non-expert [dispatch_iter], exceptions from [f] are caught,
         resulting in [closed] being invoked, instead of terminating the connection. *)
     val dispatch_iter
-      :  ?metadata:Rpc_metadata.t
-      -> ('query, 'response, 'error) t
+      :  ('query, 'response, 'error) t
       -> Connection.t
       -> 'query
       -> f:(Bigstring.t -> pos:int -> len:int -> Pipe_response.t)
@@ -862,8 +881,7 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val dispatch
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'state, 'update, 'error) t
+    :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t
@@ -879,8 +897,7 @@ module State_rpc : sig
       [abort], in which case [closed] will not be called and the ['result Deferred.t] will
       never become determined. *)
   val dispatch_fold
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'state, 'update, 'error) t
+    :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
     -> init:('state -> 'acc)
@@ -889,8 +906,7 @@ module State_rpc : sig
     -> (Id.t * 'result Deferred.t, 'error) Result.t Or_error.t Deferred.t
 
   val dispatch'
-    :  ?metadata:Rpc_metadata.t
-    -> ('query, 'state, 'update, 'error) t
+    :  ('query, 'state, 'update, 'error) t
     -> Connection.t
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Rpc_result.t
@@ -932,12 +948,7 @@ module One_way : sig
 
   (** [dispatch'] exposes [Rpc_result.t] as output. Passing it through
       [rpc_result_to_or_error] gives you the same result as [dispatch] *)
-  val dispatch'
-    :  ?metadata:Rpc_metadata.t
-    -> 'msg t
-    -> Connection.t
-    -> 'msg
-    -> unit Rpc_result.t
+  val dispatch' : 'msg t -> Connection.t -> 'msg -> unit Rpc_result.t
 
   val rpc_result_to_or_error
     :  'msg t
@@ -945,14 +956,8 @@ module One_way : sig
     -> unit Rpc_result.t
     -> unit Or_error.t
 
-  val dispatch
-    :  ?metadata:Rpc_metadata.t
-    -> 'msg t
-    -> Connection.t
-    -> 'msg
-    -> unit Or_error.t
-
-  val dispatch_exn : ?metadata:Rpc_metadata.t -> 'msg t -> Connection.t -> 'msg -> unit
+  val dispatch : 'msg t -> Connection.t -> 'msg -> unit Or_error.t
+  val dispatch_exn : 'msg t -> Connection.t -> 'msg -> unit
 
   module Expert : sig
     val implement
@@ -962,8 +967,7 @@ module One_way : sig
       -> 'connection_state Implementation.t
 
     val dispatch
-      :  ?metadata:Rpc_metadata.t
-      -> _ t
+      :  _ t
       -> Connection.t
       -> Bigstring.t
       -> pos:int
@@ -973,8 +977,7 @@ module One_way : sig
     (** Like [dispatch], but does not copy data out of the buffer, so it must not change
         until the returned [unit Deferred.t] is determined. *)
     val schedule_dispatch
-      :  ?metadata:Rpc_metadata.t
-      -> _ t
+      :  _ t
       -> Connection.t
       -> Bigstring.t
       -> pos:int

@@ -104,7 +104,8 @@ let%expect_test "client 60s, server 60s" =
     01                                       menu= Some
     00                                              List: 0 items
     (client_menu_from_server (Ok (_)))
-    (server_menu_from_client (Ok (_))) |}];
+    (server_menu_from_client (Ok (_)))
+    |}];
   return ()
 ;;
 
@@ -135,7 +136,8 @@ let%expect_test "client 0s, server 60s" =
      (Error
       ("Connection closed before we could get peer metadata"
        (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason ("RPC transport stopped"))))) |}];
+       (close_reason ("RPC transport stopped")))))
+    |}];
   return ()
 ;;
 
@@ -166,7 +168,8 @@ let%expect_test "client 60s, server 0s" =
      (Error
       ("Connection closed before we could get peer metadata"
        (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason ("RPC transport stopped"))))) |}];
+       (close_reason ("RPC transport stopped")))))
+    |}];
   return ()
 ;;
 
@@ -195,6 +198,7 @@ let%expect_test "client 0s, server 0s" =
      (server_conn
       (Error
        (connection.ml.Handshake_error.Handshake_error
-        (Timeout <created-directly>))))) |}];
+        (Timeout <created-directly>)))))
+    |}];
   return ()
 ;;

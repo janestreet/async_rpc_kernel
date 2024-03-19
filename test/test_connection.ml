@@ -126,7 +126,8 @@ let%expect_test "V3 send versioned menu automatically" =
              (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
               (initial_response e2d261c6c291b94bf6aa68ec2b08cb00)
               (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
-              (error 52966f4a49a77bfdff668e9cc61511b3))))))))))) |}];
+              (error 52966f4a49a77bfdff668e9cc61511b3)))))))))))
+    |}];
   let%bind () =
     connection_test
       ~server_header:Test_helpers.Header.v3
@@ -135,7 +136,8 @@ let%expect_test "V3 send versioned menu automatically" =
   in
   [%expect {|
     (client_menu (Ok ()))
-    (server_menu (Ok ())) |}];
+    (server_menu (Ok ()))
+    |}];
   return ()
 ;;
 
@@ -236,7 +238,8 @@ let%expect_test "V3 identification string addition" =
 
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
-    ((server_id_from_client (serv-id)) (client_id_from_server (clin-id))) |}];
+    ((server_id_from_client (serv-id)) (client_id_from_server (clin-id)))
+    |}];
   let%bind () =
     connection_test
       ~server_header:Test_helpers.Header.v3
@@ -260,7 +263,8 @@ let%expect_test "V3 identification string addition" =
     03                             3: 3 (int)
     ---   client -> server:   ---
     ---   server -> client:   ---
-    ((server_id_from_client ()) (client_id_from_server ())) |}];
+    ((server_id_from_client ()) (client_id_from_server ()))
+    |}];
   let%bind () =
     connection_test
       ~server_header:Test_helpers.Header.v1
@@ -283,7 +287,8 @@ let%expect_test "V3 identification string addition" =
     01                             1: 1 (int)
     ---   client -> server:   ---
     ---   server -> client:   ---
-    ((server_id_from_client ()) (client_id_from_server ())) |}];
+    ((server_id_from_client ()) (client_id_from_server ()))
+    |}];
   return ()
 ;;
 
@@ -294,11 +299,12 @@ let%expect_test "V2 local rpc" =
       print_header tap;
       [%expect
         {|
-      0800 0000 0000 0000    length= 8 (64-bit LE)
-      03                       body= List: 3 items
-      fd52 5043 00                   0: 4411474 (int)
-      01                             1: 1 (int)
-      02                             2: 2 (int) |}];
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        |}];
       let payload = Payload.create () in
       let rpc = Test_helpers.sort_rpc in
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
@@ -330,7 +336,8 @@ let%expect_test "V2 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
       print_messages tap;
       [%expect
@@ -357,7 +364,8 @@ let%expect_test "V2 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
       print_messages tap;
       [%expect
@@ -384,7 +392,8 @@ let%expect_test "V2 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       return ())
     ()
 ;;
@@ -396,10 +405,11 @@ let%expect_test "V1 local rpc" =
       print_header tap;
       [%expect
         {|
-      0700 0000 0000 0000    length= 7 (64-bit LE)
-      02                       body= List: 2 items
-      fd52 5043 00                   0: 4411474 (int)
-      01                             1: 1 (int) |}];
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        |}];
       let payload = Payload.create () in
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
       print_messages tap;
@@ -429,7 +439,8 @@ let%expect_test "V1 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
       print_messages tap;
       [%expect
@@ -455,7 +466,8 @@ let%expect_test "V1 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
       print_messages tap;
       [%expect
@@ -481,7 +493,8 @@ let%expect_test "V1 local rpc" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       return ())
     ()
 ;;
@@ -503,7 +516,8 @@ let%expect_test "[V1 -> V1] RPC connection" =
         0700 0000 0000 0000    length= 7 (64-bit LE)
         02                       body= List: 2 items
         fd52 5043 00                   0: 4411474 (int)
-        01                             1: 1 (int) |}];
+        01                             1: 1 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -536,7 +550,8 @@ let%expect_test "[V1 -> V1] RPC connection" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -555,7 +570,8 @@ let%expect_test "[V1 -> V1] RPC connection" =
         08                               id= 8 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -574,7 +590,8 @@ let%expect_test "[V1 -> V1] RPC connection" =
         09                               id= 9 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     return ())
 ;;
 
@@ -597,7 +614,8 @@ let%expect_test "[V2 -> V2] RPC connection" =
         03                       body= List: 3 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
-        02                             2: 2 (int) |}];
+        02                             2: 2 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -631,7 +649,8 @@ let%expect_test "[V2 -> V2] RPC connection" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -651,7 +670,8 @@ let%expect_test "[V2 -> V2] RPC connection" =
         0b                               id= 11 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -671,7 +691,8 @@ let%expect_test "[V2 -> V2] RPC connection" =
         0c                               id= 12 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     return ())
 ;;
 
@@ -695,7 +716,8 @@ let%expect_test "[V1 -> V2] RPC connection" =
         03                       body= List: 3 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
-        02                             2: 2 (int) |}];
+        02                             2: 2 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -728,7 +750,8 @@ let%expect_test "[V1 -> V2] RPC connection" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -747,7 +770,8 @@ let%expect_test "[V1 -> V2] RPC connection" =
         0e                               id= 14 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     let%bind _ = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -766,7 +790,8 @@ let%expect_test "[V1 -> V2] RPC connection" =
         0f                               id= 15 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     return ())
 ;;
 
@@ -788,7 +813,8 @@ let%expect_test "[V2 -> V1] RPC connection" =
         0700 0000 0000 0000    length= 7 (64-bit LE)
         02                       body= List: 2 items
         fd52 5043 00                   0: 4411474 (int)
-        01                             1: 1 (int) |}];
+        01                             1: 1 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -821,7 +847,8 @@ let%expect_test "[V2 -> V1] RPC connection" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -840,7 +867,8 @@ let%expect_test "[V2 -> V1] RPC connection" =
         11                               id= 17 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     let%bind () = dispatch ~client in
     print_messages_bidirectional ~s_to_c ~c_to_s;
     [%expect
@@ -859,7 +887,8 @@ let%expect_test "[V2 -> V1] RPC connection" =
         12                               id= 18 (int)
         00                             data= Ok
         01                                   length= 1 (int)
-        00                                     body= Array: 0 items |}];
+        00                                     body= Array: 0 items
+        |}];
     return ())
 ;;
 
@@ -870,11 +899,12 @@ let%expect_test "expert v2 dispatch" =
       print_header tap;
       [%expect
         {|
-      0800 0000 0000 0000    length= 8 (64-bit LE)
-      03                       body= List: 3 items
-      fd52 5043 00                   0: 4411474 (int)
-      01                             1: 1 (int)
-      02                             2: 2 (int) |}];
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        03                       body= List: 3 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        |}];
       let payload = Payload.create () in
       let%bind _response = dispatch_expert ~client:conn ~payload in
       print_messages tap;
@@ -905,7 +935,8 @@ let%expect_test "expert v2 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = dispatch_expert ~client:conn ~payload in
       print_messages tap;
       [%expect
@@ -932,7 +963,8 @@ let%expect_test "expert v2 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind _response = dispatch_expert ~client:conn ~payload in
       print_messages tap;
       [%expect
@@ -959,7 +991,8 @@ let%expect_test "expert v2 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       return ())
     ()
 ;;
@@ -971,10 +1004,11 @@ let%expect_test "expert v1 dispatch" =
       print_header tap;
       [%expect
         {|
-      0700 0000 0000 0000    length= 7 (64-bit LE)
-      02                       body= List: 2 items
-      fd52 5043 00                   0: 4411474 (int)
-      01                             1: 1 (int) |}];
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= List: 2 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        |}];
       let payload = Payload.create () in
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
       print_messages tap;
@@ -1004,7 +1038,8 @@ let%expect_test "expert v1 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
       print_messages tap;
       [%expect
@@ -1030,7 +1065,8 @@ let%expect_test "expert v1 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
       print_messages tap;
       [%expect
@@ -1056,7 +1092,58 @@ let%expect_test "expert v1 dispatch" =
         23                                           0: 35 (int)
         fea6 00                                      1: 166 (int)
         fe80 01                                      2: 384 (int)
-        fee5 03                                      3: 997 (int) |}];
+        fee5 03                                      3: 997 (int)
+        |}];
       return ())
     ()
+;;
+
+let%expect_test "regression test: closing a connection before [connection_state] returns \
+                 shouldn't leak the connection"
+  =
+  let empty_implementations =
+    Rpc.Implementations.create_exn ~implementations:[] ~on_unknown_rpc:`Raise
+  in
+  let%bind server =
+    Rpc.Connection.serve
+      ~implementations:empty_implementations
+      ~initial_connection_state:(fun _ (_ : Rpc.Connection.t) -> ())
+      ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
+      ()
+  in
+  let connection_weak_pointer = Weak_pointer.create () in
+  (* We try to ensure that [connection] doesn't leave the scope of this
+     function except for [connection_weak_pointer], so that we can ensure it gets GC'ed
+     with a Gc.major. *)
+  let connect_and_set_weak_pointer ~when_to_close_connection =
+    let connection_state connection =
+      let close () = Rpc.Connection.close connection |> don't_wait_for in
+      match when_to_close_connection with
+      | `Within_connection_state -> close ()
+      | `After_connection_state -> upon (return ()) close
+    in
+    let%bind connection =
+      Rpc.Connection.client
+        ~implementations:(T { connection_state; implementations = empty_implementations })
+        (Tcp.Where_to_connect.of_host_and_port
+           { host = "localhost"; port = Tcp.Server.listening_on server })
+      >>| Result.ok_exn
+    in
+    Weak_pointer.set connection_weak_pointer (Heap_block.create_exn connection);
+    Rpc.Connection.close_finished connection
+  in
+  let test ~when_to_close_connection =
+    let%bind () = connect_and_set_weak_pointer ~when_to_close_connection in
+    let%map () = Scheduler.yield_until_no_jobs_remain () in
+    Gc.full_major ();
+    print_endline
+      [%string
+        "Connection object still held live: %{Weak_pointer.is_some \
+         connection_weak_pointer#Bool}"]
+  in
+  let%bind () = test ~when_to_close_connection:`After_connection_state in
+  [%expect {| Connection object still held live: false |}];
+  let%bind () = test ~when_to_close_connection:`Within_connection_state in
+  [%expect {| Connection object still held live: false |}];
+  return ()
 ;;

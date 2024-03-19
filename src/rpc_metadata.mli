@@ -12,5 +12,8 @@ type t = string [@@deriving sexp_of]
 val get : unit -> t option
 
 module Private : sig
-  val with_metadata : t option -> f:(unit -> 'a) -> 'a
+  val set
+    :  t option
+    -> Async_kernel.Execution_context.t
+    -> Async_kernel.Execution_context.t
 end
