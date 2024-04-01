@@ -5,7 +5,8 @@ include module type of struct
   include Protocol.Rpc_error
 end
 
-val sexp_of_t : t -> get_connection_close_reason:(unit -> Sexp.t) -> Sexp.t
+val sexp_of_t_with_reason : t -> get_connection_close_reason:(unit -> Sexp.t) -> Sexp.t
+val sexp_of_t : t -> Sexp.t
 
 include Stringable.S with type t := t
 

@@ -7,7 +7,7 @@ exception Rpc of t * Info.t [@@deriving sexp]
 
 let raise t connection_description = raise (Rpc (t, connection_description))
 
-let sexp_of_t t ~get_connection_close_reason =
+let sexp_of_t_with_reason t ~get_connection_close_reason =
   match t with
   | Connection_closed ->
     [%sexp `Connection_closed (get_connection_close_reason () : Sexp.t)]
@@ -30,7 +30,7 @@ let to_error
   ~connection_close_started
   =
   let rpc_error =
-    sexp_of_t t ~get_connection_close_reason:(fun () ->
+    sexp_of_t_with_reason t ~get_connection_close_reason:(fun () ->
       let close_reason =
         (* Usually (always?) here we will have the deferred already full
            because Connection_closed error means the connection is already

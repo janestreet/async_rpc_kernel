@@ -641,8 +641,11 @@ let%expect_test "error dispatching a pipe rpc" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received (Response Response_finished_rpc_error_or_exn))) (rpc ())
-      (id 1) (payload_bytes 20)))
+     ((event
+       (Received
+        (Response
+         (Response_finished_rpc_error_or_exn (Uncaught_exn "injected error")))))
+      (rpc ()) (id 1) (payload_bytes 20)))
     |}];
   let%bind result = result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
@@ -715,8 +718,12 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received (Response Response_finished_rpc_error_or_exn))) (rpc ())
-      (id 1) (payload_bytes 31)))
+     ((event
+       (Received
+        (Response
+         (Response_finished_rpc_error_or_exn
+          (Bin_io_exn "binio error reading query")))))
+      (rpc ()) (id 1) (payload_bytes 31)))
     |}];
   let%bind result = result in
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
@@ -816,8 +823,12 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received (Response Response_finished_rpc_error_or_exn))) (rpc ())
-      (id 1) (payload_bytes 31)))
+     ((event
+       (Received
+        (Response
+         (Response_finished_rpc_error_or_exn
+          (Bin_io_exn "binio error reading query")))))
+      (rpc ()) (id 1) (payload_bytes 31)))
     (Close_started
      ("Rpc message handling loop stopped"
       (Bin_io_exn "binio error reading query")))

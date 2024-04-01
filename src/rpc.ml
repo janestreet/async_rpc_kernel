@@ -269,7 +269,7 @@ module Rpc = struct
         | Error e ->
           handle_error
             (Error.t_of_sexp
-               (Rpc_error.sexp_of_t
+               (Rpc_error.sexp_of_t_with_reason
                   ~get_connection_close_reason:(fun () ->
                     [%sexp
                       (Deferred.peek (Connection.close_reason ~on_close:`started conn)
@@ -784,7 +784,7 @@ module Streaming_rpc = struct
     : Connection.response_handler_action
     =
     let core_err =
-      Error.t_of_sexp (Rpc_error.sexp_of_t ~get_connection_close_reason err)
+      Error.t_of_sexp (Rpc_error.sexp_of_t_with_reason ~get_connection_close_reason err)
     in
     handle_closed handler (`Error core_err);
     Remove (Error { g = err })

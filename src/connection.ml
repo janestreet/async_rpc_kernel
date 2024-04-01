@@ -147,7 +147,8 @@ type t =
        -> Execution_context.t)
       Set_once.t
       (* this is used if [set_metadata_hooks] is called before we have filled
-           [implementations_instance]. *)
+     [implementations_instance]. *)
+  ; my_menu : Menu.t option
   }
 [@@deriving sexp_of]
 
@@ -197,6 +198,8 @@ let peer_menu' t =
     | Error `Unsupported | Error `No_handshake -> return (Ok None)
     | Error (`Closed (_ : Sexp.t lazy_t)) -> return (Error Rpc_error.Connection_closed))
 ;;
+
+let my_menu t = t.my_menu
 
 let writer t =
   if is_closed t || not (Protocol_writer.can_send t.writer)
@@ -450,9 +453,9 @@ let handle_response
        Wait wait
      | Expert_remove_and_wait wait ->
        response_event
-         (if Result.is_error response.data
-          then Response_finished_rpc_error_or_exn
-          else Response_finished_expert_uninterpreted)
+         (match response.data with
+          | Ok _ -> Response_finished_expert_uninterpreted
+          | Error err -> Response_finished_rpc_error_or_exn err)
          ~payload_bytes;
        Hashtbl.remove t.open_queries response.id;
        Wait wait
@@ -464,7 +467,7 @@ let handle_response
           then (
             let kind : Tracing_event.Received_response_kind.t =
               match error_mode, result with
-              | _, Error _ -> Response_finished_rpc_error_or_exn
+              | _, Error err -> Response_finished_rpc_error_or_exn err
               | Always_ok, Ok _ -> Response_finished_ok
               | Using_result, Ok (Ok _) -> Response_finished_ok
               | Using_result, Ok (Error _) -> Response_finished_user_defined_error
@@ -476,7 +479,8 @@ let handle_response
                 (match is_error x with
                  | true -> Response_finished_user_defined_error
                  | false -> Response_finished_ok
-                 | exception (_ : exn) -> Response_finished_rpc_error_or_exn)
+                 | exception (err : exn) ->
+                   Response_finished_rpc_error_or_exn (Uncaught_exn [%sexp (err : exn)]))
               | ( Streaming_initial_message
                 , Ok { initial = Error _; unused_query_id = (_ : P.Unused_query_id.t) } )
                 -> Response_finished_user_defined_error
@@ -490,19 +494,19 @@ let handle_response
         | Ok Pipe_eof ->
           response_event
             (if Result.is_error response.data
-             then Response_finished_rpc_error_or_exn
+             then Response_finished_rpc_error_or_exn Connection_closed
              else Response_finished_ok)
             ~payload_bytes;
           Continue
         | Ok Expert_indeterminate ->
           response_event
-            (if Result.is_error response.data
-             then Response_finished_rpc_error_or_exn
-             else Response_finished_expert_uninterpreted)
+            (match response.data with
+             | Ok _ -> Response_finished_expert_uninterpreted
+             | Error err -> Response_finished_rpc_error_or_exn err)
             ~payload_bytes;
           Continue
         | Error { g = e } ->
-          response_event Response_finished_rpc_error_or_exn ~payload_bytes;
+          response_event (Response_finished_rpc_error_or_exn e) ~payload_bytes;
           (match e with
            | Unimplemented_rpc _ -> Continue
            | Bin_io_exn _
@@ -650,7 +654,7 @@ let on_message t ~close_connection_monitor =
           Info.create
             msg
             e
-            (Rpc_error.sexp_of_t ~get_connection_close_reason:(fun () ->
+            (Rpc_error.sexp_of_t_with_reason ~get_connection_close_reason:(fun () ->
                [%sexp
                  "Connection.on_message resulted in Connection_closed error. This is \
                   weird."]))
@@ -877,37 +881,6 @@ let create
     | None -> Implementations.null ()
     | Some s -> s
   in
-  let t =
-    { description
-    ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
-    ; heartbeat_callbacks = [||]
-    ; last_seen_alive = Synchronous_time_source.now time_source
-    ; max_metadata_size
-    ; reader
-    ; writer = Protocol_writer.create_before_negotiation writer
-    ; open_queries = Hashtbl.Poly.create ~size:10 ()
-    ; close_started = Ivar.create ()
-    ; close_finished = Ivar.create ()
-    ; implementations_instance = Set_once.create ()
-    ; time_source
-    ; heartbeat_event = Set_once.create ()
-    ; negotiated_protocol_version = Set_once.create ()
-    ; events =
-        Bus.create_exn
-          [%here]
-          Arity1_local
-          ~on_subscription_after_first_write:Allow
-          ~on_callback_raise:Error.raise
-    ; metadata_for_dispatch = Moption.create ()
-    ; peer_metadata = Set_once.create ()
-    ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
-    }
-  in
-  let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
-  upon (Writer.stopped writer) (fun () ->
-    don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
-  upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
-  let header = get_handshake_header () in
   let menu, implementations =
     (* There are three cases:
 
@@ -957,6 +930,38 @@ let create
               { callback = None; close_connection_if_no_return_value = false }
           } )
   in
+  let t =
+    { description
+    ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
+    ; heartbeat_callbacks = [||]
+    ; last_seen_alive = Synchronous_time_source.now time_source
+    ; max_metadata_size
+    ; reader
+    ; writer = Protocol_writer.create_before_negotiation writer
+    ; open_queries = Hashtbl.Poly.create ~size:10 ()
+    ; close_started = Ivar.create ()
+    ; close_finished = Ivar.create ()
+    ; implementations_instance = Set_once.create ()
+    ; time_source
+    ; heartbeat_event = Set_once.create ()
+    ; negotiated_protocol_version = Set_once.create ()
+    ; events =
+        Bus.create_exn
+          [%here]
+          Arity1_local
+          ~on_subscription_after_first_write:Allow
+          ~on_callback_raise:Error.raise
+    ; metadata_for_dispatch = Moption.create ()
+    ; peer_metadata = Set_once.create ()
+    ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
+    ; my_menu = Option.map menu ~f:Menu.of_v2_response
+    }
+  in
+  let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
+  upon (Writer.stopped writer) (fun () ->
+    don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
+  upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
+  let header = get_handshake_header () in
   let negotiated_protocol_version =
     match protocol_version_headers with
     | None -> do_handshake t writer ~handshake_timeout ~header ~menu ?identification ()

@@ -156,6 +156,8 @@ module type S = sig
   (** Like {!peer_menu} but returns an rpc result  *)
   val peer_menu' : t -> Menu.t option Rpc_result.t Deferred.t
 
+  val my_menu : t -> Menu.t option
+
   (** Peer identification will become determined before any other messages are received.
       If the peer is using an older version, the peer id is immediately determined to be
       [None]. If the connection is closed before the menu is received, [None] is returned.

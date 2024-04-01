@@ -76,12 +76,12 @@ module Received_response_kind : sig
     | One_way_so_no_response
     | Partial_response
     | Response_finished_ok (** The response was interpreted as successful  *)
-    | Response_finished_rpc_error_or_exn
+    | Response_finished_rpc_error_or_exn of Rpc_error.t
         (** The response was an rpc-level error, e.g. the implementation raised or its
         response was too large to send. *)
     | Response_finished_user_defined_error
         (** The response was successfully deserialized and determined to be some
-        applicateion-specific error *)
+        application-specific error *)
     | Response_finished_expert_uninterpreted
         (** For some expert dispatches, we can’t always tell if a response was successful so
         use this variant. *)
