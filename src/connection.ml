@@ -132,7 +132,7 @@ type t =
   ; negotiated_protocol_version : int Set_once.t
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
-  *)
+      *)
   ; events : (Tracing_event.t -> unit) Bus.Read_write.t
   ; metadata_for_dispatch :
       (Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
