@@ -1,3 +1,36 @@
+## Release v0.17.0
+- Add `Tracing_event` and `Async_rpc_kernel.Async_rpc_kernel_private.Connection.events`,
+  which is intended to be used by observability libraries to generate metrics and traces
+  from RPC activity.
+  - Add an argument to rpc creator functions to specify how `Async_rpc` should determine
+    whether the result of the RPC was a success or error. This information is exposed in
+    `Tracing_event.t`s generated from RPC responses.
+- Add a new version of the `Async_rpc` wire protocol:
+  - Clients and servers now exchange `Versioned_rpc` menus up-front instead of needing
+    to request it via a special RPC, and bin shape digests are included in the menu to
+    allow for clients and servers to check compatibility at runtime.
+  - Clients and servers can exchange a user-provided identification string
+  - `Authorization_failure` was added as an additional structured RPC error type, as
+    well as `Unknown` to cover future cases
+- Added a number of `implement` functions that allow returning auth failure results
+- Add the ability to enable dumping RPC message buffers on deserialization errors. This
+  functionality is intended to help debugging cases where invalid messages are being
+  received on an RPC connection and where it's unclear where the corruption is
+  happening.
+- Change `Rpc.dispatch` and similar functions to not raise if the query is larger than the
+  message size limit.
+- Add `Pipe_rpc.dispatch'` and `State_rpc.dispatch'`, to get structured errors from
+  dispatch failures.
+- Add `Pipe_rpc.Expert.dispatch_iter` to allow custom deserialization logic.
+- Add `send_last_value_on_add` to `Direct_stream_writer.Group.t`'s, where the most
+  recently sent value will be cached and provided to new joiners to the group.
+- Add `Direct_stream_writer.Expert.schedule_write`
+- Fix a bug where the `Rpc.Connection.t` would be leaked if it was closed during the
+  execution of `connection_state`.
+- Changed `Client_implementations.t` to use a GADT to erase the type parameter.
+- Allow passing `protocol_version_headers` to `Connection.t` to allow for embedding the
+  `Async_rpc` version handshake in an outer wrapping protocol.
+
 ## Release v0.16.0
 
 - Incremented the protocol version of `Async_rpc`
