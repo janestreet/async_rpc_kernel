@@ -55,6 +55,7 @@ let rpc () =
     Async_rpc_kernel.Rpc.Implementations.create_exn
       ~implementations:[ impl ]
       ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
   in
   response1, response2, impl
 ;;
@@ -117,6 +118,7 @@ let direct_rpc_test () =
     Async_rpc_kernel.Rpc.Implementations.create_exn
       ~implementations:[ impl ]
       ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
   in
   let%map t = Mock_peer.create_and_connect' ~implementations default_config in
   t, Ivar.read writer_iv, response
@@ -130,9 +132,8 @@ let%expect_test "Single pipe-rpc implementation returning error" =
     (Tracing_event
      ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
       (payload_bytes 43)))
+    (Implementation_called "example query (id = 55)")
     |}];
-  let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  [%expect {| (Implementation_called "example query (id = 55)") |}];
   Ivar.fill_exn rpc_response (Ok (Error "example error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
@@ -157,9 +158,8 @@ let%expect_test "Single pipe-rpc implementation raising" =
     (Tracing_event
      ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
       (payload_bytes 43)))
+    (Implementation_called "example query (id = 55)")
     |}];
-  let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  [%expect {| (Implementation_called "example query (id = 55)") |}];
   Backtrace.elide := true;
   Ivar.fill_exn rpc_response (Error (Failure "injected error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -192,9 +192,8 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
     (Tracing_event
      ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
       (payload_bytes 43)))
+    (Implementation_called "example query (id = 55)")
     |}];
-  let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  [%expect {| (Implementation_called "example query (id = 55)") |}];
   let r, w = Pipe.create () in
   Ivar.fill_exn rpc_response (Ok (Ok r));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -424,7 +423,8 @@ let%expect_test "direct stream writer" =
     let buf = Bin_prot.Writer.to_bigstring [%bin_writer: string] "schedule_write" in
     match Expert.schedule_write writer ~buf ~pos:0 ~len:(Bigstring.length buf) with
     | `Closed -> print_endline "schedule_write -> closed"
-    | `Flushed { g = d } -> upon d (fun () -> printf "schedule_write flushed: %s\n" key)
+    | `Flushed { global = d } ->
+      upon d (fun () -> printf "schedule_write flushed: %s\n" key)
   in
   let expect_three_writes ?later () =
     expect_pipe_message ?later t;
@@ -432,7 +432,8 @@ let%expect_test "direct stream writer" =
     expect_pipe_message ?later t
   in
   do_three_writes "batch_before_response";
-  [%expect {|
+  [%expect
+    {|
     (Wait_for_flushed 0)
     write_without_pushback -> ok
     |}];
@@ -550,7 +551,7 @@ let%expect_test "direct stream writer errors after a scheduled write" =
     | `Closed ->
       print_endline "closed";
       None
-    | `Flushed { g = d } -> Some d
+    | `Flushed { global = d } -> Some d
   in
   Ivar.fill_exn response (Ok (Error "error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -595,7 +596,7 @@ let%expect_test "direct stream writer connection closed after a scheduled write,
     | `Closed ->
       print_endline "closed";
       None
-    | `Flushed { g = d } -> Some d
+    | `Flushed { global = d } -> Some d
   in
   for _ = 1 to 10 do
     Mock_peer.enqueue_send_result t Closed
@@ -673,7 +674,9 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
        { id = Protocol.Query_id.of_int_exn 1
        ; data =
            Ok
-             { unused_query_id = Protocol.Unused_query_id.t; initial = Error "rpc error" }
+             { unused_query_id = Protocol.Unused_query_id.singleton
+             ; initial = Error "rpc error"
+             }
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
@@ -763,6 +766,12 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
+    (Send
+     (message
+      ("00000000  05 07 00 02 01 21 52 70  63 20 6d 65 73 73 61 67  |.....!Rpc messag|"
+       "00000010  65 20 68 61 6e 64 6c 69  6e 67 20 6c 6f 6f 70 20  |e handling loop |"
+       "00000020  73 74 6f 70 70 65 64 03  01 02 00 10 55 6e 6b 6e  |stopped.....Unkn|"
+       "00000030  6f 77 6e 5f 71 75 65 72  79 5f 69 64 00 01 31     |own_query_id..1|")))
     (Close_started ("Rpc message handling loop stopped" (Unknown_query_id 1)))
     Close_writer
     Close_reader
@@ -789,7 +798,8 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
     (Response
        { id = Protocol.Query_id.of_int_exn 1
-       ; data = Ok { unused_query_id = Protocol.Unused_query_id.t; initial = Ok () }
+       ; data =
+           Ok { unused_query_id = Protocol.Unused_query_id.singleton; initial = Ok () }
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
@@ -829,12 +839,6 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
          (Response_finished_rpc_error_or_exn
           (Bin_io_exn "binio error reading query")))))
       (rpc ()) (id 1) (payload_bytes 31)))
-    (Close_started
-     ("Rpc message handling loop stopped"
-      (Bin_io_exn "binio error reading query")))
-    Close_writer
-    Close_reader
-    Close_finished
     |}];
   return ()
 ;;
@@ -848,9 +852,8 @@ let%expect_test "Client sends abort after server closes pipe" =
     (Tracing_event
      ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1234)
       (payload_bytes 47)))
+    (Implementation_called "example query (id = 1234)")
     |}];
-  let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  [%expect {| (Implementation_called "example query (id = 1234)") |}];
   Ivar.fill_exn rpc_response (Ok (Ok (Pipe.of_list [])));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect

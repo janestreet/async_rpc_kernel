@@ -8,14 +8,6 @@ open Protocol
 
 module Direct_stream_writer_id = Unique_id.Int63 ()
 
-module On_exception = struct
-  type t =
-    { callback : (exn -> unit) option [@sexp.omit_nil]
-    ; close_connection_if_no_return_value : bool
-    }
-  [@@deriving sexp_of]
-end
-
 module rec Implementation : sig
   module Expert : sig
     module Responder : sig
@@ -48,7 +40,7 @@ module rec Implementation : sig
           ('connection_state
            -> 'query
            -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t
-              Deferred.t)
+                Deferred.t)
       | Direct of
           ('connection_state
            -> 'query
@@ -62,12 +54,14 @@ module rec Implementation : sig
           (* 'init can be an error or an initial state *)
       ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
       ; error_mode : 'init error_mode
+      ; here : Source_code_position.t
       }
 
     type 'connection_state t =
       | One_way :
           'msg Bin_prot.Type_class.reader
           * ('connection_state -> 'msg -> unit Or_not_authorized.t Deferred.t)
+          * Source_code_position.t
           -> 'connection_state t
       | One_way_expert :
           ('connection_state
@@ -82,6 +76,7 @@ module rec Implementation : sig
           * ('connection_state -> 'query -> 'result)
           * 'response error_mode
           * ('response, 'result) result_mode
+          * Source_code_position.t
           -> 'connection_state t
       | Rpc_expert :
           ('connection_state
@@ -110,7 +105,7 @@ module rec Implementation : sig
     ; version : int
     ; f : 'connection_state F.t
     ; shapes : (Rpc_shapes.t * Rpc_shapes.Just_digests.t) Lazy.t
-    ; on_exception : On_exception.t
+    ; on_exception : On_exception.t option
     }
 end =
   Implementation
@@ -140,6 +135,7 @@ and Implementations : sig
   type 'connection_state t =
     { implementations : 'connection_state Implementation.t Description.Table.t
     ; on_unknown_rpc : 'connection_state on_unknown_rpc
+    ; on_exception : On_exception.t
     }
 
   type 'connection_state implementations = 'connection_state t
@@ -158,11 +154,9 @@ and Implementations : sig
       ; connection_state : 'a
       ; connection_description : Info.t
       ; connection_close_started : Info.t Deferred.t
-      ; mutable
-          last_dispatched_implementation :
+      ; mutable last_dispatched_implementation :
           (Description.t * 'a Implementation.t) option
-      ; mutable
-          on_receive :
+      ; mutable on_receive :
           Description.t
           -> query_id:Query_id.t
           -> string option
@@ -213,26 +207,26 @@ and Direct_stream_writer : sig
     }
 
   module Group : sig
-    type 'a direct_stream_writer = 'a t
+      type 'a direct_stream_writer = 'a t
 
-    type 'a t =
-      { (* [components] is only tracked separately from [components_by_id] so we can iterate
+      type 'a t =
+        { (* [components] is only tracked separately from [components_by_id] so we can iterate
            over its elements more quickly than we could iterate over the values of
            [components_by_id]. *)
-        mutable components : 'a direct_stream_writer Bag.t
-      ; components_by_id : 'a component Id.Table.t
-      ; buffer : Bigstring.t ref
-      ; mutable last_value_len : int
-      ; last_value_not_written : 'a Moption.t
-      ; send_last_value_on_add : bool
-      }
+          mutable components : 'a direct_stream_writer Bag.t
+        ; components_by_id : 'a component Id.Table.t
+        ; buffer : Bigstring.t ref
+        ; mutable last_value_len : int
+        ; last_value_not_written : 'a Moption.t
+        ; send_last_value_on_add : bool
+        }
 
-    and 'a component =
-      { writer_element_in_group : 'a direct_stream_writer Bag.Elt.t
-      ; group_element_in_writer : 'a group_entry Bag.Elt.t
-      }
-  end
-  with type 'a direct_stream_writer := 'a t
+      and 'a component =
+        { writer_element_in_group : 'a direct_stream_writer Bag.Elt.t
+        ; group_element_in_writer : 'a group_entry Bag.Elt.t
+        }
+    end
+    with type 'a direct_stream_writer := 'a t
 end =
   Direct_stream_writer
 

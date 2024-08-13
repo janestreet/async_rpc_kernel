@@ -35,6 +35,7 @@ let implementations =
   Rpc.Implementations.create_exn
     ~implementations:[ implementation ]
     ~on_unknown_rpc:`Raise
+    ~on_exception:Log_on_background_exn
 ;;
 
 let with_rpc_server_connection ?(implementations = implementations) f ~on_client_connected
@@ -156,13 +157,13 @@ let%expect_test "expert unknown rpc handler" =
       ~on_unknown_rpc:
         (`Expert
           (fun ()
-               ~rpc_tag
-               ~version
-               ~metadata
-               responder
-               (_ : Bigstring.t)
-               ~pos:(_ : int)
-               ~len ->
+            ~rpc_tag
+            ~version
+            ~metadata
+            responder
+            (_ : Bigstring.t)
+            ~pos:(_ : int)
+            ~len ->
             print_s
               [%message
                 "Unknown rpc handler called"
@@ -171,11 +172,12 @@ let%expect_test "expert unknown rpc handler" =
                   (metadata : string option)
                   ~data_len:(len : int)
                   (Scheduler.find_local custom_metadata_local
-                    : (string * int * string option) option)];
+                   : (string * int * string option) option)];
             Rpc.Rpc.Expert.Responder.write_error
               responder
               (Error.create_s [%message "example error"]);
             return ()))
+      ~on_exception:Log_on_background_exn
   in
   let%bind response =
     with_rpc_server_connection

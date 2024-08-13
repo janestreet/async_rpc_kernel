@@ -41,25 +41,10 @@ module Description : sig
   end
 end
 
-module On_exception : sig
-  (** When your implementation raises an exception, that exception might happen before a
-      value is returned or after a value is returned. The latter kind of exception is
-      what the [~rest] flag to [Monitor.try_with] is dealing with.
-
-      In both these cases, [callback] will be called with the exception.
-
-      In the case where the exception raises before a value is returned,
-      [close_connection_if_no_return_value] determines whether the connection is closed.
-      Exceptions raised after a value is returned will never close a connection. *)
-
-  type t =
-    { callback : (exn -> unit) option
-    ; close_connection_if_no_return_value : bool
-    }
-
-  val close_connection : t
-  val continue : t
-end
+(** When your implementation raises an exception, that exception might happen before a
+    value is returned or after a value is returned. The latter kind of exception is
+    what the [~rest] flag to [Monitor.try_with] is dealing with. *)
+module On_exception = On_exception
 
 (** A ['connection_state Implementation.t] is something that knows how to respond to one
     query, given a ['connection_state].  That is, you can create a ['connection_state
@@ -88,12 +73,7 @@ module Implementation : sig
       implementations less efficient if they were previously relying on functions like
       [Rpc.implement'] to avoid extra async work to send responses. This can also allow
       blocking implementations to run in a different order from the order that queries
-      arrive on a connection.
-
-      Additionally, async exceptions raised by [One_way] RPCs do not currently respect
-      [on_exception] and will unconditionally close the connection. [lift_deferred] can
-      turn synchronous exceptions in [One_way] implementations into asynchronous ones,
-      triggering this behaviour. *)
+      arrive on a connection. *)
   val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 
   val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
@@ -103,7 +83,7 @@ module Implementation : sig
     -> f:('b -> 'a Or_not_authorized.t Deferred.t)
     -> 'b t
 
-  val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
+  val update_on_exception : 'a t -> f:(On_exception.t option -> On_exception.t) -> 'a t
 end
 
 (** A ['connection_state Implementations.t] is something that knows how to respond to
@@ -130,16 +110,17 @@ module Implementations : sig
       (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
     ]
 
-  (** [create ~implementations ~on_unknown_rpc] creates a server capable of responding to
-      the rpcs implemented in the implementation list.  Be careful about setting
-      [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect to this
-      one causing it to crash. *)
+  (** [create ~implementations ~on_unknown_rpc ~on_exception] creates a server capable of
+      responding to the rpcs implemented in the implementation list. Be careful about
+      setting [on_unknown_rpc] to [`Raise] because other programs may mistakenly connect
+      to this one causing it to crash. *)
   val create
     :  implementations:'connection_state Implementation.t list
     -> on_unknown_rpc:'connection_state on_unknown_rpc
+    -> on_exception:On_exception.t
     -> ( 'connection_state t
-       , [ `Duplicate_implementations of Description.t list ] )
-       Result.t
+         , [ `Duplicate_implementations of Description.t list ] )
+         Result.t
 
   val create_exn
     :  implementations:'connection_state Implementation.t list
@@ -153,6 +134,7 @@ module Implementations : sig
            -> version:int
            -> [ `Close_connection | `Continue ]
          ]
+    -> on_exception:On_exception.t
     -> 'connection_state t
 
   val add
@@ -202,6 +184,7 @@ module Implementations : sig
                    particular, if you don't intend to read from the [Bigstring.t] after the
                    function returns, you can return [Deferred.unit]. *)
            ]
+      -> on_exception:On_exception.t
       -> 'connection_state t
   end
 end
@@ -236,13 +219,15 @@ module Rpc : sig
       exception. Instead, it is sent as an error to the caller of the RPC, i.e. the
       process that called [dispatch] or one of its alternatives.*)
   val implement
-    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Deferred.t)
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?on_exception:On_exception.t
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Or_not_authorized.t Deferred.t)
     -> 'connection_state Implementation.t
@@ -257,13 +242,15 @@ module Rpc : sig
       [implement] also tries to do 1 when possible, but it is guaranteed to happen with
       [implement']. *)
   val implement'
-    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response)
     -> 'connection_state Implementation.t
 
   val implement_with_auth'
-    :  ?on_exception:On_exception.t
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Or_not_authorized.t)
     -> 'connection_state Implementation.t
@@ -386,7 +373,7 @@ module Rpc : sig
       | Delayed_response of unit Deferred.t
 
     val implement
-      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      :  ?on_exception:On_exception.t
       -> (_, _) t
       -> ('connection_state
           -> Responder.t
@@ -397,7 +384,7 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement'
-      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      :  ?on_exception:On_exception.t
       -> (_, _) t
       -> ('connection_state
           -> Responder.t
@@ -408,7 +395,7 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version
-      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      :  ?on_exception:On_exception.t
       -> rpc_tag:string
       -> version:int
       -> ('connection_state
@@ -420,7 +407,7 @@ module Rpc : sig
       -> 'connection_state Implementation.t
 
     val implement_for_tag_and_version'
-      :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+      :  ?on_exception:On_exception.t
       -> rpc_tag:string
       -> version:int
       -> ('connection_state
@@ -438,7 +425,7 @@ module Pipe_close_reason : sig
     | Closed_locally (** You closed the pipe. *)
     | Closed_remotely (** The RPC implementer closed the pipe. *)
     | Error of Error.t
-        (** An error occurred, e.g. a message could not be deserialized.  If the connection
+    (** An error occurred, e.g. a message could not be deserialized.  If the connection
         closes before either side explicitly closes the pipe, it will also go into this
         case. *)
   [@@deriving bin_io, compare, sexp]
@@ -543,7 +530,8 @@ module Pipe_rpc : sig
       can cause elements to buffer in the pipe if the server doesn't respect pushback on
       the pipe. *)
   val implement
-    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -551,7 +539,8 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?on_exception:On_exception.t (* default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -599,52 +588,52 @@ module Pipe_rpc : sig
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> [ `Flushed of unit Deferred.t Gel.t | `Closed ]
+        -> [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
     end
 
     (** Group of direct writers. Groups are optimized for sending the same message to
         multiple clients at once. *)
     module Group : sig
-      type 'a direct_stream_writer
-      type 'a t
+        type 'a direct_stream_writer
+        type 'a t
 
-      (** A group internally holds a buffer to serialize messages only once. This buffer
+        (** A group internally holds a buffer to serialize messages only once. This buffer
           will grow automatically to accomodate bigger messages.
 
           It is safe to share the same buffer between multiple groups. *)
-      module Buffer : sig
-        type t
+        module Buffer : sig
+          type t
 
-        val create : ?initial_size:int (* default 4096 *) -> unit -> t
-      end
+          val create : ?initial_size:int (* default 4096 *) -> unit -> t
+        end
 
-      val create
-        :  ?buffer:Buffer.t
-        -> ?send_last_value_on_add:bool
-             (** If [true], the group will automatically send a copy of the last value written
+        val create
+          :  ?buffer:Buffer.t
+          -> ?send_last_value_on_add:bool
+               (** If [true], the group will automatically send a copy of the last value written
             to each new writer when it's added to the group. Default: false. *)
-        -> unit
-        -> _ t
+          -> unit
+          -> _ t
 
-      (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
+        (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
           flushed or closed. *)
-      val flushed_or_closed : _ t -> unit Deferred.t
+        val flushed_or_closed : _ t -> unit Deferred.t
 
-      val flushed : _ t -> unit Deferred.t
+        val flushed : _ t -> unit Deferred.t
         [@@deprecated "[since 2019-11] renamed as [flushed_or_closed]"]
 
-      (** Add a direct stream writer to the group. Raises if the writer is closed or
+        (** Add a direct stream writer to the group. Raises if the writer is closed or
           already part of the group, or if its bin-prot writer is different than an
           existing group member's. When the writer is closed, it is automatically
           removed from the group. *)
-      val add_exn : 'a t -> 'a direct_stream_writer -> unit
+        val add_exn : 'a t -> 'a direct_stream_writer -> unit
 
-      (** Remove a writer from a group. Note that writers are automatically removed from
+        (** Remove a writer from a group. Note that writers are automatically removed from
           all groups when they are closed, so you only need to call this if you want to
           remove a writer without closing it. *)
-      val remove : 'a t -> 'a direct_stream_writer -> unit
+        val remove : 'a t -> 'a direct_stream_writer -> unit
 
-      (** Write a message on all direct writers in the group. Contrary to
+        (** Write a message on all direct writers in the group. Contrary to
           [Direct_stream_writer.write], this cannot return [`Closed] as elements of the
           group are removed immediately when they are closed.
 
@@ -655,21 +644,27 @@ module Pipe_rpc : sig
           the time of writing, it will be serialized and saved to the buffer, but if there
           are no writers it will hold onto the ['a]. This means that it is unsafe to use
           if the ['a] is mutable or if it has a finalizer that is expected to be run *)
-      val write : 'a t -> 'a -> unit Deferred.t
+        val write : 'a t -> 'a -> unit Deferred.t
 
-      val write_without_pushback : 'a t -> 'a -> unit
-      val to_list : 'a t -> 'a direct_stream_writer list
-      val length : _ t -> int
+        val write_without_pushback : 'a t -> 'a -> unit
+        val to_list : 'a t -> 'a direct_stream_writer list
+        val length : _ t -> int
 
-      (** When these functions are used with a group created with
+        (** When these functions are used with a group created with
           [~send_last_value_on_add:true], the group will save a copy of the relevant part
           of the buffer in order to send it to writers added in the future. *)
-      module Expert : sig
-        val write : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit Deferred.t
-        val write_without_pushback : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit
+        module Expert : sig
+          val write : 'a t -> buf:Bigstring.t -> pos:int -> len:int -> unit Deferred.t
+
+          val write_without_pushback
+            :  'a t
+            -> buf:Bigstring.t
+            -> pos:int
+            -> len:int
+            -> unit
+        end
       end
-    end
-    with type 'a direct_stream_writer := 'a t
+      with type 'a direct_stream_writer := 'a t
   end
 
   (** Similar to [implement], but you are given the writer instead of providing a writer
@@ -683,7 +678,8 @@ module Pipe_rpc : sig
       function returns. Elements written before the function returns will be queued up to
       be written after the function returns. *)
   val implement_direct
-    :  ?on_exception:On_exception.t (** default: [On_exception.continue] **)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -692,7 +688,8 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_direct_with_auth
-    :  ?on_exception:On_exception.t
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -735,6 +732,22 @@ module Pipe_rpc : sig
     -> Connection.t
     -> 'query
     -> ('response Pipe.Reader.t * Metadata.t) Deferred.t
+
+  (** [dispatch] but requires handling of the [Pipe_close_reason] when there is an
+      [Error]. [Closed_locally] and [Closed_remotely] are not considered errors. *)
+  val dispatch_with_close_reason
+    :  ('query, 'response, 'error) t
+    -> Connection.t
+    -> 'query
+    -> (('response, Error.t) Pipe_with_writer_error.t, 'error) Result.t Or_error.t
+         Deferred.t
+
+  val dispatch_with_close_reason'
+    :  ('query, 'response, 'error) t
+    -> Connection.t
+    -> 'query
+    -> (('response, Error.t) Pipe_with_writer_error.t, 'error) Result.t Rpc_result.t
+         Deferred.t
 
   module Pipe_message = Pipe_message
   module Pipe_response = Pipe_response
@@ -846,7 +859,8 @@ module State_rpc : sig
   val shapes : (_, _, _, _) t -> Rpc_shapes.t
 
   val implement
-    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -854,16 +868,18 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
         -> ('state * 'update Pipe.Reader.t, 'error) Result.t Or_not_authorized.t
-           Deferred.t)
+             Deferred.t)
     -> 'connection_state Implementation.t
 
   val implement_direct
-    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -872,7 +888,8 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_direct_with_auth
-    :  ?on_exception:On_exception.t (** default: [On_exception.continue] *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -885,7 +902,7 @@ module State_rpc : sig
     -> Connection.t
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Or_error.t
-       Deferred.t
+         Deferred.t
 
   module Pipe_message = Pipe_message
   module Pipe_response = Pipe_response
@@ -910,7 +927,7 @@ module State_rpc : sig
     -> Connection.t
     -> 'query
     -> ('state * 'update Pipe.Reader.t * Metadata.t, 'error) Result.t Rpc_result.t
-       Deferred.t
+         Deferred.t
 
   val abort : (_, _, _, _) t -> Connection.t -> Id.t -> unit
   val close_reason : Metadata.t -> Pipe_close_reason.t Deferred.t
@@ -927,8 +944,7 @@ end
 (** An RPC that has no response.  Error handling is trickier here than it is for RPCs with
     responses, as there is no reasonable place to put an error if something goes wrong.
     Because of this, in the event of an error such as dispatching to an unimplemented RPC,
-    the connection will be shut down.  Similarly, if the implementation raises an
-    exception, the connection will be shut down. *)
+    the connection will be shut down. *)
 module One_way : sig
   type 'msg t
 
@@ -941,7 +957,8 @@ module One_way : sig
   val shapes : _ t -> Rpc_shapes.t
 
   val implement
-    :  ?on_exception:On_exception.t (* default On_exception.close_connection *)
+    :  ?here:Stdlib.Lexing.position
+    -> ?on_exception:On_exception.t
     -> 'msg t
     -> ('connection_state -> 'msg -> unit)
     -> 'connection_state Implementation.t
@@ -961,7 +978,7 @@ module One_way : sig
 
   module Expert : sig
     val implement
-      :  ?on_exception:On_exception.t (* default On_exception.close_connection *)
+      :  ?on_exception:On_exception.t
       -> _ t
       -> ('connection_state -> Bigstring.t -> pos:int -> len:int -> unit)
       -> 'connection_state Implementation.t

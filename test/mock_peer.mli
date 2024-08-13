@@ -55,7 +55,10 @@ val create_and_connect'
 (** Create a mock peer ready to connect *)
 val create : ?time_source:Synchronous_time_source.t -> Config.t -> t
 
-type handshake := [ `v3 ]
+type handshake :=
+  [ `v3
+  | `v4
+  ]
 
 (** Attempt to connect to the mock peer *)
 val connect

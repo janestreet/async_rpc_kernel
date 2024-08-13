@@ -18,7 +18,7 @@ let%expect_test "connect and close" =
   let%bind conn = Mock_peer.connect t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3))
+    (Send (4411474 1 2 3 4))
     (Send (Metadata ((identification ()) (menu (())))))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in

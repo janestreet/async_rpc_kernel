@@ -113,7 +113,14 @@ module Writer = struct
     not (M.is_closed t || Deferred.is_determined stopped)
   ;;
 
-  let transfer t ?(max_num_values_per_read = 1_000) pipe f =
+  let transfer_default_max_num_values_per_read = 1_000
+
+  let transfer
+    t
+    ?(max_num_values_per_read = transfer_default_max_num_values_per_read)
+    pipe
+    f
+    =
     let consumer =
       Pipe.add_consumer pipe ~downstream_flushed:(fun () ->
         let%map () = flushed t in

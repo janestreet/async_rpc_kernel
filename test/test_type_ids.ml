@@ -54,7 +54,8 @@ let%expect_test _ =
   (* rpc *)
   test_type_id_similarity rpc ~f:Rpc.query_type_id;
   test_type_id_similarity rpc ~f:Rpc.response_type_id;
-  [%expect {|
+  [%expect
+    {|
     my-rpc:query
     my-rpc:response
     |}];
@@ -74,7 +75,8 @@ let%expect_test _ =
   test_type_id_similarity pipe_rpc ~f:Pipe_rpc.query_type_id;
   test_type_id_similarity pipe_rpc ~f:Pipe_rpc.error_type_id;
   test_type_id_similarity pipe_rpc ~f:Pipe_rpc.response_type_id;
-  [%expect {|
+  [%expect
+    {|
     my-pipe-rpc:query
     my-pipe-rpc:error
     my-pipe-rpc:response

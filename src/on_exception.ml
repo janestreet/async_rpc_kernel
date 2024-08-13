@@ -1,21 +1,40 @@
-open Core
-open Async_kernel
+open! Core
+open! Async_kernel
 
-type t = Implementation_types.On_exception.t =
-  { callback : (exn -> unit) option [@sexp.omit_nil]
-  ; close_connection_if_no_return_value : bool
-  }
+module Exception_type = struct
+  type t =
+    | Raised_before_implementation_returned
+    | Raised_after_implementation_returned
+  (* [Monitor.try_with ~rest] *) [@@deriving compare, sexp_of]
+end
+
+type t =
+  | Call of (Exception_type.t -> exn -> Description.t -> unit)
+  | Log_on_background_exn
+  | Close_connection
+  | Raise_to_monitor of Monitor.t
 [@@deriving sexp_of]
 
-let close_connection = { callback = None; close_connection_if_no_return_value = true }
-let continue = { callback = None; close_connection_if_no_return_value = false }
+let handle_exn_before_implementation_returns t exn description ~close_connection_monitor =
+  match t with
+  | Call callback ->
+    callback Raised_before_implementation_returned exn description;
+    `Continue
+  | Log_on_background_exn -> `Continue
+  | Close_connection ->
+    Monitor.send_exn close_connection_monitor exn;
+    `Stop
+  | Raise_to_monitor monitor ->
+    Monitor.send_exn monitor exn;
+    `Stop
+;;
 
-let handle_exn
-  { callback; close_connection_if_no_return_value }
-  ~close_connection_monitor
-  exn
-  =
-  Option.iter callback ~f:(fun callback -> callback exn);
-  if close_connection_if_no_return_value
-  then Monitor.send_exn close_connection_monitor exn
+let to_background_monitor_rest t description ~close_connection_monitor =
+  match t with
+  | Call callback ->
+    Some
+      (`Call (fun exn -> callback Raised_after_implementation_returned exn description))
+  | Log_on_background_exn -> Some `Log
+  | Close_connection -> Some (`Call (Monitor.send_exn close_connection_monitor))
+  | Raise_to_monitor monitor -> Some (`Call (Monitor.send_exn monitor))
 ;;

@@ -26,6 +26,7 @@ let rpc' ~print_impl ~bin_response ~include_in_error_count sexp_of_response =
     Async_rpc_kernel.Rpc.Implementations.create_exn
       ~implementations:[ impl ]
       ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
   in
   response1, response2, impl
 ;;
@@ -223,6 +224,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
+  Backtrace.elide := true;
   for i = 1 to 2 do
     Mock_peer.enqueue_send_result
       t
@@ -243,6 +245,27 @@ let%expect_test "Single rpc implementation fails to send twice" =
        (data
         (Error
          (Write_error (Message_too_big ((size 100) (max_message_size 10)))))))))
+    (Send
+     (message
+      ("00000000  05 05 21 65 78 6e 20 72  61 69 73 65 64 20 69 6e  |..!exn raised in|"
+       "00000010  20 52 50 43 20 63 6f 6e  6e 65 63 74 69 6f 6e 20  | RPC connection |"
+       "00000020  6c 6f 6f 70 02 01 03 00  10 6d 6f 6e 69 74 6f 72  |loop.....monitor|"
+       "00000030  2e 6d 6c 2e 45 72 72 6f  72 01 02 00 24 46 61 69  |.ml.Error...$Fai|"
+       "00000040  6c 65 64 20 74 6f 20 73  65 6e 64 20 77 72 69 74  |led to send writ|"
+       "00000050  65 20 65 72 72 6f 72 20  74 6f 20 63 6c 69 65 6e  |e error to clien|"
+       "00000060  74 01 02 01 02 00 05 65  72 72 6f 72 01 02 00 0f  |t......error....|"
+       "00000070  4d 65 73 73 61 67 65 5f  74 6f 6f 5f 62 69 67 01  |Message_too_big.|"
+       "00000080  02 01 02 00 04 73 69 7a  65 00 03 31 30 30 01 02  |.....size..100..|"
+       "00000090  00 10 6d 61 78 5f 6d 65  73 73 61 67 65 5f 73 69  |..max_message_si|"
+       "000000a0  7a 65 00 02 31 30 01 02  00 06 72 65 61 73 6f 6e  |ze..10....reason|"
+       "000000b0  01 02 00 0f 4d 65 73 73  61 67 65 5f 74 6f 6f 5f  |....Message_too_|"
+       "000000c0  62 69 67 01 02 01 02 00  04 73 69 7a 65 00 03 32  |big......size..2|"
+       "000000d0  30 30 01 02 00 10 6d 61  78 5f 6d 65 73 73 61 67  |00....max_messag|"
+       "000000e0  65 5f 73 69 7a 65 00 02  31 30 01 02 00 1a 3c 62  |e_size..10....<b|"
+       "000000f0  61 63 6b 74 72 61 63 65  20 65 6c 69 64 65 64 20  |acktrace elided |"
+       "00000100  69 6e 20 74 65 73 74 3e  00 25 43 61 75 67 68 74  |in test>.%Caught|"
+       "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
+       "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
     (Close_started
      ("exn raised in RPC connection loop"
       (monitor.ml.Error
@@ -354,6 +377,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
+  Backtrace.elide := true;
   for i = 1 to 2 do
     Mock_peer.enqueue_send_result
       t
@@ -376,6 +400,27 @@ let%expect_test "Single rpc implementation fails to send twice" =
        (data
         (Error
          (Write_error (Message_too_big ((size 100) (max_message_size 10)))))))))
+    (Send
+     (message
+      ("00000000  05 05 21 65 78 6e 20 72  61 69 73 65 64 20 69 6e  |..!exn raised in|"
+       "00000010  20 52 50 43 20 63 6f 6e  6e 65 63 74 69 6f 6e 20  | RPC connection |"
+       "00000020  6c 6f 6f 70 02 01 03 00  10 6d 6f 6e 69 74 6f 72  |loop.....monitor|"
+       "00000030  2e 6d 6c 2e 45 72 72 6f  72 01 02 00 24 46 61 69  |.ml.Error...$Fai|"
+       "00000040  6c 65 64 20 74 6f 20 73  65 6e 64 20 77 72 69 74  |led to send writ|"
+       "00000050  65 20 65 72 72 6f 72 20  74 6f 20 63 6c 69 65 6e  |e error to clien|"
+       "00000060  74 01 02 01 02 00 05 65  72 72 6f 72 01 02 00 0f  |t......error....|"
+       "00000070  4d 65 73 73 61 67 65 5f  74 6f 6f 5f 62 69 67 01  |Message_too_big.|"
+       "00000080  02 01 02 00 04 73 69 7a  65 00 03 31 30 30 01 02  |.....size..100..|"
+       "00000090  00 10 6d 61 78 5f 6d 65  73 73 61 67 65 5f 73 69  |..max_message_si|"
+       "000000a0  7a 65 00 02 31 30 01 02  00 06 72 65 61 73 6f 6e  |ze..10....reason|"
+       "000000b0  01 02 00 0f 4d 65 73 73  61 67 65 5f 74 6f 6f 5f  |....Message_too_|"
+       "000000c0  62 69 67 01 02 01 02 00  04 73 69 7a 65 00 03 32  |big......size..2|"
+       "000000d0  30 30 01 02 00 10 6d 61  78 5f 6d 65 73 73 61 67  |00....max_messag|"
+       "000000e0  65 5f 73 69 7a 65 00 02  31 30 01 02 00 1a 3c 62  |e_size..10....<b|"
+       "000000f0  61 63 6b 74 72 61 63 65  20 65 6c 69 64 65 64 20  |acktrace elided |"
+       "00000100  69 6e 20 74 65 73 74 3e  00 25 43 61 75 67 68 74  |in test>.%Caught|"
+       "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
+       "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
     (Close_started
      ("exn raised in RPC connection loop"
       (monitor.ml.Error
@@ -666,13 +711,13 @@ let%expect_test "expert unknown rpc handler" =
       ~on_unknown_rpc:
         (`Expert
           (fun (_ : Mock_peer.t)
-               ~rpc_tag
-               ~version
-               ~metadata
-               responder
-               bs
-               ~pos
-               ~len:(_ : int) ->
+            ~rpc_tag
+            ~version
+            ~metadata
+            responder
+            bs
+            ~pos
+            ~len:(_ : int) ->
             print_s
               [%message
                 "Unknown rpc"
@@ -684,6 +729,7 @@ let%expect_test "expert unknown rpc handler" =
               responder
               (Error.create_s [%message "example error"]);
             return ()))
+      ~on_exception:Log_on_background_exn
   in
   let%bind t = Mock_peer.create_and_connect' ~implementations default_config in
   Mock_peer.expect_message t [%bin_reader: Nothing.t] [%sexp_of: Nothing.t];

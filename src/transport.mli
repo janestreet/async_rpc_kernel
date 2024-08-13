@@ -58,6 +58,9 @@ module Writer : sig
     -> 'a Pipe.Reader.t
     -> ('a -> unit)
     -> unit Deferred.t
+
+  val transfer_default_max_num_values_per_read
+    : int (* 1_000, here so that libraries built on top of [Pipe_rpc] can reference it. *)
 end
 
 type t =

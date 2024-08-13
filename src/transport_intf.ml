@@ -43,7 +43,7 @@ module Send_result = struct
     | Sent of
         { result : 'a
         ; bytes : int
-            (** Bytes should equal the size of the bin_prot rpc message and data. The total
+        (** Bytes should equal the size of the bin_prot rpc message and data. The total
             bytes written on the network in the standard protocol (which has 8-bytes sizes
             before each frame) will be [sum([8 + x.bytes for each send result x])]. Other
             framing protocols or encryption (e.g. rpc over kerberos) may write more or
@@ -70,7 +70,8 @@ module type Writer = sig
   val stopped : t -> unit Deferred.t
 
   (** [flushed t] returns a deferred that must become determined when all prior sent
-      messages are delivered.
+      messages have either been flushed to the underlying stream transport or have been
+      dropped because the underlying transport has closed.
 
       It must be OK to call [flushed t] after [t] has been closed. *)
   val flushed : t -> unit Deferred.t

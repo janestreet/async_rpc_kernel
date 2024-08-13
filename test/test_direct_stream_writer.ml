@@ -37,6 +37,7 @@ let with_server_and_client' ~rpc ~f ~on_writer =
     Rpc.Implementations.create_exn
       ~implementations:[ implementation ]
       ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
   in
   let%bind server =
     Rpc.Connection.serve
@@ -80,15 +81,15 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
       in
       List.init 100 ~f:ignore
       |> List.fold ~init:None ~f:(fun last_scheduled_response () ->
-           match
-             Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
-               writer
-               ~buf
-               ~pos:0
-               ~len:(Bigstring.length buf)
-           with
-           | `Closed -> last_scheduled_response
-           | `Flushed { g = d } -> Some d)
+        match
+          Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
+            writer
+            ~buf
+            ~pos:0
+            ~len:(Bigstring.length buf)
+        with
+        | `Closed -> last_scheduled_response
+        | `Flushed { global = d } -> Some d)
       |> Ivar.fill_exn scheduled_response)
     ~f:(fun (_ : (Socket.Address.Inet.t, int) Tcp.Server.t) connection ->
       let%bind (_ : Bigstring.t Pipe.Reader.t), metadata =

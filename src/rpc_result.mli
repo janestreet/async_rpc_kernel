@@ -8,10 +8,12 @@ val bin_io_exn : location:string -> exn -> 'a t
 val authorization_error : location:string -> exn -> 'a t
 
 val try_with
-  :  ?on_background_exception:(exn -> unit)
-  -> ?run:[ `Now | `Schedule ]
-  -> location:string
+  :  here:Source_code_position.t
   -> (unit -> 'a t Deferred.t)
+  -> Description.t
+  -> location:string
+  -> on_background_exception:On_exception.t
+  -> close_connection_monitor:Monitor.t
   -> 'a t Deferred.t
 
 val or_error

@@ -52,6 +52,14 @@ val send_expert_response
   -> 'result Transport.Send_result.t
 
 val send_heartbeat : t -> unit Transport.Send_result.t
+
+(** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
+    version doesn't support sending the close reason. *)
+val send_close_reason_if_supported
+  :  t
+  -> reason:Info.t
+  -> unit Transport.Send_result.t option
+
 val can_send : t -> bool
 val bytes_to_write : t -> int
 val bytes_written : t -> Int63.t

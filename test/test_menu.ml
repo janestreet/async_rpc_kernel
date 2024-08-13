@@ -69,7 +69,7 @@ module V1_or_v2 = struct
         List.map
           list
           ~f:(fun ({ Description.name; version }, (_ : Rpc_shapes.Just_digests.t)) ->
-          name, version)
+            name, version)
       in
       `V1 v1)
   ;;
@@ -184,7 +184,7 @@ let%expect_test "supported_rpcs" =
     [%compare: Description.Set.t]
     ~seed:12760
     ~f:(fun (module M) x _state ->
-    x |> M.of_v1_or_v2 |> M.supported_rpcs |> Description.Set.of_list);
+      x |> M.of_v1_or_v2 |> M.supported_rpcs |> Description.Set.of_list);
   [%expect
     {|
     ("500th example"
@@ -246,7 +246,7 @@ let%expect_test "supported_versions" =
     [%compare: Int.Set.t]
     ~seed:6751
     ~f:(fun (module M) x state ->
-    x |> M.of_v1_or_v2 |> M.supported_versions ~rpc_name:(choose_rpc_name x state));
+      x |> M.of_v1_or_v2 |> M.supported_versions ~rpc_name:(choose_rpc_name x state));
   [%expect
     {|
     ("500th example"
@@ -264,19 +264,19 @@ let%expect_test "mem" =
     [%compare: bool * _]
     ~seed:13668
     ~f:(fun (module M) x state ->
-    let t = M.of_v1_or_v2 x in
-    let name = choose_rpc_name x state in
-    let versions = t |> M.supported_versions ~rpc_name:name in
-    let version =
-      if Random.State.bool state || Set.is_empty versions
-      then
-        (* arbitrary value that may/may not be in the menu, or before/after all elts *)
-        8
-      else
-        Set.nth versions (Random.State.int state (Set.length versions))
-        |> Option.value_exn
-    in
-    M.mem t { name; version }, (name, version));
+      let t = M.of_v1_or_v2 x in
+      let name = choose_rpc_name x state in
+      let versions = t |> M.supported_versions ~rpc_name:name in
+      let version =
+        if Random.State.bool state || Set.is_empty versions
+        then
+          (* arbitrary value that may/may not be in the menu, or before/after all elts *)
+          8
+        else
+          Set.nth versions (Random.State.int state (Set.length versions))
+          |> Option.value_exn
+      in
+      M.mem t { name; version }, (name, version));
   [%expect
     {|
     ("500th example"
@@ -308,19 +308,19 @@ let%expect_test "shape_digests" =
     [%compare: Rpc_shapes.Just_digests.Strict_comparison.t option * _]
     ~seed:8069
     ~f:(fun (module M) x state ->
-    let t = M.of_v1_or_v2 x in
-    let name = choose_rpc_name x state in
-    let versions = t |> M.supported_versions ~rpc_name:name in
-    let version =
-      if Random.State.bool state || Set.is_empty versions
-      then
-        (* arbitrary value that may/may not be in the menu, or before/after all elts *)
-        8
-      else
-        Set.nth versions (Random.State.int state (Set.length versions))
-        |> Option.value_exn
-    in
-    M.shape_digests t { name; version }, (name, version));
+      let t = M.of_v1_or_v2 x in
+      let name = choose_rpc_name x state in
+      let versions = t |> M.supported_versions ~rpc_name:name in
+      let version =
+        if Random.State.bool state || Set.is_empty versions
+        then
+          (* arbitrary value that may/may not be in the menu, or before/after all elts *)
+          8
+        else
+          Set.nth versions (Random.State.int state (Set.length versions))
+          |> Option.value_exn
+      in
+      M.shape_digests t { name; version }, (name, version));
   [%expect
     {|
     ("500th example"

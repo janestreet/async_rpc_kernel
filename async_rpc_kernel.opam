@@ -12,11 +12,13 @@ build: [
 depends: [
   "ocaml" {>= "5.1.0"}
   "async_kernel"
+  "bin_prot"
   "core"
   "core_kernel"
-  "gel"
+  "pipe_with_writer_error"
   "ppx_jane"
   "protocol_version_header"
+  "sexplib"
   "dune"                    {>= "3.11.0"}
 ]
 available: arch != "arm32" & arch != "x86_32"

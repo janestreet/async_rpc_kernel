@@ -1,7 +1,8 @@
 (library
  (name async_rpc_kernel_test)
- (libraries core async_kernel async_rpc_kernel expect_test_helpers_async
-   expect_test_helpers_core async_kernel.eager_deferred
+ (libraries async async_kernel async.async_rpc async_rpc_kernel
+   bin_prot.shape core_kernel.bus core async_kernel.eager_deferred
+   expect_test_helpers_async expect_test_helpers_core pipe_with_writer_error
    protocol_version_header core_kernel.vec core_kernel.weak_pointer)
  (preprocess
   (pps ppx_jane)))

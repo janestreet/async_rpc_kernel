@@ -31,6 +31,7 @@ module Header : sig
   val v1 : t
   val v2 : t
   val v3 : t
+  val v4 : t
   val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
@@ -39,6 +40,7 @@ end = struct
     Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
 
+  let v4 = create ~supported_versions:[ 1; 2; 3; 4 ]
   let v3 = create ~supported_versions:[ 1; 2; 3 ]
   let v2 = create ~supported_versions:[ 1; 2 ]
   let v1 = create ~supported_versions:[ 1 ]
@@ -93,24 +95,28 @@ end
    tracing events which we document as only being caused by expert dispatches. If we
    change non-expert dispatches to use the variants we’ll need to change the doc or the
    code. *)
-type response_with_determinable_status =
-  | Pipe_eof
-  | Expert_indeterminate
-  | Determinable :
-      'a Rpc_result.t * 'a Implementation.F.error_mode
-      -> response_with_determinable_status
+module Response_handler_action = struct
+  type response_with_determinable_status =
+    | Pipe_eof
+    | Expert_indeterminate
+    | Determinable :
+        'a Rpc_result.t * 'a Implementation.F.error_mode
+        -> response_with_determinable_status
 
-type response_handler_action =
-  | Keep
-  | Wait of unit Deferred.t
-  | Remove of (response_with_determinable_status, Rpc_error.t Gel.t) result
-  | Expert_remove_and_wait of unit Deferred.t
+  type t =
+    | Keep
+    | Wait of unit Deferred.t
+    | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
+    | Expert_remove_and_wait of unit Deferred.t
+end
 
-type response_handler =
-  Nat0.t P.Response.t
-  -> read_buffer:Bigstring.t
-  -> read_buffer_pos_ref:int ref
-  -> response_handler_action
+module Response_handler = struct
+  type t =
+    Nat0.t P.Response.t
+    -> read_buffer:Bigstring.t
+    -> read_buffer_pos_ref:int ref
+    -> Response_handler_action.t
+end
 
 type t =
   { description : Info.t
@@ -120,7 +126,7 @@ type t =
   ; max_metadata_size : Byte_units.t
   ; reader : Reader.t
   ; writer : Protocol_writer.t
-  ; open_queries : (P.Query_id.t, (response_handler[@sexp.opaque])) Hashtbl.t
+  ; open_queries : (P.Query_id.t, (Response_handler.t[@sexp.opaque])) Hashtbl.t
   ; close_started : Info.t Ivar.t
   ; close_finished : unit Ivar.t
       (* There's a circular dependency between connections and their implementation instances
@@ -129,7 +135,6 @@ type t =
   ; implementations_instance : Implementations.Instance.t Set_once.t
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
-  ; negotiated_protocol_version : int Set_once.t
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
       *)
@@ -145,10 +150,13 @@ type t =
        -> Rpc_metadata.t option
        -> Execution_context.t
        -> Execution_context.t)
-      Set_once.t
+        Set_once.t
       (* this is used if [set_metadata_hooks] is called before we have filled
      [implementations_instance]. *)
   ; my_menu : Menu.t option
+  ; received_close_reason : Info.t Set_once.t
+  ; has_drained_reader : unit Ivar.t Set_once.t
+  ; reader_drain_timeout : Time_ns.Span.t
   }
 [@@deriving sexp_of]
 
@@ -256,15 +264,15 @@ module Dispatch_error = struct
   [@@deriving sexp_of]
 end
 
-let handle_send_result :
-      'a.
-      t
-      -> 'a Transport.Send_result.t
-      -> rpc:Description.t
-      -> kind:_ Tracing_event.Kind.t
-      -> id:P.Query_id.t
-      -> sending_one_way_rpc:bool
-      -> ('a, Dispatch_error.t) Result.t
+let handle_send_result
+  : 'a.
+  t
+  -> 'a Transport.Send_result.t
+  -> rpc:Description.t
+  -> kind:_ Tracing_event.Kind.t
+  -> id:P.Query_id.t
+  -> sending_one_way_rpc:bool
+  -> ('a, Dispatch_error.t) Result.t
   =
   fun t r ~rpc ~kind ~id ~sending_one_way_rpc ->
   let id = (id :> Int63.t) in
@@ -307,7 +315,7 @@ let handle_special_send_result t (result : unit Transport.Send_result.t) =
         "Message cannot be sent"
         , { reason =
               ([%globalize: unit Transport.Send_result.t] result
-                : unit Transport.Send_result.t)
+               : unit Transport.Send_result.t)
           ; connection = (t : t_hum_writer)
           }]
 ;;
@@ -387,27 +395,27 @@ let make_dispatch_bigstring
       ~response_handler
       ~kind:Query
       ~send_query:(fun query ->
-      Protocol_writer.send_expert_query
-        writer
-        query
-        ~buf
-        ~pos
-        ~len
-        ~send_bin_prot_and_bigstring:do_send) [@nontail]
+        Protocol_writer.send_expert_query
+          writer
+          query
+          ~buf
+          ~pos
+          ~len
+          ~send_bin_prot_and_bigstring:do_send) [@nontail]
 ;;
 
 let dispatch_bigstring =
   make_dispatch_bigstring
     Writer.send_bin_prot_and_bigstring
     ~compute_metadata:(fun t ~tag ~version ~id ~metadata:() ->
-    compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
+      compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
 ;;
 
 let schedule_dispatch_bigstring =
   make_dispatch_bigstring
     Writer.send_bin_prot_and_bigstring_non_copying
     ~compute_metadata:(fun t ~tag ~version ~id ~metadata:() ->
-    compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
+      compute_metadata t { name = P.Rpc_tag.to_string tag; version } id)
 ;;
 
 let schedule_dispatch_bigstring_with_metadata =
@@ -505,7 +513,7 @@ let handle_response
              | Error err -> Response_finished_rpc_error_or_exn err)
             ~payload_bytes;
           Continue
-        | Error { g = e } ->
+        | Error { global = e } ->
           response_event (Response_finished_rpc_error_or_exn e) ~payload_bytes;
           (match e with
            | Unimplemented_rpc _ -> Continue
@@ -524,8 +532,8 @@ let handle_msg
   (msg : _ P.Message.t)
   ~read_buffer
   ~read_buffer_pos_ref
-  ~close_connection_monitor
   ~protocol_message_len
+  ~close_connection_monitor
   : _ Transport.Handler_result.t
   =
   match msg with
@@ -552,21 +560,25 @@ let handle_msg
     let instance = Set_once.get_exn t.implementations_instance [%here] in
     Implementations.Instance.handle_query
       instance
-      ~close_connection_monitor
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
       ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
+      ~close_connection_monitor
   | Query_v1 query ->
     let instance = Set_once.get_exn t.implementations_instance [%here] in
     let query = P.Query.of_v1 query in
     Implementations.Instance.handle_query
       instance
-      ~close_connection_monitor
       ~query
       ~read_buffer
       ~read_buffer_pos_ref
       ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
+      ~close_connection_monitor
+  | Close_reason info ->
+    let info = Info.tag info ~tag:"Connection closed by peer:" in
+    Set_once.set_exn t.received_close_reason [%here] info;
+    Stop (Ok ())
 ;;
 
 let close_reason t ~on_close =
@@ -600,10 +612,39 @@ let abort_heartbeating t =
     | Ok | Previously_unscheduled -> ())
 ;;
 
-let close ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5) ~reason t =
+let close
+  ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5)
+  ~reason
+  ~send_reason_to_peer
+  t
+  =
   if not (is_closed t)
   then (
     abort_heartbeating t;
+    let () =
+      let should_send_reason_to_peer =
+        send_reason_to_peer
+        (* If our [received_close_reason] is set, it means our peer initiated the
+           connection close, so we shouldn't bother sending our reason. *)
+        && Set_once.is_none t.received_close_reason
+      in
+      if should_send_reason_to_peer
+      then
+        Result.iter (writer t) ~f:(fun writer ->
+          let send_result =
+            Protocol_writer.send_close_reason_if_supported writer ~reason
+          in
+          (* We should do nothing if we can't send the close reason. If the
+             connection is closed, that's fine, we were trying to close the
+             connection anyways. If the message is too big, the peer won't get
+             the close reason, but it's not worth raising over. *)
+          match send_result with
+          | None
+          | Some
+              ( Sent { result = (); bytes = (_ : int) }
+              | Closed
+              | Message_too_big (_ : Transport_intf.Send_result.message_too_big) ) -> ())
+    in
     Ivar.fill_exn t.close_started reason;
     (match Set_once.get t.implementations_instance with
      | None -> Deferred.unit
@@ -640,26 +681,34 @@ let on_message t ~close_connection_monitor =
         nat0_msg
         ~read_buffer:buf
         ~read_buffer_pos_ref:pos_ref
-        ~close_connection_monitor
         ~protocol_message_len:(!pos_ref - pos)
+        ~close_connection_monitor
     with
     | Continue -> Continue
     | Wait _ as res -> res
     | Stop result ->
-      let reason =
-        let msg = "Rpc message handling loop stopped" in
+      let reason, send_reason_to_peer =
+        let reason_if_no_error =
+          match Set_once.get t.received_close_reason with
+          | Some info -> info
+          | None -> Info.of_string "Rpc message handling loop stopped"
+        in
         match result with
-        | Ok () -> Info.of_string msg
+        | Ok () -> reason_if_no_error, false
         | Error e ->
-          Info.create
-            msg
-            e
-            (Rpc_error.sexp_of_t_with_reason ~get_connection_close_reason:(fun () ->
-               [%sexp
-                 "Connection.on_message resulted in Connection_closed error. This is \
-                  weird."]))
+          ( Info.of_list
+              [ reason_if_no_error
+              ; Info.create_s
+                  (Rpc_error.sexp_of_t_with_reason
+                     e
+                     ~get_connection_close_reason:(fun () ->
+                       [%sexp
+                         "Connection.on_message resulted in Connection_closed error. \
+                          This is weird."]))
+              ]
+          , true )
       in
-      don't_wait_for (close t ~reason);
+      don't_wait_for (close t ~reason ~send_reason_to_peer);
       Stop reason
   in
   Staged.stage f
@@ -676,7 +725,7 @@ let heartbeat_now t =
         !"No heartbeats received for %{sexp:Time_ns.Span.t}."
         t.heartbeat_config.timeout
     in
-    don't_wait_for (close t ~reason:(Info.of_thunk reason)))
+    don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true))
   else (
     match writer t with
     | Error `Closed -> ()
@@ -685,10 +734,11 @@ let heartbeat_now t =
       ())
 ;;
 
-let default_handshake_timeout = Time_ns.Span.of_sec 30.
+let default_handshake_timeout = Time_ns.Span.of_int_sec 30
+let default_reader_drain_timeout = Time_ns.Span.of_int_sec 5
 
-let cleanup t ~reason exn =
-  don't_wait_for (close ~reason t);
+let cleanup t ~reason ~send_reason_to_peer exn =
+  don't_wait_for (close ~reason ~send_reason_to_peer t);
   if not (Hashtbl.is_empty t.open_queries)
   then (
     let error =
@@ -738,12 +788,17 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
    | None -> ()
    | Some on_receive -> Implementations.Instance.set_on_receive instance on_receive);
   Set_once.set_exn t.implementations_instance [%here] instance;
+  let has_drained_reader = Ivar.create () in
+  (* Ensure that we set [has_drained_reader] as soon as we've completed the handshake so
+     that if the connection dies after this, we make sure to wait and see if we got a
+     close reason. *)
+  Set_once.set_if_none t.has_drained_reader [%here] has_drained_reader;
   let close_connection_monitor = Monitor.create ~name:"RPC close connection monitor" () in
   Monitor.detach_and_iter_errors close_connection_monitor ~f:(fun exn ->
     let reason =
       Info.create_s [%message "Uncaught exception in implementation" (exn : Exn.t)]
     in
-    don't_wait_for (close ~reason t));
+    don't_wait_for (close ~reason ~send_reason_to_peer:true t));
   let monitor = Monitor.create ~name:"RPC connection loop" () in
   let reason name exn =
     exn, Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name)
@@ -754,7 +809,7 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
           [ Stream.map ~f:(reason "loop") (Monitor.detach_and_get_error_stream monitor)
           ; Stream.map ~f:(reason "Writer.t") writer_monitor_exns
           ]))
-    ~f:(fun (exn, reason) -> cleanup t exn ~reason);
+    ~f:(fun (exn, reason) -> cleanup t exn ~reason ~send_reason_to_peer:true);
   within ~monitor (fun () ->
     schedule_heartbeats t;
     Reader.read_forever
@@ -762,14 +817,25 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
       ~on_message:(Staged.unstage (on_message t ~close_connection_monitor))
       ~on_end_of_batch:(fun () ->
         t.last_seen_alive <- Synchronous_time_source.now t.time_source)
-    >>> function
-    | Ok reason -> cleanup t ~reason (Rpc_error.Rpc (Connection_closed, t.description))
+    >>> fun result ->
+    Ivar.fill_if_empty has_drained_reader ();
+    match result with
+    | Ok reason ->
+      (* [on_message] only returns a reason when it gets a [Stop], which always sets the
+         reason to be "Rpc message handling loop stopped" - that's not a reason we care
+         about sending. *)
+      cleanup
+        t
+        ~reason
+        ~send_reason_to_peer:false
+        (Rpc_error.Rpc (Connection_closed, t.description))
     (* The protocol is such that right now, the only outcome of the other side closing the
        connection normally is that we get an eof. *)
     | Error (`Eof | `Closed) ->
       cleanup
         t
         ~reason:(Info.of_string "EOF or connection closed")
+        ~send_reason_to_peer:false
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
@@ -784,14 +850,10 @@ let run_after_handshake
   let connection_state = connection_state t in
   if not (is_closed t)
   then (
-    (* It's important that this function executes synchronously and that [close] hasn't been
-       called yet by the time it completes, as [close] does some important cleanup (like
-       stopping the heartbeat loop), and we need to ensure there isn't a race where the
-       heartbeat loop could be started without a call to [close] stopping it. *)
     run_connection t ~implementations ~connection_state ~writer_monitor_exns;
-    assert (not (is_closed t));
     assert (Set_once.is_some t.heartbeat_event);
-    assert (Set_once.is_some t.implementations_instance))
+    assert (Set_once.is_some t.implementations_instance);
+    if is_closed t then abort_heartbeating t)
 ;;
 
 let send_metadata t writer ~menu ?identification () =
@@ -805,18 +867,16 @@ let send_metadata t writer ~menu ?identification () =
 
 let negotiate t ?identification ~header ~peer ~writer ~menu () =
   let negotiate_result = Header.negotiate ~us:header ~peer in
-  match negotiate_result with
-  | Ok version ->
-    if version >= 3
+  Result.iter negotiate_result ~f:(fun version ->
+    if Version_dependent_feature.(is_supported Peer_metadata ~version)
     then (
       let ivar = Ivar.create () in
       upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
         Ivar.fill_if_empty ivar (Error `Connection_closed));
       Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
       send_metadata t writer ~menu ?identification ())
-    else Set_once.set_exn t.peer_metadata [%here] Unsupported;
-    negotiate_result
-  | Error (_ : Handshake_error.t) -> negotiate_result
+    else Set_once.set_exn t.peer_metadata [%here] Unsupported);
+  negotiate_result
 ;;
 
 let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
@@ -828,7 +888,7 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
     let result =
-      Monitor.try_with ~rest:`Log ~run:`Now (fun () ->
+      Monitor.try_with_local ~rest:`Log (fun () ->
         Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
     match%bind
@@ -840,11 +900,12 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
     | `Timeout ->
       (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
-      don't_wait_for (close t ~reason:(Info.of_string "Handshake timeout"));
+      don't_wait_for
+        (close t ~reason:(Info.of_string "Handshake timeout") ~send_reason_to_peer:true);
       return (Error Handshake_error.Timeout)
     | `Result (Error exn) ->
       let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
-      don't_wait_for (close t ~reason);
+      don't_wait_for (close t ~reason ~send_reason_to_peer:true);
       return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
     | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
     | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
@@ -853,7 +914,7 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
-let default_handshake_header = Header.v3
+let default_handshake_header = Header.v4
 
 let handshake_header_override_key =
   Univ_map.Key.create ~name:"async rpc handshake header override" [%sexp_of: Header.t]
@@ -862,6 +923,23 @@ let handshake_header_override_key =
 let get_handshake_header () =
   Async_kernel_scheduler.find_local handshake_header_override_key
   |> Option.value ~default:default_handshake_header
+;;
+
+let drain_reader_for_close_reason t ~default_close_reason =
+  let%map (`Timeout | `Result ()) =
+    match Set_once.get t.has_drained_reader with
+    | None ->
+      (* If we haven't even started the reader loop yet when we close then we'll never get
+         a close reason. *)
+      return (`Result ())
+    | Some has_drained_reader ->
+      Time_source.with_timeout
+        (Time_source.of_synchronous t.time_source)
+        t.reader_drain_timeout
+        (Ivar.read has_drained_reader)
+  in
+  Set_once.get t.received_close_reason
+  |> Option.value_or_thunk ~default:default_close_reason
 ;;
 
 let create
@@ -874,6 +952,7 @@ let create
   ?(description = Info.of_string "<created-directly>")
   ?(time_source = Synchronous_time_source.wall_clock ())
   ?identification
+  ?(reader_drain_timeout = default_reader_drain_timeout)
   ({ reader; writer } : Transport.t)
   =
   let implementations =
@@ -926,8 +1005,7 @@ let create
                    ; response = Menu.Stable.V1.bin_response.shape
                    }
                  |> fun shapes -> shapes, Rpc_shapes.eval_to_digest shapes)
-          ; on_exception =
-              { callback = None; close_connection_if_no_return_value = false }
+          ; on_exception = Some Log_on_background_exn
           } )
   in
   let t =
@@ -944,7 +1022,6 @@ let create
     ; implementations_instance = Set_once.create ()
     ; time_source
     ; heartbeat_event = Set_once.create ()
-    ; negotiated_protocol_version = Set_once.create ()
     ; events =
         Bus.create_exn
           [%here]
@@ -955,11 +1032,19 @@ let create
     ; peer_metadata = Set_once.create ()
     ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
     ; my_menu = Option.map menu ~f:Menu.of_v2_response
+    ; received_close_reason = Set_once.create ()
+    ; has_drained_reader = Set_once.create ()
+    ; reader_drain_timeout
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
-    don't_wait_for (close t ~reason:(Info.of_string "RPC transport stopped")));
+    don't_wait_for
+      (let%bind reason =
+         drain_reader_for_close_reason t ~default_close_reason:(fun () ->
+           Info.of_string "RPC transport stopped")
+       in
+       close t ~reason ~send_reason_to_peer:false));
   upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
   let header = get_handshake_header () in
   let negotiated_protocol_version =
@@ -1018,7 +1103,10 @@ let with_close
       ~run:`Schedule
       ~rest:`Log
       ~finally:(fun () ->
-        close t ~reason:(Info.of_string "Rpc.Connection.with_close finished"))
+        close
+          t
+          ~reason:(Info.of_string "Rpc.Connection.with_close finished")
+          ~send_reason_to_peer:false)
       (fun () ->
         let%bind result = dispatch_queries t in
         let%map () =
@@ -1057,12 +1145,13 @@ let server_with_close
     ~dispatch_queries:(fun _ -> Deferred.unit)
 ;;
 
-let close
-  ?streaming_responses_flush_timeout
-  ?(reason = Info.of_string "Rpc.Connection.close")
-  t
-  =
-  close ?streaming_responses_flush_timeout ~reason t
+let close ?streaming_responses_flush_timeout ?reason t =
+  let send_reason_to_peer, reason =
+    match reason with
+    | None -> false, Info.of_string "Rpc.Connection.close"
+    | Some reason -> true, reason
+  in
+  close ?streaming_responses_flush_timeout ~reason ~send_reason_to_peer t
 ;;
 
 module Client_implementations = struct

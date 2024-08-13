@@ -69,8 +69,7 @@ type t =
   ; mutable reader_close_started : bool
   ; reader_close_finished : unit Ivar.t
   ; messages : Bigstring.t Deque.t
-  ; mutable
-      read_forever_state :
+  ; mutable read_forever_state :
       [ `None
       | `Running
       | `Waiting of unit Deferred.t
@@ -204,7 +203,7 @@ module Reader : Rpc.Transport.Reader.S with type t = t = struct
           | hd :: tl ->
             (match
                (on_message hd ~pos:0 ~len:(Bigstring.length hd)
-                 : _ Rpc.Transport.Handler_result.t)
+                : _ Rpc.Transport.Handler_result.t)
              with
              | Continue -> handle_batch to_wait continue tl
              | Stop x ->
@@ -369,15 +368,17 @@ let write ?don't_read_yet t writer x =
   write_bigstring ?don't_read_yet t bigstring
 ;;
 
-let write_handshake t handshake =
-  match handshake with
-  | `v3 ->
-    let header = Test_helpers.Header.v3 in
-    write t [%bin_writer: Test_helpers.Header.t] header;
-    write
-      t
-      [%bin_writer: Protocol.Message.nat0_t]
-      (Metadata { identification = None; menu = None })
+let write_handshake t (handshake : [ `v3 | `v4 ]) =
+  let header =
+    match handshake with
+    | `v3 -> Test_helpers.Header.v3
+    | `v4 -> Test_helpers.Header.v4
+  in
+  write t [%bin_writer: Test_helpers.Header.t] header;
+  write
+    t
+    [%bin_writer: Protocol.Message.nat0_t]
+    (Metadata { identification = None; menu = None })
 ;;
 
 let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
@@ -389,7 +390,7 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
   in
   let nat0 =
     match message with
-    | (Heartbeat | Metadata _) as x -> x
+    | (Heartbeat | Metadata _ | Close_reason _) as x -> x
     | Query_v1 x -> Query_v1 { x with data = length x.data }
     | Response { data = Error _; _ } as x -> x
     | Response ({ data = Ok data; _ } as x) -> Response { x with data = Ok (length data) }
@@ -430,7 +431,7 @@ let expect_message ?later t reader sexp_of =
     (Protocol.Message.sexp_of_t sexp_of)
 ;;
 
-let connect ?implementations ?(send_handshake = Some `v3) t =
+let connect ?implementations ?(send_handshake = Some `v4) t =
   let transport = transport t in
   let r =
     Rpc.Connection.create

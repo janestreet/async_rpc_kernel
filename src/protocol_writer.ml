@@ -46,6 +46,17 @@ let send_heartbeat t =
   Transport.Writer.send_bin_prot t.writer Protocol.Message.bin_writer_nat0_t Heartbeat
 ;;
 
+let send_close_reason_if_supported t ~reason =
+  match Set_once.get t.negotiated_protocol_version with
+  | Some version when Version_dependent_feature.is_supported Close_reason ~version ->
+    Some
+      (Transport.Writer.send_bin_prot
+         t.writer
+         Protocol.Message.bin_writer_nat0_t
+         (Close_reason reason))
+  | Some (_ : int) | None -> None
+;;
+
 let response_message (type a) t (response : a Protocol.Response.t) : a Protocol.Message.t =
   let negotiated_protocol_version =
     Set_once.get_exn t.negotiated_protocol_version [%here]

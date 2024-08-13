@@ -11,7 +11,7 @@ module Query_id = Core.Unique_id.Int63 ()
 module Unused_query_id : sig
   type t [@@deriving bin_io, sexp_of]
 
-  val t : t
+  val singleton : t
 end = struct
   type t = Query_id.t [@@deriving bin_io, sexp_of]
 
@@ -20,7 +20,7 @@ end = struct
     [%expect {| 2b528f4b22f08e28876ffe0239315ac2 |}]
   ;;
 
-  let t = Query_id.create ()
+  let singleton = Query_id.create ()
 end
 
 module Rpc_error : sig
@@ -194,11 +194,12 @@ module Message = struct
     | Response of 'a Response.needs_length
     | Query of 'a Query.needs_length
     | Metadata of Connection_metadata.V1.t
+    | Close_reason of Core.Info.t
   [@@deriving bin_io, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 421d39a5ff4a0dd5182cc00f63b3ddab |}]
+    [%expect {| 3e811b2a6e524c387272aafc395e6011 |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]

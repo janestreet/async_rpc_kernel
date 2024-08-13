@@ -50,55 +50,6 @@ let rpc_result_to_or_error rpc_description conn result =
     ~connection_close_started:(Connection.close_reason ~on_close:`started conn)
 ;;
 
-module Rpc_common = struct
-  let dispatch_raw'
-    conn
-    ~tag
-    ~version
-    ~bin_writer_query
-    ~query
-    ~query_id
-    ~response_handler
-    =
-    let query =
-      { P.Query.tag
-      ; version
-      ; id = query_id
-      ; metadata =
-          Connection.compute_metadata
-            conn
-            { name = P.Rpc_tag.to_string tag; version }
-            query_id
-      ; data = query
-      }
-    in
-    match
-      Connection.dispatch conn ~response_handler ~kind:Query ~bin_writer_query ~query
-    with
-    | Ok result -> Ok result
-    | Error Closed -> Error Rpc_error.Connection_closed
-    | Error (Message_too_big message_too_big) ->
-      Error (Rpc_error.Message_too_big message_too_big)
-  ;;
-
-  let dispatch_raw conn ~tag ~version ~bin_writer_query ~query ~query_id ~f =
-    let response_ivar = Ivar.create () in
-    (match
-       dispatch_raw'
-         conn
-         ~tag
-         ~version
-         ~bin_writer_query
-         ~query
-         ~query_id
-         ~response_handler:(Some (f response_ivar))
-     with
-     | Ok () -> ()
-     | Error _ as e -> Ivar.fill_exn response_ivar e);
-    Ivar.read response_ivar
-  ;;
-end
-
 module Rpc = struct
   type ('query, 'response) t =
     { tag : P.Rpc_tag.t
@@ -157,7 +108,7 @@ module Rpc = struct
     Eager_deferred.map (f state query) ~f:(fun a -> Or_not_authorized.Authorized a)
   ;;
 
-  let implement ?(on_exception = On_exception.continue) t f =
+  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f =
@@ -166,22 +117,23 @@ module Rpc = struct
           , t.bin_response.writer
           , deferred_no_authorization f
           , t.has_errors
-          , Deferred )
+          , Deferred
+          , here )
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
 
-  let implement_with_auth ?(on_exception = On_exception.continue) t f =
+  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Deferred)
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Deferred, here)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
 
-  let implement' ?(on_exception = On_exception.continue) t f =
+  let implement' ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f =
@@ -190,16 +142,17 @@ module Rpc = struct
           , t.bin_response.writer
           , blocking_no_authorization f
           , t.has_errors
-          , Blocking )
+          , Blocking
+          , here )
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
 
-  let implement_with_auth' ?(on_exception = On_exception.continue) t f =
+  let implement_with_auth' ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Blocking)
+    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Blocking, here)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
@@ -211,7 +164,7 @@ module Rpc = struct
       (response : _ P.Response.t)
       ~read_buffer
       ~read_buffer_pos_ref
-      : Connection.response_handler_action
+      : Connection.Response_handler_action.t
       =
       let response =
         response.data
@@ -227,7 +180,7 @@ module Rpc = struct
       Remove (Ok (Determinable (response, t.has_errors)))
     in
     let query_id = P.Query_id.create () in
-    Rpc_common.dispatch_raw
+    Raw_rpc.dispatch
       conn
       ~tag:t.tag
       ~version:t.version
@@ -263,17 +216,17 @@ module Rpc = struct
       ~handle_response
       ~handle_error
       =
-      let response_handler : Connection.response_handler =
+      let response_handler : Connection.Response_handler.t =
         fun response ~read_buffer ~read_buffer_pos_ref ->
         match response.data with
         | Error e ->
           handle_error
-            (Error.t_of_sexp
+            (Error.create_s
                (Rpc_error.sexp_of_t_with_reason
                   ~get_connection_close_reason:(fun () ->
                     [%sexp
                       (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-                        : Info.t option)])
+                       : Info.t option)])
                   e));
           Remove (Ok Expert_indeterminate)
         | Ok len ->
@@ -372,7 +325,7 @@ module Rpc = struct
       Or_not_authorized.Authorized (f state responder buf ~pos ~len)
     ;;
 
-    let implement ?(on_exception = On_exception.continue) t f =
+    let implement ?on_exception t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (deferred_no_authorization f, Deferred)
@@ -381,7 +334,7 @@ module Rpc = struct
       }
     ;;
 
-    let implement' ?(on_exception = On_exception.continue) t f =
+    let implement' ?on_exception t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = Rpc_expert (blocking_no_authorization f, Blocking)
@@ -390,12 +343,7 @@ module Rpc = struct
       }
     ;;
 
-    let implement_for_tag_and_version
-      ?(on_exception = On_exception.continue)
-      ~rpc_tag
-      ~version
-      f
-      =
+    let implement_for_tag_and_version ?on_exception ~rpc_tag ~version f =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (deferred_no_authorization f, Deferred)
@@ -404,12 +352,7 @@ module Rpc = struct
       }
     ;;
 
-    let implement_for_tag_and_version'
-      ?(on_exception = On_exception.continue)
-      ~rpc_tag
-      ~version
-      f
-      =
+    let implement_for_tag_and_version' ?on_exception ~rpc_tag ~version f =
       { Implementation.tag = P.Rpc_tag.of_string rpc_tag
       ; version
       ; f = Rpc_expert (blocking_no_authorization f, Blocking)
@@ -445,10 +388,10 @@ module One_way = struct
     Eager_deferred.return (Or_not_authorized.Authorized (f state query))
   ;;
 
-  let implement ?(on_exception = On_exception.close_connection) t f =
+  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = One_way (t.bin_msg.reader, no_authorization f)
+    ; f = One_way (t.bin_msg.reader, no_authorization f, here)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
@@ -456,7 +399,7 @@ module One_way = struct
 
   let dispatch' t conn query =
     let query_id = P.Query_id.create () in
-    Rpc_common.dispatch_raw'
+    Raw_rpc.dispatch'
       conn
       ~tag:t.tag
       ~version:t.version
@@ -481,7 +424,7 @@ module One_way = struct
       Eager_deferred.return (Or_not_authorized.Authorized (f state buf ~pos ~len))
     ;;
 
-    let implement ?(on_exception = On_exception.close_connection) t f =
+    let implement ?on_exception t f =
       { Implementation.tag = t.tag
       ; version = t.version
       ; f = One_way_expert (no_authorization f)
@@ -621,8 +564,8 @@ module Streaming_rpc = struct
   let version t = t.version
   let description t = { Description.name = name t; version = version t }
 
-  let make_initial_message x =
-    { Initial_message.unused_query_id = P.Unused_query_id.t; initial = x }
+  let initial_message initial =
+    { Initial_message.unused_query_id = P.Unused_query_id.singleton; initial }
   ;;
 
   let shapes t =
@@ -636,7 +579,7 @@ module Streaming_rpc = struct
 
   let shapes_and_digest t = shapes t |> and_digest
 
-  let implement_gen t ?(on_exception = On_exception.continue) impl =
+  let implement_gen ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t impl =
     let bin_init_writer =
       Initial_message.bin_writer_t
         t.bin_initial_response.writer
@@ -651,51 +594,51 @@ module Streaming_rpc = struct
           ; bin_update_writer = t.bin_update_response.writer
           ; impl
           ; error_mode = Streaming_initial_message
+          ; here
           }
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
 
-  let implement ?on_exception t f =
+  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     let f c query =
       match%map f c query with
-      | Error err ->
-        Or_not_authorized.Authorized (Error (make_initial_message (Error err)))
-      | Ok (initial, pipe) -> Authorized (Ok (make_initial_message (Ok initial), pipe))
+      | Error err -> Or_not_authorized.Authorized (Error (initial_message (Error err)))
+      | Ok (initial, pipe) -> Authorized (Ok (initial_message (Ok initial), pipe))
     in
-    implement_gen t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception (Pipe f)
   ;;
 
-  let implement_with_auth ?on_exception t f =
+  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     let f c query =
       let%map response_or_not_authorized = f c query in
       Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
         match response with
-        | Error err -> Error (make_initial_message (Error err))
-        | Ok (initial, pipe) -> Ok (make_initial_message (Ok initial), pipe))
+        | Error err -> Error (initial_message (Error err))
+        | Ok (initial, pipe) -> Ok (initial_message (Ok initial), pipe))
     in
-    implement_gen t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception (Pipe f)
   ;;
 
-  let implement_direct ?on_exception t f =
+  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     let f c query writer =
       match%map f c query writer with
-      | Error _ as x -> Or_not_authorized.Authorized (Error (make_initial_message x))
-      | Ok _ as x -> Authorized (Ok (make_initial_message x))
+      | Error _ as x -> Or_not_authorized.Authorized (Error (initial_message x))
+      | Ok _ as x -> Authorized (Ok (initial_message x))
     in
-    implement_gen ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception t (Direct f)
   ;;
 
-  let implement_direct_with_auth ?on_exception t f =
+  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
     let f c query writer =
       let%map response_or_not_authorized = f c query writer in
       Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
         match response with
-        | Error _ as x -> Error (make_initial_message x)
-        | Ok _ as x -> Ok (make_initial_message x))
+        | Error _ as x -> Error (initial_message x)
+        | Ok _ as x -> Ok (initial_message x))
     in
-    implement_gen ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception t (Direct f)
   ;;
 
   let abort t conn id =
@@ -709,7 +652,7 @@ module Streaming_rpc = struct
          ~bin_writer_query:P.Stream_query.bin_writer_nat0_t
          ~query
          ~response_handler:None
-        : (unit, Connection.Dispatch_error.t) Result.t)
+       : (unit, Connection.Dispatch_error.t) Result.t)
   ;;
 
   module Closed_by = struct
@@ -749,92 +692,164 @@ module Streaming_rpc = struct
             { on_update : Bigstring.t -> pos:int -> len:int -> Pipe_response.t
             ; on_closed : Closed_by.t -> unit
             }
-    end
 
-    module Initial = struct
-      type nonrec ('query, 'init, 'update, 'error, 'init_response) t =
-        { rpc : ('query, 'init, 'update, 'error) t
-        ; query_id : P.Query_id.t
-        ; make_update_handler : 'init -> 'init_response * 'update Update_handler.t
-        ; ivar : (P.Query_id.t * 'init_response, 'error) Result.t Rpc_result.t Ivar.t
-        ; connection : Connection.t
-        }
+      let handle_closed (t : _ t) closed_by =
+        match t with
+        | Standard update_handler ->
+          ignore (update_handler (Closed closed_by) : Pipe_response.t)
+        | Expert { on_update = _; on_closed } -> on_closed closed_by
+      ;;
     end
 
     module State = struct
-      type 'a t =
-        | Waiting_for_initial_response : ('q, 'i, 'u, 'e, 'ir) Initial.t -> 'u t
-        | Writing_updates of 'a Bin_prot.Type_class.reader * 'a Update_handler.t
+      module Init_result = struct
+        type ('init_response, 'error) t =
+          (P.Query_id.t * 'init_response, 'error) Result.t Rpc_result.t
+      end
+
+      type ('init, 'init_response, 'update, 'error) t =
+        | Waiting_for_initial_response of
+            { initial_handler : 'init -> 'init_response * 'update Update_handler.t
+            ; response_ivar : ('init_response, 'error) Init_result.t Ivar.t
+            }
+        | Waiting_for_updates of 'update Update_handler.t
+        | Waiting_for_induced_close of
+            { original_result : ('init_response, 'error) Init_result.t }
     end
 
-    type 'a t = { mutable state : 'a State.t }
-  end
+    type nonrec ('query, 'init, 'update, 'error, 'init_response) t =
+      { mutable state : ('init, 'init_response, 'update, 'error) State.t
+      ; rpc : ('query, 'init, 'update, 'error) t
+      ; query_id : P.Query_id.t
+      ; connection : Connection.t
+      ; get_connection_close_reason : unit -> Sexp.t
+      }
 
-  let handle_closed (handler : _ Response_state.Update_handler.t) closed_by =
-    match handler with
-    | Standard update_handler ->
-      ignore (update_handler (Closed closed_by) : Pipe_response.t)
-    | Expert { on_update = _; on_closed } -> on_closed closed_by
-  ;;
+    let we_know_that_the_server_remains_open_on_error = function
+      | Rpc_error.Bin_io_exn (_ : Sexp.t)
+      | Connection_closed
+      | Uncaught_exn (_ : Sexp.t)
+      | Unimplemented_rpc _
+      | Unknown_query_id (_ : P.Query_id.t)
+      | Authorization_failure (_ : Sexp.t)
+      | Message_too_big (_ : Transport_intf.Send_result.message_too_big)
+      | Unknown (_ : Sexp.t) -> false
+      | Write_error (_ : Sexp.t) -> true
+    ;;
 
-  let read_error
-    ~get_connection_close_reason
-    (handler : _ Response_state.Update_handler.t)
-    err
-    : Connection.response_handler_action
-    =
-    let core_err =
-      Error.t_of_sexp (Rpc_error.sexp_of_t_with_reason ~get_connection_close_reason err)
-    in
-    handle_closed handler (`Error core_err);
-    Remove (Error { g = err })
-  ;;
+    (* Error handling is a bit complicated here so I'll attempt to explain it in words
+       instead.
 
-  let eof (handler : _ Response_state.Update_handler.t)
-    : Connection.response_handler_action
-    =
-    handle_closed handler `By_remote_side;
-    Remove (Ok Pipe_eof)
-  ;;
+       [Connection.Response_handler_action.Remove] will remove the [Query_id.t] from the
+       client connection loop. If a subsequent message is sent with that [Query_id.t] from
+       the server writer the client's connection will throw and close the shared stream.
 
-  let response_handler ~get_connection_close_reason initial_state
-    : Connection.response_handler
-    =
-    let open Response_state in
-    let state = { state = Waiting_for_initial_response initial_state } in
-    fun response ~read_buffer ~read_buffer_pos_ref ->
-      match state.state with
-      | Writing_updates (bin_reader_update, handler) ->
+       This is a problem because there are cases where the server could send subsequent
+       messages to a client in good faith after an error. e.g. version mismatch and the
+       client can't deserialize the messages properly.
+
+       So we want to be careful about exactly when we remove a [Query_id.t] to try and
+       prevent the entire connection from closing.
+
+       The safest way to do this is to send an [abort] to the server to induce a close
+       then wait until we receive an [Eof] (which we can then [Remove] using the
+       [original_result] that caused us to send the abort for proper tracing).
+
+       In some cases however, the server will have already closed. In those cases, we
+       can't send an abort and wait for [`Eof] because once the server closes the pipe, it
+       will no longer respond to abort messages with [`Eof]. We need to immediately remove
+       the handler instead of sending abort in that case, to avoid leaking a response
+       handler.
+
+       Differentiating these cases is done using the above
+       [we_know_that_the_server_remains_open_on_error], which is based on
+       [Implementations.apply_streaming_implementation:run_impl].
+
+       Simply adjusting the server to always respond to unknown aborts with [`Eof] doesn't
+       work, because then the client could in some cases receive multiple [`Eof]'s for the
+       same pipe, so instead we model here whether the server has already closed the pipe.
+
+       An improvement here would be to modify the protocol so that there's an explicit
+       field or message indicating that the server has closed the pipe, and then we could
+       always send [abort] unless we've already received that message.
+    *)
+    let response_handler t : Connection.Response_handler.t =
+      fun response ~read_buffer ~read_buffer_pos_ref ->
+      let bin_read_from_bigstring ?add_len reader ~len ~location =
+        bin_read_from_bigstring
+          ?add_len
+          reader
+          read_buffer
+          ~pos_ref:read_buffer_pos_ref
+          ~len
+          ~location
+      in
+      let read_stream_response_header ~len =
+        bin_read_from_bigstring
+          P.Stream_response_data.bin_reader_nat0_t
+          ~len
+          ~location:"client-side streaming_rpc response un-bin-io'ing"
+          ~add_len:(function
+          | `Eof -> 0
+          | `Ok (len : Nat0.t) -> (len :> int))
+      in
+      let on_error result ~we_know_the_server_pipe_is_open
+        : Connection.Response_handler_action.t
+        =
+        t.state <- Waiting_for_induced_close { original_result = result };
+        if we_know_the_server_pipe_is_open
+        then (
+          abort t.rpc t.connection t.query_id;
+          Keep)
+        else Remove (Ok (Determinable (result, Using_result)))
+      in
+      match t.state with
+      | Waiting_for_updates handler ->
+        let on_error error ~we_know_the_server_pipe_is_open =
+          let core_error =
+            Error.create_s
+              (Rpc_error.sexp_of_t_with_reason
+                 ~get_connection_close_reason:t.get_connection_close_reason
+                 error)
+          in
+          (* It's always fine to close our own local reader when we want to. We just can't
+             always close the connection handler for this [Query_id.t] since more
+             messages might be on the way. *)
+          Update_handler.handle_closed handler (`Error core_error);
+          on_error (Error error) ~we_know_the_server_pipe_is_open
+        in
         (match response.data with
-         | Error err -> read_error ~get_connection_close_reason handler err
+         | Error error ->
+           (* We know that the server will have closed it's pipe after these errors so
+              let's not bother with waiting for an ack on [abort]. *)
+           on_error
+             error
+             ~we_know_the_server_pipe_is_open:
+               (we_know_that_the_server_remains_open_on_error error)
          | Ok len ->
-           let data =
-             bin_read_from_bigstring
-               P.Stream_response_data.bin_reader_nat0_t
-               read_buffer
-               ~pos_ref:read_buffer_pos_ref
-               ~len
-               ~location:"client-side streaming_rpc response un-bin-io'ing"
-               ~add_len:(function
-               | `Eof -> 0
-               | `Ok (len : Nat0.t) -> (len :> int))
-           in
-           (match data with
-            | Error err -> read_error ~get_connection_close_reason handler err
-            | Ok `Eof -> eof handler
+           (match read_stream_response_header ~len with
+            | Error error -> on_error error ~we_know_the_server_pipe_is_open:true
+            | Ok `Eof ->
+              (* Always safe to close on an [Eof]. *)
+              Update_handler.handle_closed handler `By_remote_side;
+              Remove (Ok Pipe_eof)
             | Ok (`Ok len) ->
               (match handler with
                | Standard update_handler ->
                  let data =
                    bin_read_from_bigstring
-                     bin_reader_update
-                     read_buffer
-                     ~pos_ref:read_buffer_pos_ref
+                     t.rpc.bin_update_response.reader
                      ~len
-                     ~location:"client-side streaming_rpc response un-bin-io'ing"
+                     ~location:
+                       "client-side streaming_rpc response un-bin-io'ing to \
+                        [bin_reader_update]"
                  in
                  (match data with
-                  | Error err -> read_error ~get_connection_close_reason handler err
+                  | Error error ->
+                    (* Similarly to the above case, this always implies a [Bin_io_exn]
+                       when we fail to deseralize ['update]. Server won't know that we
+                       failed to deserialize so let's wait for their ack to close. *)
+                    on_error error ~we_know_the_server_pipe_is_open:true
                   | Ok data ->
                     (match update_handler (Update data) with
                      | Continue -> Keep
@@ -849,92 +864,119 @@ module Streaming_rpc = struct
                     | Wait d -> Wait d
                   with
                   | exn ->
-                    read_error
-                      ~get_connection_close_reason
-                      handler
-                      (Uncaught_exn
-                         [%message
-                           "Uncaught exception in expert update handler" (exn : Exn.t)])))))
-      | State.Waiting_for_initial_response initial_handler ->
-        (* We never use [`remove (Error _)] here, since that indicates that the
-           connection should be closed, and these are "normal" errors. (In contrast, the
-           errors we get in the [Writing_updates_to_pipe] case indicate more serious
-           problems.) Instead, we just put errors in [ivar]. *)
-        let error result : Connection.response_handler_action =
-          Ivar.fill_exn initial_handler.ivar result;
-          Remove (Ok (Determinable (result, Always_ok)))
-        in
+                    let error =
+                      Rpc_error.Uncaught_exn
+                        [%message
+                          "Uncaught exception in expert update handler" (exn : Exn.t)]
+                    in
+                    on_error error ~we_know_the_server_pipe_is_open:false))))
+      | Waiting_for_induced_close { original_result } ->
+        (* We are waiting for an ack on close from the peer but have already closed our
+           side. When transitioning to this state there might be other messages already on
+           the pipe so we wait for a [Pipe_eof] triggered from our abort message but might
+           run into another message which is fine. *)
         (match response.data with
-         | Error _ as result -> error result
+         | Error error ->
+           if we_know_that_the_server_remains_open_on_error error
+           then Keep
+           else Remove (Ok (Determinable (Error error, Using_result)))
+         | Ok len ->
+           (match read_stream_response_header ~len with
+            | Ok `Eof -> Remove (Ok (Determinable (original_result, Using_result)))
+            | Error (_ : Rpc_error.t) | Ok (`Ok (_ : Nat0.t)) ->
+              (* We've marked the pipe closed on the reader end but the writer might still
+                 be sending data after. Let's drop this while waiting for the error ack
+                 since the handler is already cleaned up. *)
+              Keep))
+      | Waiting_for_initial_response { initial_handler; response_ivar } ->
+        let on_error result ~we_know_the_server_pipe_is_open =
+          Ivar.fill_exn response_ivar result;
+          on_error result ~we_know_the_server_pipe_is_open
+        in
+        (* Error cases in [Waiting_for_initial_response] match [Waiting_for_updates]
+           except we need to fill the [response_ivar] so that our dispatch determines. *)
+        (match response.data with
+         | Error error ->
+           on_error
+             (Error error)
+             ~we_know_the_server_pipe_is_open:
+               (we_know_that_the_server_remains_open_on_error error)
          | Ok len ->
            let initial =
              bin_read_from_bigstring
                (Initial_message.bin_reader_t
-                  initial_handler.rpc.bin_initial_response.reader
-                  initial_handler.rpc.bin_error_response.reader)
-               read_buffer
-               ~pos_ref:read_buffer_pos_ref
+                  t.rpc.bin_initial_response.reader
+                  t.rpc.bin_error_response.reader)
                ~len
                ~location:"client-side streaming_rpc initial_response un-bin-io'ing"
            in
            (match initial with
-            | Error _ as result -> error result
+            | Error _ as result ->
+              (* [Bin_io_exn] on failure to deserialize the initial response. Let's wait
+                 for the peer to [Eof] since they likely don't know that an error occured
+                 on our end. *)
+              on_error result ~we_know_the_server_pipe_is_open:true
             | Ok initial_msg ->
               (match initial_msg.initial with
                | Error _ as result ->
-                 Ivar.fill_exn initial_handler.ivar (Ok result);
+                 let (_ : Connection.Response_handler_action.t) =
+                   on_error (Ok result) ~we_know_the_server_pipe_is_open:false
+                 in
+                 (* If the peer sent an [Error] as the initial message that serialized
+                    properly then they will have already closed the pipe on their end so
+                    we can immediately exit. *)
                  Remove (Ok (Determinable (initial, Streaming_initial_message)))
                | Ok initial ->
-                 let initial_response, handler =
-                   initial_handler.make_update_handler initial
-                 in
-                 Ivar.fill_exn
-                   initial_handler.ivar
-                   (Ok (Ok (initial_handler.query_id, initial_response)));
-                 state.state
-                   <- Writing_updates
-                        (initial_handler.rpc.bin_update_response.reader, handler);
+                 let initial_response, handler = initial_handler initial in
+                 Ivar.fill_exn response_ivar (Ok (Ok (t.query_id, initial_response)));
+                 t.state <- Waiting_for_updates handler;
                  Keep)))
-  ;;
+    ;;
+  end
 
-  let dispatch_gen t conn query make_update_handler =
+  let dispatch_gen t connection query ~initial_handler =
     let bin_writer_query =
       P.Stream_query.bin_writer_needs_length
         (Writer_with_length.of_type_class t.bin_query)
     in
     let query = `Query query in
     let query_id = P.Query_id.create () in
-    Rpc_common.dispatch_raw
-      conn
+    Raw_rpc.dispatch
+      connection
       ~query_id
       ~tag:t.tag
       ~version:t.version
       ~bin_writer_query
       ~query
-      ~f:(fun ivar ->
-      response_handler
-        ~get_connection_close_reason:(fun () ->
-          [%sexp
-            (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-              : Info.t option)])
-        { rpc = t; query_id; connection = conn; ivar; make_update_handler })
+      ~f:(fun response_ivar ->
+        Response_state.response_handler
+          { state = Waiting_for_initial_response { initial_handler; response_ivar }
+          ; rpc = t
+          ; query_id
+          ; connection
+          ; get_connection_close_reason =
+              (fun () ->
+                [%sexp
+                  (Deferred.peek (Connection.close_reason ~on_close:`started connection)
+                   : Info.t option)])
+          })
   ;;
 
   let dispatch_fold t conn query ~init ~f ~closed =
     let result = Ivar.create () in
     match%map
-      dispatch_gen t conn query (fun state ->
+      dispatch_gen t conn query ~initial_handler:(fun state ->
         let acc = ref (init state) in
         ( ()
         , Standard
             (function
-             | Update update ->
-               let new_acc, response = f !acc update in
-               acc := new_acc;
-               response
-             | Closed reason ->
-               Ivar.fill_exn result (closed !acc reason);
-               Continue) ))
+              | Update update ->
+                let new_acc, response = f !acc update in
+                acc := new_acc;
+                response
+              | Closed reason ->
+                Ivar.fill_exn result (closed !acc reason);
+                Continue) ))
     with
     | (Error _ | Ok (Error _)) as e -> rpc_result_to_or_error (description t) conn e
     | Ok (Ok (id, ())) -> Ok (Ok (id, Ivar.read result))
@@ -942,7 +984,7 @@ module Streaming_rpc = struct
 
   let dispatch' t conn query =
     match%map
-      dispatch_gen t conn query (fun init ->
+      dispatch_gen t conn query ~initial_handler:(fun init ->
         let pipe_r, pipe_w = Pipe.create () in
         (* Set a small buffer to reduce the number of pushback events *)
         Pipe.set_size_budget pipe_w 100;
@@ -1022,14 +1064,14 @@ module Pipe_rpc = struct
   let shapes t = Streaming_rpc.shapes t
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
-  let implement ?on_exception t f =
-    Streaming_rpc.implement ?on_exception t (fun a query ->
+  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+    Streaming_rpc.implement ~here ?on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
   ;;
 
-  let implement_with_auth ?on_exception t f =
-    Streaming_rpc.implement_with_auth ?on_exception t (fun a query ->
+  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+    Streaming_rpc.implement_with_auth ~here ?on_exception t (fun a query ->
       match%map f a query with
       | (Not_authorized _ : _ Or_not_authorized.t) as r -> r
       | Authorized (Error _) as err -> err
@@ -1117,7 +1159,7 @@ module Pipe_rpc = struct
                closed, so [`Closed] here just means that the removal didn't happen yet. *)
             ignore
               (Expert.write_without_pushback direct_stream_writer ~buf ~pos ~len
-                : [ `Ok | `Closed ]));
+               : [ `Ok | `Closed ]));
           if t.send_last_value_on_add && not (phys_equal !(t.buffer) buf)
           then (
             if Bigstring.length !(t.buffer) < len
@@ -1224,12 +1266,12 @@ module Pipe_rpc = struct
     end
   end
 
-  let implement_direct ?on_exception t f =
-    Streaming_rpc.implement_direct ?on_exception t f
+  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+    Streaming_rpc.implement_direct ~here ?on_exception t f
   ;;
 
-  let implement_direct_with_auth ?on_exception t f =
-    Streaming_rpc.implement_direct_with_auth ?on_exception t f
+  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f
   ;;
 
   let dispatch' t conn query =
@@ -1244,18 +1286,40 @@ module Pipe_rpc = struct
   exception Pipe_rpc_failed
 
   let dispatch_exn t conn query =
-    let%map result = dispatch t conn query in
-    match result with
-    | Error rpc_error -> raise (Error.to_exn rpc_error)
+    match%map dispatch t conn query with
+    | Error rpc_error -> Error.raise rpc_error
     | Ok (Error _) -> raise Pipe_rpc_failed
     | Ok (Ok pipe_and_id) -> pipe_and_id
+  ;;
+
+  let close_reason = Streaming_rpc.Pipe_metadata.close_reason
+
+  let dispatch_with_close_reason' t connection query =
+    match%map dispatch' t connection query with
+    | Ok (Ok (pipe, metadata)) ->
+      let writer_error =
+        close_reason metadata
+        |> Deferred.map ~f:(function
+          | Closed_remotely | Closed_locally -> Ok ()
+          | Error error -> Error error)
+      in
+      Ok (Ok (Pipe_with_writer_error.of_reader ~writer_error pipe))
+    | Ok (Error error) -> Ok (Error error)
+    | Error error -> Error error
+  ;;
+
+  let dispatch_with_close_reason t connection query =
+    dispatch_with_close_reason' t connection query
+    >>| rpc_result_to_or_error (Streaming_rpc.description t) connection
   ;;
 
   module Pipe_message = Pipe_message
   module Pipe_response = Pipe_response
 
   let dispatch_iter t conn query ~f =
-    match%map Streaming_rpc.dispatch_gen t conn query (fun () -> (), Standard f) with
+    match%map
+      Streaming_rpc.dispatch_gen t conn query ~initial_handler:(fun () -> (), Standard f)
+    with
     | (Error _ | Ok (Error _)) as e ->
       rpc_result_to_or_error (Streaming_rpc.description t) conn e
     | Ok (Ok (id, ())) -> Ok (Ok id)
@@ -1264,7 +1328,7 @@ module Pipe_rpc = struct
   module Expert = struct
     let dispatch_iter t conn query ~f ~closed =
       match%map
-        Streaming_rpc.dispatch_gen t conn query (fun () ->
+        Streaming_rpc.dispatch_gen t conn query ~initial_handler:(fun () ->
           (), Expert { on_update = f; on_closed = closed })
       with
       | (Error _ | Ok (Error _)) as e ->
@@ -1274,7 +1338,6 @@ module Pipe_rpc = struct
   end
 
   let abort = Streaming_rpc.abort
-  let close_reason = Streaming_rpc.Pipe_metadata.close_reason
   let name = Streaming_rpc.name
   let version = Streaming_rpc.version
   let description = Streaming_rpc.description

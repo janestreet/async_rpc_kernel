@@ -21,13 +21,13 @@ module Int64_long = struct
 end
 
 module Make_with_length (Length : sig
-  type t
+    type t
 
-  val bin_shape_t : Bin_shape.t
-  val bin_read_t : Bigstring.t -> pos_ref:int ref -> t
-  val bin_write_t : Bigstring.t -> pos:int -> t -> int
-  val bin_size_t : t -> int
-end) =
+    val bin_shape_t : Bin_shape.t
+    val bin_read_t : Bigstring.t -> pos_ref:int ref -> t
+    val bin_write_t : Bigstring.t -> pos:int -> t -> int
+    val bin_size_t : t -> int
+  end) =
 struct
   type 'a t = 'a [@@deriving sexp]
 
@@ -123,9 +123,13 @@ let rec parse (shape : Bin_shape.Expert.Canonical.t) rows buf ~pos ~level ~prefi
     let name, shapes = List.nth_exn variants n in
     row rows buf ~start ~pos ~level ~prefix name;
     parse_tuple shapes rows buf ~pos ~level ~prefix:[]
+  | Application (f, args) ->
+    List.iteri (f :: args) ~f:(fun i shape ->
+      let prefix' = level, " " in
+      let prefix = if i = 0 then prefix' :: prefix else [ prefix' ] in
+      parse shape rows buf ~pos ~level:(level + 1) ~prefix)
   | Poly_variant _ -> raise_s [%message "Poly_variant not implemented"]
-  | Application (_, _) | Rec_app (_, _) | Var _ ->
-    raise_s [%message "Recursive types are not implemented"]
+  | Rec_app (_, _) | Var _ -> raise_s [%message "Recursive types are not implemented"]
 
 and parse_tuple contents rows buf ~pos ~level ~prefix =
   match contents with
@@ -274,7 +278,7 @@ module Aligned_row = struct
         let max_prefix, last_child = loop (i + 1) 0 in
         for j = i + 1 to last_child do
           simplified.(j).parts.(prefix_len - 1)
-            <- sprintf "%*s " max_prefix simplified.(j).parts.(prefix_len - 1)
+          <- sprintf "%*s " max_prefix simplified.(j).parts.(prefix_len - 1)
         done
       done
     done;

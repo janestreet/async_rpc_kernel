@@ -20,6 +20,7 @@ type 'connection_state on_unknown_rpc =
 val create
   :  implementations:'connection_state Implementation.t list
   -> on_unknown_rpc:'connection_state on_unknown_rpc
+  -> on_exception:On_exception.t
   -> ('connection_state t, [ `Duplicate_implementations of Description.t list ]) Result.t
 
 val null : unit -> 'a t
@@ -58,7 +59,7 @@ module Direct_stream_writer : sig
       -> buf:Bigstring.t
       -> pos:int
       -> len:int
-      -> [ `Flushed of unit Deferred.t Gel.t | `Closed ]
+      -> [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
   end
 end
 
@@ -112,6 +113,7 @@ val create_exn
          -> version:int
          -> [ `Close_connection | `Continue ]
        ]
+  -> on_exception:On_exception.t
   -> 'connection_state t
 
 val add
@@ -181,5 +183,6 @@ module Expert : sig
            -> len:int
            -> unit Deferred.t
          ]
+    -> on_exception:On_exception.t
     -> 'connection_state t
 end

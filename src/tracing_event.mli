@@ -57,13 +57,13 @@ open Core
 module Sent_response_kind : sig
   type t =
     | One_way_so_no_response
-        (** If the handler of a one-way RPC uses Async, this response message may be sent when
+    (** If the handler of a one-way RPC uses Async, this response message may be sent when
         that handler first calls [bind] rather than when it finishes its work. *)
     | Single_succeeded
     | Single_or_streaming_rpc_error_or_exn
     | Single_or_streaming_user_defined_error
     | Expert_single_succeeded_or_failed
-        (** We can't always tell if an Expert response was successful so sometimes use this
+    (** We can't always tell if an Expert response was successful so sometimes use this
         variant. *)
     | Streaming_initial
     | Streaming_update
@@ -77,13 +77,13 @@ module Received_response_kind : sig
     | Partial_response
     | Response_finished_ok (** The response was interpreted as successful  *)
     | Response_finished_rpc_error_or_exn of Rpc_error.t
-        (** The response was an rpc-level error, e.g. the implementation raised or its
+    (** The response was an rpc-level error, e.g. the implementation raised or its
         response was too large to send. *)
     | Response_finished_user_defined_error
-        (** The response was successfully deserialized and determined to be some
+    (** The response was successfully deserialized and determined to be some
         application-specific error *)
     | Response_finished_expert_uninterpreted
-        (** For some expert dispatches, we can’t always tell if a response was successful so
+    (** For some expert dispatches, we can’t always tell if a response was successful so
         use this variant. *)
   [@@deriving globalize, sexp]
 end
@@ -114,13 +114,13 @@ end
 type t =
   { event : Event.t
   ; rpc : Description.t option
-      (** Associated information for the RPC. This is [None] only for [Received (Response _)]
+  (** Associated information for the RPC. This is [None] only for [Received (Response _)]
       events. *)
   ; id : Int63.t
-      (** A unique identifier per in-flight RPC, this can be used to tie together request
+  (** A unique identifier per in-flight RPC, this can be used to tie together request
       and response events. The client and server see the same id. *)
   ; payload_bytes : int
-      (** The number of bytes for the message, except for the 8-byte length header before
+  (** The number of bytes for the message, except for the 8-byte length header before
       async-rpc messages. This includes the bytes specifying the rpc name/version or query
       id. This will be 0 in some cases where nothing is sent. *)
   }

@@ -65,7 +65,14 @@ module type S = sig
       [identification] can be used to send an additional information to the peer. This is
       intended to be used for identifying the identity of the /process/ as opposed to the
       identity of the user. We use a bigstring to leave the option for clients to
-      interpret as structured data of their choosing. *)
+      interpret as structured data of their choosing.
+
+      [reader_drain_timeout] determines how long the connection will try to drain the
+      reader before closing a connection after noticing that its writer is closed. If the
+      write end of the connection has closed, the connection will attempt to keep reading
+      for up to this long from the read end to attempt to receive a close reason message.
+      Default: 5s.
+  *)
   val create
     :  ?implementations:'s Implementations.t
     -> ?protocol_version_headers:Protocol_version_header.Pair.t
@@ -76,6 +83,7 @@ module type S = sig
     -> ?description:Info.t
     -> ?time_source:Synchronous_time_source.t
     -> ?identification:Bigstring.t
+    -> ?reader_drain_timeout:Time_ns.Span.t
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -219,24 +227,28 @@ module type S_private = sig
 
   val compute_metadata : t -> Description.t -> Query_id.t -> Rpc_metadata.t option
 
-  type response_with_determinable_status =
-    | Pipe_eof
-    | Expert_indeterminate
-    | Determinable :
-        'a Rpc_result.t * 'a Implementation.F.error_mode
-        -> response_with_determinable_status
+  module Response_handler_action : sig
+    type response_with_determinable_status =
+      | Pipe_eof
+      | Expert_indeterminate
+      | Determinable :
+          'a Rpc_result.t * 'a Implementation.F.error_mode
+          -> response_with_determinable_status
 
-  type response_handler_action =
-    | Keep
-    | Wait of unit Deferred.t
-    | Remove of (response_with_determinable_status, Rpc_error.t Gel.t) result
-    | Expert_remove_and_wait of unit Deferred.t
+    type t =
+      | Keep
+      | Wait of unit Deferred.t
+      | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
+      | Expert_remove_and_wait of unit Deferred.t
+  end
 
-  type response_handler =
-    Nat0.t Response.t
-    -> read_buffer:Bigstring.t
-    -> read_buffer_pos_ref:int ref
-    -> response_handler_action
+  module Response_handler : sig
+    type t =
+      Nat0.t Response.t
+      -> read_buffer:Bigstring.t
+      -> read_buffer_pos_ref:int ref
+      -> Response_handler_action.t
+  end
 
   val sexp_of_t_hum_writer : t -> Sexp.t
 
@@ -250,7 +262,7 @@ module type S_private = sig
   val dispatch
     :  t
     -> kind:Tracing_event.Sent_response_kind.t Tracing_event.Kind.t
-    -> response_handler:response_handler option
+    -> response_handler:Response_handler.t option
     -> bin_writer_query:'a Bin_prot.Type_class.writer
     -> query:'a Query.t
     -> (unit, Dispatch_error.t) Result.t
@@ -263,7 +275,7 @@ module type S_private = sig
     -> Bigstring.t
     -> pos:int
     -> len:int
-    -> response_handler:response_handler option
+    -> response_handler:Response_handler.t option
     -> (unit, Dispatch_error.t) Result.t
 
   val schedule_dispatch_bigstring
@@ -274,7 +286,7 @@ module type S_private = sig
     -> Bigstring.t
     -> pos:int
     -> len:int
-    -> response_handler:response_handler option
+    -> response_handler:Response_handler.t option
     -> (unit Deferred.t, Dispatch_error.t) Result.t
 
   val schedule_dispatch_bigstring_with_metadata
@@ -285,7 +297,7 @@ module type S_private = sig
     -> Bigstring.t
     -> pos:int
     -> len:int
-    -> response_handler:response_handler option
+    -> response_handler:Response_handler.t option
     -> (unit Deferred.t, Dispatch_error.t) Result.t
 
   val default_handshake_timeout : Time_ns.Span.t
@@ -330,6 +342,7 @@ module type S_private = sig
       val v1 : t
       val v2 : t
       val v3 : t
+      val v4 : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

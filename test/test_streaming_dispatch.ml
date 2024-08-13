@@ -27,6 +27,7 @@ let with_server_and_conn implementation ~f : unit Deferred.t =
     Rpc.Implementations.create_exn
       ~implementations:[ implementation ]
       ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
   in
   let%bind server =
     Rpc.Connection.serve

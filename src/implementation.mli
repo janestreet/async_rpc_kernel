@@ -54,12 +54,14 @@ module F : sig
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
     ; error_mode : 'init error_mode
+    ; here : Source_code_position.t
     }
 
   type 'connection_state t = 'connection_state F.t =
     | One_way :
         'msg Bin_prot.Type_class.reader
         * ('connection_state -> 'msg -> unit Or_not_authorized.t Deferred.t)
+        * Source_code_position.t
         -> 'connection_state t
     | One_way_expert :
         ('connection_state
@@ -74,6 +76,7 @@ module F : sig
         * ('connection_state -> 'query -> 'result)
         * 'response error_mode
         * ('response, 'result) result_mode
+        * Source_code_position.t
         -> 'connection_state t
     | Rpc_expert :
         ('connection_state
@@ -98,7 +101,7 @@ type 'connection_state t = 'connection_state Implementation_types.Implementation
   ; version : int
   ; f : 'connection_state F.t
   ; shapes : (Rpc_shapes.t * Rpc_shapes.Just_digests.t) Lazy.t
-  ; on_exception : On_exception.t
+  ; on_exception : On_exception.t option
   }
 [@@deriving sexp_of]
 
@@ -110,8 +113,11 @@ val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
 
 val with_authorization_deferred
-  :  'a t
-  -> f:('b -> 'a Or_not_authorized.t Deferred.t)
-  -> 'b t
+  :  'authorized_connection_state t
+  -> f:('connection_state -> 'authorized_connection_state Or_not_authorized.t Deferred.t)
+  -> 'connection_state t
 
-val update_on_exception : 'a t -> f:(On_exception.t -> On_exception.t) -> 'a t
+val update_on_exception
+  :  'connection_state t
+  -> f:(On_exception.t option -> On_exception.t)
+  -> 'connection_state t

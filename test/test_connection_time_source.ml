@@ -157,7 +157,7 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
-      (reason      "EOF or connection closed"))
+      (reason ("Connection closed by peer:" "No heartbeats received for 10s.")))
     |}];
   print_liveness server_conn;
   print_liveness client_conn;

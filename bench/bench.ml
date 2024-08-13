@@ -55,6 +55,7 @@ let implementations =
   Rpc.Implementations.create_exn
     ~implementations:[ implementation; implementation_big ]
     ~on_unknown_rpc:`Raise
+    ~on_exception:Log_on_background_exn
 ;;
 
 let create fdr fdw =
@@ -181,8 +182,8 @@ let add_tracing_subscriber connection =
       (Async_rpc_kernel.Async_rpc_kernel_private.Connection.events connection)
       [%here]
       ~f:(fun event ->
-      let (_ : _) = Base.Sys.opaque_identity event in
-      ())
+        let (_ : _) = Base.Sys.opaque_identity event in
+        ())
   in
   ()
 ;;
@@ -246,7 +247,10 @@ let pipe_setup_conn ?(with_tracing_subscriber = false) rpc ~message_data ~num_me
         done)
     in
     let implementations =
-      Rpc.Implementations.create_exn ~implementations:[ impl ] ~on_unknown_rpc:`Raise
+      Rpc.Implementations.create_exn
+        ~implementations:[ impl ]
+        ~on_unknown_rpc:`Raise
+        ~on_exception:Log_on_background_exn
     in
     let%map client_conn = create_connection implementations ~with_tracing_subscriber in
     if with_tracing_subscriber then add_tracing_subscriber client_conn;

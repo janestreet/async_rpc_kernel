@@ -63,7 +63,7 @@ type t =
   { descriptions : Description.t array
       (* strictly sorted. One thing we don't do but might want is to make equal names phys_equal *)
   ; digests : Rpc_shapes.Just_digests.t array option
-      (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
+  (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
   }
 
 let supported_rpcs (t : t) = Array.to_list t.descriptions
@@ -190,7 +190,7 @@ let ensure_no_duplicates descriptions =
             (Array.find_consecutive_duplicate descriptions ~equal:[%equal: Description.t]
              |> Option.value_exn
              |> fst
-              : Description.t)]
+             : Description.t)]
 ;;
 
 let of_supported_rpcs descriptions ~rpc_shapes:`Unknown =

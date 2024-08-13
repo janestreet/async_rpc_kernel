@@ -3,6 +3,7 @@
  (public_name async_rpc_kernel)
  (preprocess
   (pps ppx_jane))
- (libraries async_kernel core async_kernel.eager_deferred gel
-   core_kernel.moption async_kernel.persistent_connection_kernel
-   protocol_version_header core_kernel.reversed_list))
+ (libraries async_kernel bin_prot.shape core_kernel.bus core
+   async_kernel.eager_deferred core_kernel.moption
+   async_kernel.persistent_connection_kernel pipe_with_writer_error
+   protocol_version_header core_kernel.reversed_list sexplib))
