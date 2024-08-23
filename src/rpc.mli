@@ -22,7 +22,7 @@ open! Async_kernel
 
 module Description : sig
   type t = Description.t =
-    { name : string
+    { global_ name : string
     ; version : int
     }
   [@@deriving compare, equal, hash, sexp_of, globalize]
@@ -68,6 +68,10 @@ module Implementation : sig
       Note [f] is called on every RPC rather than once on the initial connection state. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
+  (** Like [lift] above, but allows for the possibility of the state mapping failing. If
+      [Error] is returned, then the peer will receive that error. *)
+  val try_lift : 'a t -> f:('b -> 'a Or_error.t) -> 'b t
+
   (** Similar to [lift], but useful if you want to do asynchronous work to map connection
       state. Like [lift], [f] will be called on every RPC. This can make RPC
       implementations less efficient if they were previously relying on functions like
@@ -76,6 +80,7 @@ module Implementation : sig
       arrive on a connection. *)
   val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 
+  val try_lift_deferred : 'a t -> f:('b -> 'a Or_error.t Deferred.t) -> 'b t
   val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
 
   val with_authorization_deferred
@@ -219,14 +224,14 @@ module Rpc : sig
       exception. Instead, it is sent as an error to the caller of the RPC, i.e. the
       process that called [dispatch] or one of its alternatives.*)
   val implement
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Deferred.t)
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Or_not_authorized.t Deferred.t)
@@ -242,14 +247,14 @@ module Rpc : sig
       [implement] also tries to do 1 when possible, but it is guaranteed to happen with
       [implement']. *)
   val implement'
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response)
     -> 'connection_state Implementation.t
 
   val implement_with_auth'
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response) t
     -> ('connection_state -> 'query -> 'response Or_not_authorized.t)
@@ -530,7 +535,7 @@ module Pipe_rpc : sig
       can cause elements to buffer in the pipe if the server doesn't respect pushback on
       the pipe. *)
   val implement
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
@@ -539,7 +544,7 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
@@ -588,7 +593,7 @@ module Pipe_rpc : sig
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
+        -> local_ [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
     end
 
     (** Group of direct writers. Groups are optimized for sending the same message to
@@ -600,20 +605,22 @@ module Pipe_rpc : sig
         (** A group internally holds a buffer to serialize messages only once. This buffer
           will grow automatically to accomodate bigger messages.
 
-          It is safe to share the same buffer between multiple groups. *)
+            If [send_last_value_on_add:true], it is _not_ safe to share the same buffer
+            between multiple groups, as the last value is kept in the buffer.  *)
         module Buffer : sig
           type t
 
           val create : ?initial_size:int (* default 4096 *) -> unit -> t
         end
 
-        val create
-          :  ?buffer:Buffer.t
-          -> ?send_last_value_on_add:bool
-               (** If [true], the group will automatically send a copy of the last value written
-            to each new writer when it's added to the group. Default: false. *)
-          -> unit
-          -> _ t
+        val create : ?buffer:Buffer.t -> unit -> _ t
+
+        (** [create_sending_last_value_on_add] will create a group that will
+            automatically send a copy of the last value written to each new writer when
+            it's added to the group. It's split out as a separate function from [create]
+            as it's not safe to re-use a buffer between multiple different groups in this
+            case, as the previous value is stored in the buffer. *)
+        val create_sending_last_value_on_add : ?initial_buffer_size:int -> unit -> _ t
 
         (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
           flushed or closed. *)
@@ -678,7 +685,7 @@ module Pipe_rpc : sig
       function returns. Elements written before the function returns will be queued up to
       be written after the function returns. *)
   val implement_direct
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
@@ -688,7 +695,7 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_direct_with_auth
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'response, 'error) t
     -> ('connection_state
@@ -859,7 +866,7 @@ module State_rpc : sig
   val shapes : (_, _, _, _) t -> Rpc_shapes.t
 
   val implement
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
@@ -868,7 +875,7 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_with_auth
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
@@ -878,7 +885,7 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_direct
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
@@ -888,7 +895,7 @@ module State_rpc : sig
     -> 'connection_state Implementation.t
 
   val implement_direct_with_auth
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
@@ -957,7 +964,7 @@ module One_way : sig
   val shapes : _ t -> Rpc_shapes.t
 
   val implement
-    :  ?here:Stdlib.Lexing.position
+    :  here:[%call_pos]
     -> ?on_exception:On_exception.t
     -> 'msg t
     -> ('connection_state -> 'msg -> unit)

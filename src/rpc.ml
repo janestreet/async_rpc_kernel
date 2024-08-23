@@ -101,14 +101,14 @@ module Rpc = struct
   let shapes_and_digest t = shapes t |> and_digest
 
   let blocking_no_authorization f state query =
-    Or_not_authorized.Authorized (f state query)
+    Ok (Or_not_authorized.Authorized (f state query))
   ;;
 
   let deferred_no_authorization f state query =
-    Eager_deferred.map (f state query) ~f:(fun a -> Or_not_authorized.Authorized a)
+    Eager_deferred.map (f state query) ~f:(fun a -> Ok (Or_not_authorized.Authorized a))
   ;;
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement ~(here : [%call_pos]) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f =
@@ -124,16 +124,23 @@ module Rpc = struct
     }
   ;;
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth
+    ~(here : [%call_pos])
+    ?on_exception
+    t
+    (f : _ -> _ -> _ Or_not_authorized.t Deferred.t)
+    =
+    let f_ok state query = f state query |> Eager_deferred.map ~f:Or_error.return in
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Deferred, here)
+    ; f =
+        Rpc (t.bin_query.reader, t.bin_response.writer, f_ok, t.has_errors, Deferred, here)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
   ;;
 
-  let implement' ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement' ~(here : [%call_pos]) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f =
@@ -149,10 +156,12 @@ module Rpc = struct
     }
   ;;
 
-  let implement_with_auth' ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth' ~(here : [%call_pos]) ?on_exception t f =
+    let f_ok state query = f state query |> Or_error.return in
     { Implementation.tag = t.tag
     ; version = t.version
-    ; f = Rpc (t.bin_query.reader, t.bin_response.writer, f, t.has_errors, Blocking, here)
+    ; f =
+        Rpc (t.bin_query.reader, t.bin_response.writer, f_ok, t.has_errors, Blocking, here)
     ; shapes = lazy (shapes_and_digest t)
     ; on_exception
     }
@@ -177,7 +186,7 @@ module Rpc = struct
           ~location:"client-side rpc response un-bin-io'ing"
       in
       Ivar.fill_exn ivar response;
-      Remove (Ok (Determinable (response, t.has_errors)))
+      exclave_ Remove (Ok (Determinable (response, t.has_errors)))
     in
     let query_id = P.Query_id.create () in
     Raw_rpc.dispatch
@@ -217,7 +226,7 @@ module Rpc = struct
       ~handle_error
       =
       let response_handler : Connection.Response_handler.t =
-        fun response ~read_buffer ~read_buffer_pos_ref ->
+        fun response ~read_buffer ~read_buffer_pos_ref -> exclave_
         match response.data with
         | Error e ->
           handle_error
@@ -318,11 +327,11 @@ module Rpc = struct
 
     let deferred_no_authorization f state responder buf ~pos ~len =
       Eager_deferred.map (f state responder buf ~pos ~len) ~f:(fun a ->
-        Or_not_authorized.Authorized a)
+        Ok (Or_not_authorized.Authorized a))
     ;;
 
     let blocking_no_authorization f state responder buf ~pos ~len =
-      Or_not_authorized.Authorized (f state responder buf ~pos ~len)
+      Ok (Or_not_authorized.Authorized (f state responder buf ~pos ~len))
     ;;
 
     let implement ?on_exception t f =
@@ -385,10 +394,10 @@ module One_way = struct
   let msg_type_id t = t.msg_type_id
 
   let no_authorization f state query =
-    Eager_deferred.return (Or_not_authorized.Authorized (f state query))
+    Eager_deferred.return (Ok (Or_not_authorized.Authorized (f state query)))
   ;;
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement ~(here : [%call_pos]) ?on_exception t f =
     { Implementation.tag = t.tag
     ; version = t.version
     ; f = One_way (t.bin_msg.reader, no_authorization f, here)
@@ -421,7 +430,7 @@ module One_way = struct
 
   module Expert = struct
     let no_authorization f state buf ~pos ~len =
-      Eager_deferred.return (Or_not_authorized.Authorized (f state buf ~pos ~len))
+      Eager_deferred.return (Ok (Or_not_authorized.Authorized (f state buf ~pos ~len)))
     ;;
 
     let implement ?on_exception t f =
@@ -579,7 +588,7 @@ module Streaming_rpc = struct
 
   let shapes_and_digest t = shapes t |> and_digest
 
-  let implement_gen ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t impl =
+  let implement_gen ~(here : [%call_pos]) ?on_exception t impl =
     let bin_init_writer =
       Initial_message.bin_writer_t
         t.bin_initial_response.writer
@@ -601,42 +610,43 @@ module Streaming_rpc = struct
     }
   ;;
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement ~(here : [%call_pos]) ?on_exception t f =
     let f c query =
       match%map f c query with
-      | Error err -> Or_not_authorized.Authorized (Error (initial_message (Error err)))
-      | Ok (initial, pipe) -> Authorized (Ok (initial_message (Ok initial), pipe))
+      | Error err ->
+        Ok (Or_not_authorized.Authorized (Error (initial_message (Error err))))
+      | Ok (initial, pipe) -> Ok (Authorized (Ok (initial_message (Ok initial), pipe)))
     in
     implement_gen ~here t ?on_exception (Pipe f)
   ;;
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
     let f c query =
       let%map response_or_not_authorized = f c query in
-      Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
-        match response with
-        | Error err -> Error (initial_message (Error err))
-        | Ok (initial, pipe) -> Ok (initial_message (Ok initial), pipe))
+      Result.map response_or_not_authorized ~f:(fun response ->
+        Or_not_authorized.map response ~f:(function
+          | Error err -> Error (initial_message (Error err))
+          | Ok (initial, pipe) -> Ok (initial_message (Ok initial), pipe)))
     in
     implement_gen ~here t ?on_exception (Pipe f)
   ;;
 
-  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct ~(here : [%call_pos]) ?on_exception t f =
     let f c query writer =
       match%map f c query writer with
-      | Error _ as x -> Or_not_authorized.Authorized (Error (initial_message x))
-      | Ok _ as x -> Authorized (Ok (initial_message x))
+      | Error _ as x -> Ok (Or_not_authorized.Authorized (Error (initial_message x)))
+      | Ok _ as x -> Ok (Authorized (Ok (initial_message x)))
     in
     implement_gen ~here ?on_exception t (Direct f)
   ;;
 
-  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
     let f c query writer =
       let%map response_or_not_authorized = f c query writer in
-      Or_not_authorized.map response_or_not_authorized ~f:(fun response ->
-        match response with
-        | Error _ as x -> Error (initial_message x)
-        | Ok _ as x -> Ok (initial_message x))
+      Result.map response_or_not_authorized ~f:(fun response ->
+        Or_not_authorized.map response ~f:(function
+          | Error _ as x -> Error (initial_message x)
+          | Ok _ as x -> Ok (initial_message x)))
     in
     implement_gen ~here ?on_exception t (Direct f)
   ;;
@@ -733,7 +743,8 @@ module Streaming_rpc = struct
       | Unknown_query_id (_ : P.Query_id.t)
       | Authorization_failure (_ : Sexp.t)
       | Message_too_big (_ : Transport_intf.Send_result.message_too_big)
-      | Unknown (_ : Sexp.t) -> false
+      | Unknown (_ : Sexp.t)
+      | Lift_error (_ : Sexp.t) -> false
       | Write_error (_ : Sexp.t) -> true
     ;;
 
@@ -774,7 +785,7 @@ module Streaming_rpc = struct
        always send [abort] unless we've already received that message.
     *)
     let response_handler t : Connection.Response_handler.t =
-      fun response ~read_buffer ~read_buffer_pos_ref ->
+      fun response ~read_buffer ~read_buffer_pos_ref -> exclave_
       let bin_read_from_bigstring ?add_len reader ~len ~location =
         bin_read_from_bigstring
           ?add_len
@@ -1064,18 +1075,18 @@ module Pipe_rpc = struct
   let shapes t = Streaming_rpc.shapes t
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement ~(here : [%call_pos]) ?on_exception t f =
     Streaming_rpc.implement ~here ?on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
   ;;
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
     Streaming_rpc.implement_with_auth ~here ?on_exception t (fun a query ->
       match%map f a query with
-      | (Not_authorized _ : _ Or_not_authorized.t) as r -> r
-      | Authorized (Error _) as err -> err
-      | Authorized (Ok pipe) -> Authorized (Ok ((), pipe)))
+      | Or_not_authorized.Not_authorized _ as r -> Ok r
+      | Authorized (Error _) as err -> Ok err
+      | Authorized (Ok pipe) -> Ok (Authorized (Ok ((), pipe))))
   ;;
 
   module Direct_stream_writer = struct
@@ -1116,7 +1127,7 @@ module Pipe_rpc = struct
         ; group_element_in_writer : 'a T.group_entry Bag.Elt.t
         }
 
-      let create ?buffer ?(send_last_value_on_add = false) () =
+      let aux_create ?buffer () ~send_last_value_on_add =
         let buffer =
           match buffer with
           | None -> Buffer.create ()
@@ -1129,6 +1140,16 @@ module Pipe_rpc = struct
         ; last_value_not_written = Moption.create ()
         ; send_last_value_on_add
         }
+      ;;
+
+      let create ?buffer () = aux_create ?buffer ~send_last_value_on_add:false ()
+
+      let create_sending_last_value_on_add ?initial_buffer_size () =
+        let buffer =
+          Option.map initial_buffer_size ~f:(fun initial_size ->
+            Buffer.create ~initial_size ())
+        in
+        aux_create ?buffer ~send_last_value_on_add:true ()
       ;;
 
       let length t = Bag.length t.components
@@ -1266,12 +1287,15 @@ module Pipe_rpc = struct
     end
   end
 
-  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct ~(here : [%call_pos]) ?on_exception t f =
     Streaming_rpc.implement_direct ~here ?on_exception t f
   ;;
 
-  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
-    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f
+  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
+    let f_ok state query writer =
+      f state query writer |> Eager_deferred.map ~f:Or_error.return
+    in
+    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
   ;;
 
   let dispatch' t conn query =
@@ -1383,8 +1407,18 @@ module State_rpc = struct
   let shapes t = Streaming_rpc.shapes t
   let implement = Streaming_rpc.implement
   let implement_direct = Streaming_rpc.implement_direct
-  let implement_with_auth = Streaming_rpc.implement_with_auth
-  let implement_direct_with_auth = Streaming_rpc.implement_direct_with_auth
+
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
+    let f_ok state query = f state query |> Eager_deferred.map ~f:Or_error.return in
+    Streaming_rpc.implement_with_auth ~here ?on_exception t f_ok
+  ;;
+
+  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
+    let f_ok state query writer =
+      f state query writer |> Eager_deferred.map ~f:Or_error.return
+    in
+    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
+  ;;
 
   let unwrap_dispatch_result rpc_result =
     let open Result.Let_syntax in

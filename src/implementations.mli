@@ -59,7 +59,7 @@ module Direct_stream_writer : sig
       -> buf:Bigstring.t
       -> pos:int
       -> len:int
-      -> [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
+      -> local_ [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
   end
 end
 
@@ -84,7 +84,7 @@ module Instance : sig
 
   val set_on_receive
     :  t
-    -> (Description.t
+    -> (local_ Description.t
         -> query_id:Query_id.t
         -> Rpc_metadata.t option
         -> Execution_context.t
@@ -98,7 +98,7 @@ val instantiate
   -> connection_close_started:Info.t Deferred.t
   -> connection_state:'a
   -> writer:Protocol_writer.t
-  -> events:(Tracing_event.t -> unit) Bus.Read_write.t
+  -> events:(local_ Tracing_event.t -> unit) Bus.Read_write.t
   -> Instance.t
 
 val create_exn

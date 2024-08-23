@@ -18,7 +18,8 @@ let sexp_of_t_with_reason t ~get_connection_close_reason =
   | Unknown_query_id _
   | Authorization_failure _
   | Message_too_big _
-  | Unknown _ -> sexp_of_t t
+  | Unknown _
+  | Lift_error _ -> sexp_of_t t
 ;;
 
 (* it would make sense to just take a [Connection.t], but we take its pieces instead to
@@ -46,4 +47,15 @@ let to_error
       ; rpc_name : string
       ; rpc_version : int
       }]
+;;
+
+let implemented_in_protocol_version = function
+  | Connection_closed
+  | Bin_io_exn _
+  | Write_error _
+  | Uncaught_exn _
+  | Unimplemented_rpc _
+  | Unknown_query_id _ -> 1
+  | Authorization_failure _ | Message_too_big _ | Unknown _ -> 3
+  | Lift_error _ -> 5
 ;;

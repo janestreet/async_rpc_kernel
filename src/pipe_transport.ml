@@ -199,9 +199,9 @@ module Pipe_writer (Data : DATA) = struct
      transport. *)
   let flushed (_ : t) = Deferred.unit
   let ready_to_write = flushed
-  let sent_result x ~bytes : _ Send_result.t = Sent { result = x; bytes }
+  let sent_result x ~bytes : _ Send_result.t = exclave_ Sent { result = x; bytes }
 
-  let check_closed (t : t) f =
+  let check_closed (t : t) (local_ f) = exclave_
     if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed
   ;;
 
@@ -209,8 +209,9 @@ module Pipe_writer (Data : DATA) = struct
     t.bytes_written <- Int63.(t.bytes_written + of_int num_bytes)
   ;;
 
-  let send_bin_prot t writer x =
+  let send_bin_prot t writer x = exclave_
     check_closed t (fun () ->
+      exclave_
       let buf = Bin_prot.Utils.bin_dump ~header:true writer x in
       let data = Data.of_bigstring buf in
       let len = Data.length data in
@@ -226,8 +227,9 @@ module Pipe_writer (Data : DATA) = struct
     ~buf
     ~pos
     ~len:payload_size
-    =
+    = exclave_
     check_closed t (fun () ->
+      exclave_
       (* Write the size header manually and concatenate the two *)
       let data_size = writer.size x in
       let data = Bigstring.create (data_size + Header.length + payload_size) in
@@ -241,7 +243,7 @@ module Pipe_writer (Data : DATA) = struct
       sent_result () ~bytes:(len - Header.length))
   ;;
 
-  let send_bin_prot_and_bigstring_non_copying t writer x ~buf ~pos ~len =
+  let send_bin_prot_and_bigstring_non_copying t writer x ~buf ~pos ~len = exclave_
     match send_bin_prot_and_bigstring t writer x ~buf ~pos ~len with
     | Sent { result = (); bytes } -> sent_result Deferred.unit ~bytes
     | (Closed | Message_too_big _) as r -> r

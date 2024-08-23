@@ -76,7 +76,7 @@ module Received_response_kind : sig
     | One_way_so_no_response
     | Partial_response
     | Response_finished_ok (** The response was interpreted as successful  *)
-    | Response_finished_rpc_error_or_exn of Rpc_error.t
+    | Response_finished_rpc_error_or_exn of global_ Rpc_error.t
     (** The response was an rpc-level error, e.g. the implementation raised or its
         response was too large to send. *)
     | Response_finished_user_defined_error
@@ -116,7 +116,7 @@ type t =
   ; rpc : Description.t option
   (** Associated information for the RPC. This is [None] only for [Received (Response _)]
       events. *)
-  ; id : Int63.t
+  ; global_ id : Int63.t
   (** A unique identifier per in-flight RPC, this can be used to tie together request
       and response events. The client and server see the same id. *)
   ; payload_bytes : int

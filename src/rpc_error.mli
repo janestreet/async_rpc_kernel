@@ -20,3 +20,5 @@ val to_error
   -> connection_description:Info.t
   -> connection_close_started:Info.t Deferred.t
   -> Error.t
+
+val implemented_in_protocol_version : t -> int

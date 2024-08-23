@@ -225,21 +225,21 @@ module type S_private = sig
   (* Internally, we use a couple of extra functions on connections that aren't exposed to
      users. *)
 
-  val compute_metadata : t -> Description.t -> Query_id.t -> Rpc_metadata.t option
+  val compute_metadata : t -> local_ Description.t -> Query_id.t -> Rpc_metadata.t option
 
   module Response_handler_action : sig
     type response_with_determinable_status =
       | Pipe_eof
       | Expert_indeterminate
       | Determinable :
-          'a Rpc_result.t * 'a Implementation.F.error_mode
+          global_ 'a Rpc_result.t * global_ 'a Implementation.F.error_mode
           -> response_with_determinable_status
 
     type t =
       | Keep
-      | Wait of unit Deferred.t
+      | Wait of global_ unit Deferred.t
       | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
-      | Expert_remove_and_wait of unit Deferred.t
+      | Expert_remove_and_wait of global_ unit Deferred.t
   end
 
   module Response_handler : sig
@@ -247,7 +247,7 @@ module type S_private = sig
       Nat0.t Response.t
       -> read_buffer:Bigstring.t
       -> read_buffer_pos_ref:int ref
-      -> Response_handler_action.t
+      -> local_ Response_handler_action.t
   end
 
   val sexp_of_t_hum_writer : t -> Sexp.t
@@ -304,7 +304,7 @@ module type S_private = sig
 
   (** Allows getting information from the RPC that may be used for tracing or metrics. The
       interface is not yet stable. *)
-  val events : t -> (Tracing_event.t -> unit) Bus.Read_only.t
+  val events : t -> (local_ Tracing_event.t -> unit) Bus.Read_only.t
 
   (** The header that would be sent at the beginning of a connection. This can be used to
       pre-share this part of the handshake (see the [protocol_version_headers] argument to
@@ -323,9 +323,9 @@ module type S_private = sig
       The passed [query_id] may be used to correlate with a listener on the {!events} bus. *)
   val set_metadata_hooks
     :  t
-    -> when_sending:(Description.t -> query_id:Int63.t -> Rpc_metadata.t option)
+    -> when_sending:(local_ Description.t -> query_id:Int63.t -> Rpc_metadata.t option)
     -> on_receive:
-         (Description.t
+         (local_ Description.t
           -> query_id:Int63.t
           -> Rpc_metadata.t option
           -> Execution_context.t
@@ -343,6 +343,7 @@ module type S_private = sig
       val v2 : t
       val v3 : t
       val v4 : t
+      val v5 : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

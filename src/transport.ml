@@ -79,7 +79,8 @@ module Writer = struct
     M.ready_to_write t
   ;;
 
-  let send_bin_prot (T { impl = (module M); t; _ }) bin_writer x : _ Send_result.t =
+  let send_bin_prot (T { impl = (module M); t; _ }) bin_writer x : _ Send_result.t
+    = exclave_
     M.send_bin_prot t bin_writer x
   ;;
 
@@ -91,7 +92,7 @@ module Writer = struct
     ~pos
     ~len
     : _ Send_result.t
-    =
+    = exclave_
     M.send_bin_prot_and_bigstring t bin_writer x ~buf ~pos ~len
   ;;
 
@@ -103,7 +104,7 @@ module Writer = struct
     ~pos
     ~len
     : _ Send_result.t
-    =
+    = exclave_
     M.send_bin_prot_and_bigstring_non_copying t bin_writer x ~buf ~pos ~len
   ;;
 

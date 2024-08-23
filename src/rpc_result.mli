@@ -5,11 +5,12 @@ type 'a t = 'a Protocol.Rpc_result.t
 
 val uncaught_exn : location:string -> exn -> 'a t
 val bin_io_exn : location:string -> exn -> 'a t
-val authorization_error : location:string -> exn -> 'a t
+val authorization_failure : location:string -> exn -> 'a t
+val lift_error : location:string -> exn -> 'a t
 
 val try_with
   :  here:Source_code_position.t
-  -> (unit -> 'a t Deferred.t)
+  -> local_ (unit -> 'a t Deferred.t)
   -> Description.t
   -> location:string
   -> on_background_exception:On_exception.t

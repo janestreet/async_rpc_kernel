@@ -698,7 +698,7 @@ let%expect_test "connection closes before response received" =
     Close_reader
     Close_finished
     |}];
-  let%bind result = result in
+  let%bind result in
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
   [%expect {| (Error Connection_closed) |}];
   return ()

@@ -102,7 +102,7 @@ let supported_versions t ~rpc_name =
       ~f:(fun i -> t.descriptions.(lb + i).version)
 ;;
 
-let index t description =
+let index t (local_ description) = exclave_
   match
     Array.binary_search_segmented
       t.descriptions

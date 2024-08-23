@@ -32,6 +32,7 @@ module Header : sig
   val v2 : t
   val v3 : t
   val v4 : t
+  val v5 : t
   val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
@@ -40,6 +41,7 @@ end = struct
     Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
 
+  let v5 = create ~supported_versions:[ 1; 2; 3; 4; 5 ]
   let v4 = create ~supported_versions:[ 1; 2; 3; 4 ]
   let v3 = create ~supported_versions:[ 1; 2; 3 ]
   let v2 = create ~supported_versions:[ 1; 2 ]
@@ -100,14 +102,14 @@ module Response_handler_action = struct
     | Pipe_eof
     | Expert_indeterminate
     | Determinable :
-        'a Rpc_result.t * 'a Implementation.F.error_mode
+        global_ 'a Rpc_result.t * global_ 'a Implementation.F.error_mode
         -> response_with_determinable_status
 
   type t =
     | Keep
-    | Wait of unit Deferred.t
+    | Wait of global_ unit Deferred.t
     | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
-    | Expert_remove_and_wait of unit Deferred.t
+    | Expert_remove_and_wait of global_ unit Deferred.t
 end
 
 module Response_handler = struct
@@ -115,7 +117,7 @@ module Response_handler = struct
     Nat0.t P.Response.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
-    -> Response_handler_action.t
+    -> local_ Response_handler_action.t
 end
 
 type t =
@@ -138,14 +140,14 @@ type t =
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
       *)
-  ; events : (Tracing_event.t -> unit) Bus.Read_write.t
+  ; events : (local_ Tracing_event.t -> unit) Bus.Read_write.t
   ; metadata_for_dispatch :
-      (Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
+      (local_ Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
   ; peer_metadata : Peer_metadata.t Set_once.t
       (* responses to queries are written by the implementations instance. Other events
      are written by this module. *)
   ; metadata_on_receive_to_add_to_implementations_instance :
-      (Description.t
+      (local_ Description.t
        -> query_id:P.Query_id.t
        -> Rpc_metadata.t option
        -> Execution_context.t
@@ -231,8 +233,8 @@ let set_metadata_hooks t ~when_sending ~on_receive =
     Moption.set_some t.metadata_for_dispatch when_sending;
     let on_receive =
       (on_receive
-        : _ -> query_id:Int63.t -> _ -> _ -> _
-        :> _ -> query_id:P.Query_id.t -> _ -> _ -> _)
+        : local_ _ -> query_id:Int63.t -> _ -> _ -> _
+        :> local_ _ -> query_id:P.Query_id.t -> _ -> _ -> _)
     in
     (match Set_once.get t.implementations_instance with
      | Some instance -> Implementations.Instance.set_on_receive instance on_receive
@@ -244,11 +246,11 @@ let set_metadata_hooks t ~when_sending ~on_receive =
     `Ok)
 ;;
 
-let write_event t event =
+let write_event t (local_ event) =
   if not (Bus.is_closed t.events) then Bus.write_local t.events event
 ;;
 
-let compute_metadata t description query_id =
+let compute_metadata t (local_ description) query_id =
   if Moption.is_some t.metadata_for_dispatch
   then
     (Moption.unsafe_get t.metadata_for_dispatch)
@@ -267,10 +269,10 @@ end
 let handle_send_result
   : 'a.
   t
-  -> 'a Transport.Send_result.t
-  -> rpc:Description.t
-  -> kind:_ Tracing_event.Kind.t
-  -> id:P.Query_id.t
+  -> local_ 'a Transport.Send_result.t
+  -> rpc:local_ Description.t
+  -> kind:local_ _ Tracing_event.Kind.t
+  -> id:local_ P.Query_id.t
   -> sending_one_way_rpc:bool
   -> ('a, Dispatch_error.t) Result.t
   =
@@ -278,7 +280,7 @@ let handle_send_result
   let id = (id :> Int63.t) in
   match r with
   | Sent { result = x; bytes } ->
-    let ev : Tracing_event.t =
+    let ev : Tracing_event.t = local_
       { event = Sent kind; rpc = Some rpc; id; payload_bytes = bytes }
     in
     write_event t ev;
@@ -304,7 +306,7 @@ let handle_send_result
 ;;
 
 (* Used for heartbeats and protocol negotiation *)
-let handle_special_send_result t (result : unit Transport.Send_result.t) =
+let handle_special_send_result t (local_ (result : unit Transport.Send_result.t)) =
   match result with
   | Sent { result = (); bytes = (_ : int) } -> ()
   | Closed ->
@@ -325,7 +327,7 @@ let send_query_with_registered_response_handler
   (query : 'query P.Query.t)
   ~response_handler
   ~kind
-  ~(send_query : 'query P.Query.t -> 'response Transport.Send_result.t)
+  ~(local_ send_query : 'query P.Query.t -> local_ 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
   let registered_response_handler =
@@ -367,7 +369,9 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) 
       query
       ~response_handler
       ~kind
-      ~send_query:(fun query -> Protocol_writer.send_query writer query ~bin_writer_query) 
+      ~send_query:
+        (local_
+        fun query -> exclave_ Protocol_writer.send_query writer query ~bin_writer_query)
     [@nontail]
 ;;
 
@@ -394,14 +398,16 @@ let make_dispatch_bigstring
       query
       ~response_handler
       ~kind:Query
-      ~send_query:(fun query ->
-        Protocol_writer.send_expert_query
-          writer
-          query
-          ~buf
-          ~pos
-          ~len
-          ~send_bin_prot_and_bigstring:do_send) [@nontail]
+      ~send_query:
+        (local_
+        fun query -> exclave_
+          Protocol_writer.send_expert_query
+            writer
+            query
+            ~buf
+            ~pos
+            ~len
+            ~send_bin_prot_and_bigstring:do_send) [@nontail]
 ;;
 
 let dispatch_bigstring =
@@ -442,7 +448,7 @@ let handle_response
       | Ok x -> (x :> int)
       | Error _ -> 0
     in
-    let response_event kind ~payload_bytes =
+    let response_event (local_ kind) ~payload_bytes =
       write_event
         t
         { Tracing_event.event = Received (Response kind)
@@ -461,9 +467,10 @@ let handle_response
        Wait wait
      | Expert_remove_and_wait wait ->
        response_event
-         (match response.data with
-          | Ok _ -> Response_finished_expert_uninterpreted
-          | Error err -> Response_finished_rpc_error_or_exn err)
+         (local_
+         match response.data with
+         | Ok _ -> Response_finished_expert_uninterpreted
+         | Error err -> Response_finished_rpc_error_or_exn err)
          ~payload_bytes;
        Hashtbl.remove t.open_queries response.id;
        Wait wait
@@ -473,7 +480,7 @@ let handle_response
         | Ok (Determinable (result, error_mode)) ->
           if Bus.num_subscribers t.events > 0
           then (
-            let kind : Tracing_event.Received_response_kind.t =
+            let kind : Tracing_event.Received_response_kind.t = local_
               match error_mode, result with
               | _, Error err -> Response_finished_rpc_error_or_exn err
               | Always_ok, Ok _ -> Response_finished_ok
@@ -501,20 +508,22 @@ let handle_response
           Continue
         | Ok Pipe_eof ->
           response_event
-            (if Result.is_error response.data
-             then Response_finished_rpc_error_or_exn Connection_closed
-             else Response_finished_ok)
+            (local_
+            if Result.is_error response.data
+            then Response_finished_rpc_error_or_exn Connection_closed
+            else Response_finished_ok)
             ~payload_bytes;
           Continue
         | Ok Expert_indeterminate ->
           response_event
-            (match response.data with
-             | Ok _ -> Response_finished_expert_uninterpreted
-             | Error err -> Response_finished_rpc_error_or_exn err)
+            (local_
+            match response.data with
+            | Ok _ -> Response_finished_expert_uninterpreted
+            | Error err -> Response_finished_rpc_error_or_exn err)
             ~payload_bytes;
           Continue
         | Error { global = e } ->
-          response_event (Response_finished_rpc_error_or_exn e) ~payload_bytes;
+          response_event (local_ Response_finished_rpc_error_or_exn e) ~payload_bytes;
           (match e with
            | Unimplemented_rpc _ -> Continue
            | Bin_io_exn _
@@ -524,7 +533,8 @@ let handle_response
            | Unknown_query_id _
            | Authorization_failure _
            | Message_too_big _
-           | Unknown _ -> Stop (Error e))))
+           | Unknown _
+           | Lift_error _ -> Stop (Error e))))
 ;;
 
 let handle_msg

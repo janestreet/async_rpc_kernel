@@ -5,7 +5,7 @@ type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
 
 let%expect_test _ =
   print_endline [%bin_digest: unit t];
-  [%expect {| 106a55f7c7d8cf06dd3f4a8e759329f3 |}]
+  [%expect {| 3c5c4bdb6a7668a7a89b965be2fac1ba |}]
 ;;
 
 module Located_error = struct
@@ -24,13 +24,17 @@ let bin_io_exn ~location exn =
   Error (Rpc_error.Bin_io_exn ([%sexp_of: Located_error.t] { location; exn }))
 ;;
 
-let authorization_error ~location exn =
+let authorization_failure ~location exn =
   Error (Rpc_error.Authorization_failure ([%sexp_of: Located_error.t] { location; exn }))
+;;
+
+let lift_error ~location exn =
+  Error (Rpc_error.Lift_error ([%sexp_of: Located_error.t] { location; exn }))
 ;;
 
 let try_with
   ~here
-  f
+  (local_ f)
   description
   ~location
   ~on_background_exception

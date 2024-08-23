@@ -78,7 +78,7 @@ module Instance = struct
   type 'a unpacked = 'a Instance.unpacked =
     { implementations : ('a implementations[@sexp.opaque])
     ; writer : Protocol_writer.t
-    ; events : (Tracing_event.t -> unit) Bus.Read_write.t
+    ; events : (local_ Tracing_event.t -> unit) Bus.Read_write.t
     ; open_streaming_responses : streaming_responses
     ; mutable stopped : bool
     ; connection_state : 'a
@@ -87,7 +87,7 @@ module Instance = struct
     ; mutable last_dispatched_implementation :
         (Description.t * ('a Implementation.t[@sexp.opaque])) option
     ; mutable on_receive :
-        Description.t
+        local_ Description.t
         -> query_id:P.Query_id.t
         -> Rpc_metadata.t option
         -> Execution_context.t
@@ -119,11 +119,17 @@ module Instance = struct
             }]
   ;;
 
-  let write_event t event =
+  let write_event t (local_ event) =
     if not (Bus.is_closed t.events) then Bus.write_local t.events event
   ;;
 
-  let handle_send_result t qid rpc kind (result : _ Transport.Send_result.t) =
+  let handle_send_result
+    t
+    (local_ qid)
+    (local_ rpc)
+    (local_ kind)
+    (local_ (result : _ Transport.Send_result.t))
+    =
     let id = (qid : P.Query_id.t :> Int63.t) in
     (match result with
      | Sent { result = _; bytes } ->
@@ -481,7 +487,7 @@ module Instance = struct
       ()
     ;;
 
-    let schedule_write_message_expert t ~buf ~pos ~len =
+    let schedule_write_message_expert t ~buf ~pos ~len = exclave_
       let bin_writer_message = Cached_bin_writer.prep_write_expert t.stream_writer ~len in
       let (T instance) = t.instance in
       if not instance.stopped
@@ -573,7 +579,7 @@ module Instance = struct
         | `Ok -> `Flushed (Protocol_writer.flushed instance.writer)
       ;;
 
-      let schedule_write t ~buf ~pos ~len =
+      let schedule_write t ~buf ~pos ~len = exclave_
         if Ivar.is_full t.closed
         then `Closed
         else (
@@ -623,9 +629,14 @@ module Instance = struct
 
   let authorization_failure_result error ~rpc_kind =
     let exn = Error.to_exn error in
-    Rpc_result.authorization_error
+    Rpc_result.authorization_failure
       exn
       ~location:[%string "server-side %{rpc_kind} authorization"]
+  ;;
+
+  let lift_failure_result error ~rpc_kind =
+    let exn = Error.to_exn error in
+    Rpc_result.lift_error exn ~location:[%string "server-side %{rpc_kind} lift"]
   ;;
 
   let apply_streaming_implementation
@@ -672,7 +683,12 @@ module Instance = struct
         Hashtbl.set t.open_streaming_responses ~key:id ~data:(Direct writer);
         `Direct (f, writer)
     in
-    let run_impl impl split_ok handle_ok on_err =
+    let run_impl
+      (impl : _ -> (_, _) Result.t Or_not_authorized.t Or_error.t Deferred.t)
+      split_ok
+      handle_ok
+      on_err
+      =
       let result =
         Rpc_result.try_with
           ~here
@@ -699,7 +715,7 @@ module Instance = struct
           Hashtbl.remove t.open_streaming_responses id;
           on_err ();
           write_streaming_initial t id bin_init_writer (Error err) `Final ~rpc ~error_mode
-        | Ok (Or_not_authorized.Not_authorized error) ->
+        | Ok (Ok (Or_not_authorized.Not_authorized error)) ->
           Hashtbl.remove t.open_streaming_responses id;
           on_err ();
           write_streaming_initial
@@ -710,11 +726,22 @@ module Instance = struct
             `Final
             ~rpc
             ~error_mode
-        | Ok (Authorized (Error error)) ->
+        | Ok (Error error) ->
+          Hashtbl.remove t.open_streaming_responses id;
+          on_err ();
+          write_streaming_initial
+            t
+            id
+            bin_init_writer
+            (lift_failure_result error ~rpc_kind:"pipe_rpc")
+            `Final
+            ~rpc
+            ~error_mode
+        | Ok (Ok (Authorized (Error error))) ->
           Hashtbl.remove t.open_streaming_responses id;
           on_err ();
           write_streaming_initial t id bin_init_writer (Ok error) `Final ~rpc ~error_mode
-        | Ok (Authorized (Ok ok)) ->
+        | Ok (Ok (Authorized (Ok ok))) ->
           let initial, rest = split_ok ok in
           write_streaming_initial
             t
@@ -781,7 +808,7 @@ module Instance = struct
     : _ Transport.Handler_result.t
     =
     let id = query.id in
-    let rpc =
+    let local_ rpc =
       ({ name = P.Rpc_tag.to_string query.tag; version = query.version } : Description.t)
     in
     let emit_regular_query_tracing_event () =
@@ -827,7 +854,7 @@ module Instance = struct
              Continue
            | Some result ->
              (match result with
-              | Ok (_ : unit Or_not_authorized.t) ->
+              | Ok (_ : unit Or_not_authorized.t Or_error.t) ->
                 (* We don't close connections on unauthorized RPCs. Since there is no way
                    to communicate failure back to the sender in one-way rpcs, we do
                    nothing. *)
@@ -857,7 +884,7 @@ module Instance = struct
       let result : _ Transport_intf.Handler_result.t =
         try
           let len = (query.data :> int) in
-          let (_ : _ Or_not_authorized.t Deferred.t) =
+          let (_ : _ Or_not_authorized.t Or_error.t Deferred.t) =
             f t.connection_state read_buffer ~pos:!read_buffer_pos_ref ~len
           in
           read_buffer_pos_ref := !read_buffer_pos_ref + len;
@@ -897,15 +924,16 @@ module Instance = struct
           ~len:query.data
           ~location:"server-side rpc query un-bin-io'ing"
       in
-      let or_not_authorized_to_rpc_result = function
-        | Or_not_authorized.Authorized result -> Ok result
-        | Not_authorized error -> authorization_failure_result error ~rpc_kind:"rpc"
+      let lift_result_to_rpc_result = function
+        | Ok (Or_not_authorized.Authorized result) -> Ok result
+        | Ok (Not_authorized error) -> authorization_failure_result error ~rpc_kind:"rpc"
+        | Error error -> lift_failure_result error ~rpc_kind:"rpc"
       in
       (match result_mode with
        | Implementation.F.Blocking ->
          (match
             Result.bind query_contents ~f:(fun query ->
-              f t.connection_state query |> or_not_authorized_to_rpc_result)
+              f t.connection_state query |> lift_result_to_rpc_result)
           with
           | response ->
             write_single_response t id bin_response_writer response ~rpc ~error_mode
@@ -959,7 +987,7 @@ module Instance = struct
          in
          let handle_result result =
            let write_response response =
-             let rpc =
+             let local_ rpc =
                ({ name = P.Rpc_tag.to_string query.tag; version = query.version }
                 : Description.t)
              in
@@ -979,9 +1007,11 @@ module Instance = struct
                on_exception
                { name = P.Rpc_tag.to_string query.tag; version = query.version }
                ~close_connection_monitor
-           | Ok (Or_not_authorized.Authorized result) -> write_response (Ok result)
-           | Ok (Not_authorized error) ->
+           | Ok (Ok (Or_not_authorized.Authorized result)) -> write_response (Ok result)
+           | Ok (Ok (Not_authorized error)) ->
              write_response (authorization_failure_result error ~rpc_kind:"rpc")
+           | Ok (Error error) ->
+             write_response (lift_failure_result error ~rpc_kind:"rpc")
          in
          (* In the common case that the implementation returns a value immediately, we will
             write the response immediately as well (this is also why the above [try_with]
@@ -1097,7 +1127,7 @@ module Instance = struct
       let d =
         let open Eager_deferred.Let_syntax in
         match%map d with
-        | Ok (Authorized result) ->
+        | Ok (Ok (Authorized result)) ->
           let d =
             match result with
             | Replied -> Deferred.unit
@@ -1115,8 +1145,10 @@ module Instance = struct
                    ~connection_close_started:t.connection_close_started
               |> ok_exn);
             Ok ())
-        | Ok (Not_authorized error) ->
+        | Ok (Ok (Not_authorized error)) ->
           handle_exn (authorization_failure_result error ~rpc_kind:"rpc expert")
+        | Ok (Error error) ->
+          handle_exn (lift_failure_result error ~rpc_kind:"rpc expert")
         | Error exn ->
           let result = handle_exn (computation_failure_result exn) in
           let (`Stop | `Continue) =
@@ -1499,7 +1531,7 @@ module Expert = struct
         cannot_send ([%globalize: unit Transport.Send_result.t] r)
     ;;
 
-    let handle_send_result : unit Transport.Send_result.t -> unit = function
+    let handle_send_result : local_ unit Transport.Send_result.t -> unit = function
       | Sent { result = (); bytes = (_ : int) } | Closed -> ()
       | Message_too_big _ as r ->
         cannot_send ([%globalize: unit Transport.Send_result.t] r)

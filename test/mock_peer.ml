@@ -368,14 +368,15 @@ let write ?don't_read_yet t writer x =
   write_bigstring ?don't_read_yet t bigstring
 ;;
 
-let write_handshake t (handshake : [ `v3 | `v4 ]) =
+let write_handshake ?don't_read_yet t (handshake : [ `v3 | `v4 ]) =
   let header =
     match handshake with
     | `v3 -> Test_helpers.Header.v3
     | `v4 -> Test_helpers.Header.v4
   in
-  write t [%bin_writer: Test_helpers.Header.t] header;
+  write ?don't_read_yet t [%bin_writer: Test_helpers.Header.t] header;
   write
+    ?don't_read_yet
     t
     [%bin_writer: Protocol.Message.nat0_t]
     (Metadata { identification = None; menu = None })

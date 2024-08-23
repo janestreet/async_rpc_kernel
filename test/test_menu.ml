@@ -89,8 +89,8 @@ module type Menu_intf = sig
   val of_v1_or_v2 : V1_or_v2.t -> t
   val supported_rpcs : t -> Description.t list
   val supported_versions : t -> rpc_name:string -> Int.Set.t
-  val mem : t -> Description.t -> bool
-  val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t option
+  val mem : t -> local_ Description.t -> bool
+  val shape_digests : t -> local_ Description.t -> Rpc_shapes.Just_digests.t option
 
   val highest_available_version
     :  t
