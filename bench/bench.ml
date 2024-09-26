@@ -179,7 +179,7 @@ let%bench_fun ("direct write to group (big)" [@indexed n = [ 1; 10; 100 ]]) =
 let add_tracing_subscriber connection =
   let _subscriber =
     Bus.subscribe_exn
-      (Async_rpc_kernel.Async_rpc_kernel_private.Connection.events connection)
+      (Async_rpc_kernel.Async_rpc_kernel_private.Connection.tracing_events connection)
       [%here]
       ~f:(fun event ->
         let (_ : _) = Base.Sys.opaque_identity event in

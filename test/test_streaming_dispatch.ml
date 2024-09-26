@@ -52,7 +52,7 @@ let unwrap_results = function
 ;;
 
 let write_pipe_close_and_drain writer_ref get_pipe_reader_from_rpc_result result =
-  let%bind result = result in
+  let%bind result in
   let reader = get_pipe_reader_from_rpc_result (unwrap_results result) in
   let writer = Option.value_exn !writer_ref in
   let%bind () = Pipe.write writer () in

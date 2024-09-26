@@ -32,20 +32,21 @@ module rec Implementation : sig
       | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
 
     type (_, _) result_mode =
-      | Blocking : ('a, 'a Or_not_authorized.t) result_mode
-      | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
+      | Blocking : ('a, 'a Or_not_authorized.t Or_error.t) result_mode
+      | Deferred : ('a, 'a Or_not_authorized.t Or_error.t Deferred.t) result_mode
 
     type ('connection_state, 'query, 'init, 'update) streaming_impl =
       | Pipe of
           ('connection_state
            -> 'query
            -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t
+                Or_error.t
                 Deferred.t)
       | Direct of
           ('connection_state
            -> 'query
            -> 'update Direct_stream_writer.t
-           -> ('init, 'init) Result.t Or_not_authorized.t Deferred.t)
+           -> ('init, 'init) Result.t Or_not_authorized.t Or_error.t Deferred.t)
 
     type ('connection_state, 'query, 'init, 'update) streaming_rpc =
       { bin_query_reader : 'query Bin_prot.Type_class.reader
@@ -60,7 +61,7 @@ module rec Implementation : sig
     type 'connection_state t =
       | One_way :
           'msg Bin_prot.Type_class.reader
-          * ('connection_state -> 'msg -> unit Or_not_authorized.t Deferred.t)
+          * ('connection_state -> 'msg -> unit Or_not_authorized.t Or_error.t Deferred.t)
           * Source_code_position.t
           -> 'connection_state t
       | One_way_expert :
@@ -68,7 +69,7 @@ module rec Implementation : sig
            -> Bigstring.t
            -> pos:int
            -> len:int
-           -> unit Or_not_authorized.t Deferred.t)
+           -> unit Or_not_authorized.t Or_error.t Deferred.t)
           -> 'connection_state t
       | Rpc :
           'query Bin_prot.Type_class.reader
@@ -141,15 +142,17 @@ and Implementations : sig
   type 'connection_state implementations = 'connection_state t
 
   module rec Instance : sig
-    type streaming_response =
-      | Pipe : _ Pipe.Reader.t -> streaming_response
-      | Direct : _ Direct_stream_writer.t -> streaming_response
+    module Streaming_response : sig
+      type t =
+        | Pipe : _ Pipe.Reader.t Set_once.t -> t
+        | Direct : _ Direct_stream_writer.t -> t
+    end
 
     type 'a unpacked =
       { implementations : 'a implementations
       ; writer : Protocol_writer.t
-      ; events : (Tracing_event.t -> unit) Bus.Read_write.t
-      ; open_streaming_responses : (Query_id.t, streaming_response) Hashtbl.t
+      ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
+      ; open_streaming_responses : (Protocol.Query_id.t, Streaming_response.t) Hashtbl.t
       ; mutable stopped : bool
       ; connection_state : 'a
       ; connection_description : Info.t

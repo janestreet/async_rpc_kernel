@@ -36,6 +36,7 @@ module Rpc_error : sig
     | Authorization_failure of Sexp.t
     | Message_too_big of Transport.Send_result.message_too_big
     | Unknown of Sexp.t
+    | Lift_error of Sexp.t
   [@@deriving bin_io, sexp, compare]
 
   include Comparable.S with type t := t
@@ -51,11 +52,12 @@ end = struct
       | Authorization_failure of Core.Sexp.t
       | Message_too_big of Transport.Send_result.message_too_big
       | Unknown of Core.Sexp.t
+      | Lift_error of Core.Sexp.t
     [@@deriving bin_io, sexp, compare]
 
     let%expect_test "stable" =
       print_endline [%bin_digest: t];
-      [%expect {| 7393bbbb2d57fff150d0e2b37cf022f3 |}]
+      [%expect {| 7dc04a86186858eb0bf5008e9a063c21 |}]
     ;;
   end
 
@@ -68,7 +70,7 @@ module Rpc_result = struct
 
   let%expect_test _ =
     print_endline [%bin_digest: unit t];
-    [%expect {| 106a55f7c7d8cf06dd3f4a8e759329f3 |}]
+    [%expect {| 3c5c4bdb6a7668a7a89b965be2fac1ba |}]
   ;;
 end
 
@@ -136,7 +138,7 @@ module Response = struct
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
-    [%expect {| 0829b98561f5b848c3be1921db7969a8 |}]
+    [%expect {| e08147cd47ea743ad47cbb4abcd9448d |}]
   ;;
 
   type 'a t = 'a needs_length [@@deriving bin_read]
@@ -154,7 +156,6 @@ module Stream_query = struct
     [%expect {| 2c37868761971c78cc355d43f0854860 |}]
   ;;
 
-  type 'a t = 'a needs_length [@@deriving bin_read]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end
 
@@ -199,7 +200,7 @@ module Message = struct
 
   let%expect_test _ =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 3e811b2a6e524c387272aafc395e6011 |}]
+    [%expect {| b6f09da28a0d4bda27778fbb89b40dc0 |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -216,7 +217,7 @@ let%test "v1 message compatibility" =
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
-      [%expect {| b5514da32c3863fcbb1c2229b877cc6f |}]
+      [%expect {| 50a43e9365bd0d30798aaeca7f28c7ac |}]
     ;;
   end
   in

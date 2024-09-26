@@ -299,7 +299,7 @@ let%expect_test "direct stream writer impl raises synchronously" =
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
       (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   print_s
     ([%sexp_of: bool]
        (Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.is_closed writer));
@@ -321,7 +321,7 @@ let%expect_test "direct stream writer impl raises asynchronously" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   let write1 =
     Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.write writer "example1"
   in
@@ -380,7 +380,7 @@ let%expect_test "direct stream writer returns error" =
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
       (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   print_s
     ([%sexp_of: bool]
        (Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.is_closed writer));
@@ -402,7 +402,7 @@ let%expect_test "direct stream writer" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   print_s
     ([%sexp_of: bool]
        (Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.is_closed writer));
@@ -537,7 +537,7 @@ let%expect_test "direct stream writer errors after a scheduled write" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   let buf = Bin_prot.Writer.to_bigstring [%bin_writer: string] "example" in
   let schedule_result =
     Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
@@ -582,7 +582,7 @@ let%expect_test "direct stream writer connection closed after a scheduled write,
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
-  let%bind writer = writer in
+  let%bind writer in
   let buf = Bin_prot.Writer.to_bigstring [%bin_writer: string] "example" in
   let schedule_result =
     Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
@@ -648,7 +648,7 @@ let%expect_test "error dispatching a pipe rpc" =
          (Response_finished_rpc_error_or_exn (Uncaught_exn "injected error")))))
       (rpc ()) (id 1) (payload_bytes 20)))
     |}];
-  let%bind result = result in
+  let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
   [%expect {| (Error (Uncaught_exn "injected error")) |}];
   return ()
@@ -685,7 +685,7 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
      ((event (Received (Response Response_finished_user_defined_error)))
       (rpc ()) (id 1) (payload_bytes 16)))
     |}];
-  let%bind result = result in
+  let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
   [%expect {| (Ok (Error "rpc error")) |}];
   return ()
@@ -728,7 +728,7 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
           (Bin_io_exn "binio error reading query")))))
       (rpc ()) (id 1) (payload_bytes 31)))
     |}];
-  let%bind result = result in
+  let%bind result in
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
   [%expect {| (Error (Bin_io_exn "binio error reading query")) |}];
   return ()

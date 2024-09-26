@@ -32,6 +32,7 @@ module Header : sig
   val v2 : t
   val v3 : t
   val v4 : t
+  val v5 : t
   val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
@@ -40,6 +41,7 @@ end = struct
     Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
 
+  let v5 = create ~supported_versions:[ 1; 2; 3; 4; 5 ]
   let v4 = create ~supported_versions:[ 1; 2; 3; 4 ]
   let v3 = create ~supported_versions:[ 1; 2; 3 ]
   let v2 = create ~supported_versions:[ 1; 2 ]
@@ -138,7 +140,7 @@ type t =
       (* Variant is decided once the protocol version negotiation is completed -- then, either
      sending the id is unsupported, or the id is requested and is on its way or received
       *)
-  ; events : (Tracing_event.t -> unit) Bus.Read_write.t
+  ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
   ; metadata_for_dispatch :
       (Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
   ; peer_metadata : Peer_metadata.t Set_once.t
@@ -219,7 +221,7 @@ let bytes_to_write t = Protocol_writer.bytes_to_write t.writer
 let bytes_written t = Protocol_writer.bytes_written t.writer
 let bytes_read t = Reader.bytes_read t.reader
 let flushed t = Protocol_writer.flushed t.writer
-let events t = (t.events :> _ Bus.Read_only.t)
+let tracing_events t = (t.tracing_events :> _ Bus.Read_only.t)
 let have_metadata_hooks_been_set t = Moption.is_some t.metadata_for_dispatch
 
 let set_metadata_hooks t ~when_sending ~on_receive =
@@ -244,8 +246,8 @@ let set_metadata_hooks t ~when_sending ~on_receive =
     `Ok)
 ;;
 
-let write_event t event =
-  if not (Bus.is_closed t.events) then Bus.write_local t.events event
+let write_tracing_event t event =
+  if not (Bus.is_closed t.tracing_events) then Bus.write_local t.tracing_events event
 ;;
 
 let compute_metadata t description query_id =
@@ -281,17 +283,18 @@ let handle_send_result
     let ev : Tracing_event.t =
       { event = Sent kind; rpc = Some rpc; id; payload_bytes = bytes }
     in
-    write_event t ev;
+    write_tracing_event t ev;
     if sending_one_way_rpc
-    then write_event t { ev with event = Received (Response One_way_so_no_response) };
+    then
+      write_tracing_event t { ev with event = Received (Response One_way_so_no_response) };
     Ok x
   | Closed ->
-    write_event
+    write_tracing_event
       t
       { event = Failed_to_send (kind, Closed); rpc = Some rpc; id; payload_bytes = 0 };
     Error Dispatch_error.Closed
   | Message_too_big err ->
-    write_event
+    write_tracing_event
       t
       { event = Failed_to_send (kind, Too_large)
       ; rpc = Some rpc
@@ -443,7 +446,7 @@ let handle_response
       | Error _ -> 0
     in
     let response_event kind ~payload_bytes =
-      write_event
+      write_tracing_event
         t
         { Tracing_event.event = Received (Response kind)
         ; rpc = None
@@ -471,7 +474,7 @@ let handle_response
        Hashtbl.remove t.open_queries response.id;
        (match removal_circumstances with
         | Ok (Determinable (result, error_mode)) ->
-          if Bus.num_subscribers t.events > 0
+          if Bus.num_subscribers t.tracing_events > 0
           then (
             let kind : Tracing_event.Received_response_kind.t =
               match error_mode, result with
@@ -524,7 +527,8 @@ let handle_response
            | Unknown_query_id _
            | Authorization_failure _
            | Message_too_big _
-           | Unknown _ -> Stop (Error e))))
+           | Unknown _
+           | Lift_error _ -> Stop (Error e))))
 ;;
 
 let handle_msg
@@ -714,16 +718,21 @@ let on_message t ~close_connection_monitor =
   Staged.stage f
 ;;
 
+let time_ns_to_microsecond_string time =
+  Time_ns.round_down_to_us time
+  |> Time_ns.to_string_abs_trimmed ~zone:(Lazy.force Timezone.local)
+;;
+
 let heartbeat_now t =
-  let since_last_heartbeat =
-    Time_ns.diff (Synchronous_time_source.now t.time_source) t.last_seen_alive
-  in
+  let now = Synchronous_time_source.now t.time_source in
+  let since_last_heartbeat = Time_ns.diff now t.last_seen_alive in
   if Time_ns.Span.( > ) since_last_heartbeat t.heartbeat_config.timeout
   then (
     let reason () =
-      sprintf
-        !"No heartbeats received for %{sexp:Time_ns.Span.t}."
-        t.heartbeat_config.timeout
+      [%string
+        "No heartbeats received for %{t.heartbeat_config.timeout#Time_ns.Span}. Last \
+         seen at: %{time_ns_to_microsecond_string t.last_seen_alive}, now: \
+         %{time_ns_to_microsecond_string now}."]
     in
     don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true))
   else (
@@ -779,7 +788,7 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
     Implementations.instantiate
       implementations
       ~writer:t.writer
-      ~events:t.events
+      ~tracing_events:t.tracing_events
       ~connection_description:t.description
       ~connection_close_started:(Ivar.read t.close_started)
       ~connection_state
@@ -891,6 +900,7 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
       Monitor.try_with_local ~rest:`Log (fun () ->
         Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
+    let handshake_started_at = Synchronous_time_source.now t.time_source in
     match%bind
       Time_source.with_timeout
         (Time_source.of_synchronous t.time_source)
@@ -898,10 +908,16 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
         result
     with
     | `Timeout ->
+      let now = Synchronous_time_source.now t.time_source in
+      let reason () =
+        [%string
+          "Handshake timeout after %{handshake_timeout#Time_ns.Span}. Handshake started \
+           at %{time_ns_to_microsecond_string handshake_started_at}, now: \
+           %{time_ns_to_microsecond_string now}."]
+      in
       (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
-      don't_wait_for
-        (close t ~reason:(Info.of_string "Handshake timeout") ~send_reason_to_peer:true);
+      don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true);
       return (Error Handshake_error.Timeout)
     | `Result (Error exn) ->
       let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
@@ -1022,7 +1038,7 @@ let create
     ; implementations_instance = Set_once.create ()
     ; time_source
     ; heartbeat_event = Set_once.create ()
-    ; events =
+    ; tracing_events =
         Bus.create_exn
           [%here]
           Arity1_local
@@ -1045,7 +1061,7 @@ let create
            Info.of_string "RPC transport stopped")
        in
        close t ~reason ~send_reason_to_peer:false));
-  upon (Ivar.read t.close_finished) (fun () -> Bus.close t.events);
+  upon (Ivar.read t.close_finished) (fun () -> Bus.close t.tracing_events);
   let header = get_handshake_header () in
   let negotiated_protocol_version =
     match protocol_version_headers with

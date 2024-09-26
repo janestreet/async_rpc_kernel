@@ -68,6 +68,10 @@ module Implementation : sig
       Note [f] is called on every RPC rather than once on the initial connection state. *)
   val lift : 'a t -> f:('b -> 'a) -> 'b t
 
+  (** Like [lift] above, but allows for the possibility of the state mapping failing. If
+      [Error] is returned, then the peer will receive that error. *)
+  val try_lift : 'a t -> f:('b -> 'a Or_error.t) -> 'b t
+
   (** Similar to [lift], but useful if you want to do asynchronous work to map connection
       state. Like [lift], [f] will be called on every RPC. This can make RPC
       implementations less efficient if they were previously relying on functions like
@@ -76,6 +80,7 @@ module Implementation : sig
       arrive on a connection. *)
   val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
 
+  val try_lift_deferred : 'a t -> f:('b -> 'a Or_error.t Deferred.t) -> 'b t
   val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
 
   val with_authorization_deferred
@@ -548,7 +553,18 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] or
-      {!State_rpc} query. *)
+      {!State_rpc} query, for use with functions below like [implement_direct].
+
+      It is the most basic and primitive way to write data to a client recieivng the
+      values.
+
+      When compared to using a Pipe - there is effectively a [Pipe.iter] in the library
+      that is writing those values to a direct stream writer.
+
+      If your code makes it more natural to create a [Pipe.Reader.t] and provide that,
+      then that's a reasonable thing to do, but generally if you don't already have a
+      pipe, avoiding the hop going through the pipe by using a [Direct_stream_writer] will
+      be more efficient, since the elements can be serialized immediately *)
   module Direct_stream_writer : sig
     type 'a t
 
@@ -600,20 +616,22 @@ module Pipe_rpc : sig
         (** A group internally holds a buffer to serialize messages only once. This buffer
           will grow automatically to accomodate bigger messages.
 
-          It is safe to share the same buffer between multiple groups. *)
+            If [send_last_value_on_add:true], it is _not_ safe to share the same buffer
+            between multiple groups, as the last value is kept in the buffer.  *)
         module Buffer : sig
           type t
 
           val create : ?initial_size:int (* default 4096 *) -> unit -> t
         end
 
-        val create
-          :  ?buffer:Buffer.t
-          -> ?send_last_value_on_add:bool
-               (** If [true], the group will automatically send a copy of the last value written
-            to each new writer when it's added to the group. Default: false. *)
-          -> unit
-          -> _ t
+        val create : ?buffer:Buffer.t -> unit -> _ t
+
+        (** [create_sending_last_value_on_add] will create a group that will
+            automatically send a copy of the last value written to each new writer when
+            it's added to the group. It's split out as a separate function from [create]
+            as it's not safe to re-use a buffer between multiple different groups in this
+            case, as the previous value is stored in the buffer. *)
+        val create_sending_last_value_on_add : ?initial_buffer_size:int -> unit -> _ t
 
         (** [flushed_or_closed t] is determined when the underlying writer for each member of [t] is
           flushed or closed. *)

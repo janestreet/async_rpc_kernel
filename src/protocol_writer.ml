@@ -63,17 +63,23 @@ let response_message (type a) t (response : a Protocol.Response.t) : a Protocol.
   in
   (match response.data with
    | Ok (_ : a) -> response
-   | Error
-       (( Bin_io_exn _ | Connection_closed | Write_error _ | Uncaught_exn _
-        | Unimplemented_rpc (_, _)
-        | Unknown_query_id _ ) as _v1_error) -> response
-   | Error ((Authorization_failure _ | Message_too_big _ | Unknown _) as v3_error) ->
-     if negotiated_protocol_version < 3
-     then
+   | Error rpc_error ->
+     let error_implemented_in_protocol_version =
+       Rpc_error.implemented_in_protocol_version rpc_error
+     in
+     (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
+        v3 we used [Uncaught_exn] as the catchall. *)
+     if error_implemented_in_protocol_version <= negotiated_protocol_version
+     then response
+     else (
+       let error_sexp = [%sexp_of: Protocol.Rpc_error.t] rpc_error in
        { response with
-         data = Error (Uncaught_exn ([%sexp_of: Protocol.Rpc_error.t] v3_error))
-       }
-     else response)
+         data =
+           Error
+             (if negotiated_protocol_version >= 3
+              then Unknown error_sexp
+              else Uncaught_exn error_sexp)
+       }))
   |> Response
 ;;
 

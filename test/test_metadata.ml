@@ -121,7 +121,7 @@ let%expect_test "dispatch with metadata and implementation hook" =
          with
          | `Ok -> ()
          | `Already_set -> failwith "Unexpected already set");
-        let%map without_md = without_md
+        let%map without_md
         and with_md = Rpc.Rpc.dispatch rpc conn () in
         [ `without_metadata, without_md; `with_metdata, with_md ])
       ~on_client_connected:(fun conn ->

@@ -31,20 +31,21 @@ module F : sig
     | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
 
   type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
-    | Blocking : ('a, 'a Or_not_authorized.t) result_mode
-    | Deferred : ('a, 'a Or_not_authorized.t Deferred.t) result_mode
+    | Blocking : ('a, 'a Or_not_authorized.t Or_error.t) result_mode
+    | Deferred : ('a, 'a Or_not_authorized.t Or_error.t Deferred.t) result_mode
 
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
         ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
-         -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t Deferred.t)
+         -> ('init * 'update Pipe.Reader.t, 'init) Result.t Or_not_authorized.t Or_error.t
+              Deferred.t)
     | Direct of
         ('connection_state
          -> 'query
          -> 'update Implementation_types.Direct_stream_writer.t
-         -> ('init, 'init) Result.t Or_not_authorized.t Deferred.t)
+         -> ('init, 'init) Result.t Or_not_authorized.t Or_error.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
         ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
@@ -60,7 +61,7 @@ module F : sig
   type 'connection_state t = 'connection_state F.t =
     | One_way :
         'msg Bin_prot.Type_class.reader
-        * ('connection_state -> 'msg -> unit Or_not_authorized.t Deferred.t)
+        * ('connection_state -> 'msg -> unit Or_not_authorized.t Or_error.t Deferred.t)
         * Source_code_position.t
         -> 'connection_state t
     | One_way_expert :
@@ -68,7 +69,7 @@ module F : sig
          -> Bigstring.t
          -> pos:int
          -> len:int
-         -> unit Or_not_authorized.t Deferred.t)
+         -> unit Or_not_authorized.t Or_error.t Deferred.t)
         -> 'connection_state t
     | Rpc :
         'query Bin_prot.Type_class.reader
@@ -92,8 +93,12 @@ module F : sig
         -> 'connection_state t
     | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
 
-  val lift : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
-  val lift_deferred : 'a t -> f:('b -> 'a Or_not_authorized.t Deferred.t) -> 'b t
+  val lift : 'a t -> f:('b -> 'a Or_not_authorized.t Or_error.t) -> 'b t
+
+  val lift_deferred
+    :  'a t
+    -> f:('b -> 'a Or_not_authorized.t Or_error.t Deferred.t)
+    -> 'b t
 end
 
 type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
@@ -110,6 +115,8 @@ val shapes : _ t -> Rpc_shapes.t
 val digests : _ t -> Rpc_shapes.Just_digests.t
 val lift : 'a t -> f:('b -> 'a) -> 'b t
 val lift_deferred : 'a t -> f:('b -> 'a Deferred.t) -> 'b t
+val try_lift : 'a t -> f:('b -> 'a Or_error.t) -> 'b t
+val try_lift_deferred : 'a t -> f:('b -> 'a Or_error.t Deferred.t) -> 'b t
 val with_authorization : 'a t -> f:('b -> 'a Or_not_authorized.t) -> 'b t
 
 val with_authorization_deferred

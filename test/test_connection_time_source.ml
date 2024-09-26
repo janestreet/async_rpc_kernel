@@ -153,11 +153,14 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:14Z")
       (description server)
-      (reason      "No heartbeats received for 10s."))
+      (reason
+       "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00."))
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
-      (reason ("Connection closed by peer:" "No heartbeats received for 10s.")))
+      (reason (
+        "Connection closed by peer:"
+        "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")))
     |}];
   print_liveness server_conn;
   print_liveness client_conn;

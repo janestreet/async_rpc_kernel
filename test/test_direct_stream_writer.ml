@@ -111,7 +111,7 @@ let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] sends va
                  written with [write] and [Expert.write]"
   =
   let group =
-    Rpc.Pipe_rpc.Direct_stream_writer.Group.create ~send_last_value_on_add:true ()
+    Rpc.Pipe_rpc.Direct_stream_writer.Group.create_sending_last_value_on_add ()
   in
   with_server_and_client group ~rpc ~f:(fun _ connection ->
     let%bind pipe1, (_ : Rpc.Pipe_rpc.Metadata.t) =
@@ -147,7 +147,7 @@ let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] will sav
                  written when there are no writers"
   =
   let group =
-    Rpc.Pipe_rpc.Direct_stream_writer.Group.create ~send_last_value_on_add:true ()
+    Rpc.Pipe_rpc.Direct_stream_writer.Group.create_sending_last_value_on_add ()
   in
   let last_value = ref 0 in
   let write_and_record_last_value value =
@@ -195,7 +195,7 @@ let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] works wi
       ()
   in
   let group =
-    Rpc.Pipe_rpc.Direct_stream_writer.Group.create ~send_last_value_on_add:true ()
+    Rpc.Pipe_rpc.Direct_stream_writer.Group.create_sending_last_value_on_add ()
   in
   with_server_and_client group ~rpc ~f:(fun _ connection ->
     let%bind pipe1, (_ : Rpc.Pipe_rpc.Metadata.t) =

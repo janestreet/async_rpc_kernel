@@ -78,7 +78,7 @@ val close_reader : t -> unit
 
 val write_bigstring : ?don't_read_yet:unit -> t -> Bigstring.t -> unit
 val write : ?don't_read_yet:unit -> t -> 'a Bin_prot.Writer.t -> 'a -> unit
-val write_handshake : t -> handshake -> unit
+val write_handshake : ?don't_read_yet:unit -> t -> handshake -> unit
 
 val write_message
   :  ?don't_read_yet:unit

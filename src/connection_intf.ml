@@ -304,7 +304,7 @@ module type S_private = sig
 
   (** Allows getting information from the RPC that may be used for tracing or metrics. The
       interface is not yet stable. *)
-  val events : t -> (Tracing_event.t -> unit) Bus.Read_only.t
+  val tracing_events : t -> (Tracing_event.t -> unit) Bus.Read_only.t
 
   (** The header that would be sent at the beginning of a connection. This can be used to
       pre-share this part of the handshake (see the [protocol_version_headers] argument to
@@ -343,6 +343,7 @@ module type S_private = sig
       val v2 : t
       val v3 : t
       val v4 : t
+      val v5 : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

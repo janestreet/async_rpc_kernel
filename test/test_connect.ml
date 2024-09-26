@@ -33,3 +33,31 @@ let%expect_test "connect and close" =
     |}];
   return ()
 ;;
+
+let%expect_test "close immediately after handshake (with close message sent)" =
+  let t =
+    Mock_peer.create
+      { when_reader_waits = `Carry_on_until_end_of_batch; when_waiting_done = `Read_more }
+  in
+  Mock_peer.write_handshake ~don't_read_yet:() t `v4;
+  Mock_peer.write_message
+    t
+    Protocol.Message.bin_writer_nat0_t
+    (Protocol.Message.Close_reason (Info.create_s [%message "immediate close"]));
+  let%bind (conn : Rpc.Connection.t) = Mock_peer.connect t >>| Result.ok_exn in
+  let%bind () = Rpc.Connection.close_finished conn in
+  [%expect
+    {|
+    (Send
+     (message
+      ("00000000  05 fd 52 50 43 00 01 02  03 04                    |..RPC.....|")))
+    (Send
+     (message
+      ("00000000  04 00 01 00                                       |....|")))
+    Close_writer
+    Close_reader
+    (Close_started ("Connection closed by peer:" "immediate close"))
+    Close_finished
+    |}];
+  return ()
+;;
