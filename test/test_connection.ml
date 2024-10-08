@@ -142,6 +142,91 @@ let%expect_test "V3 send versioned menu automatically" =
   return ()
 ;;
 
+let%expect_test "V6 sometimes sends shapes in the menu" =
+  (* v6 -> v6 with [always_provide_rpc_shapes:false] *)
+  let%bind () =
+    connection_test
+      ~server_header:Test_helpers.Header.v6
+      ~client_header:Test_helpers.Header.v6
+      ~f:connection_test_menu
+  in
+  [%expect
+    {|
+    (client_menu (Ok (())))
+    (server_menu
+     (Ok
+      ((((name sort) (versions (((version 1) (digest Unknown)))))
+        ((name test-one-way-rpc) (versions (((version 1) (digest Unknown)))))
+        ((name test-pipe-rpc) (versions (((version 1) (digest Unknown)))))
+        ((name test-rpc)
+         (versions
+          (((version 1) (digest Unknown)) ((version 2) (digest Unknown)))))
+        ((name test-state-rpc) (versions (((version 1) (digest Unknown)))))))))
+    |}];
+  (* v6 -> v3, we must send rpc shapes still *)
+  let%bind () =
+    connection_test
+      ~server_header:Test_helpers.Header.v6
+      ~client_header:Test_helpers.Header.v3
+      ~f:connection_test_menu
+  in
+  [%expect
+    {|
+    (client_menu (Ok (())))
+    (server_menu
+     (Ok
+      ((((name sort)
+         (versions
+          (((version 1)
+            (digest
+             (Rpc (query 4c138035aa69ec9dd8b7a7119090f84a)
+              (response 4c138035aa69ec9dd8b7a7119090f84a)))))))
+        ((name test-one-way-rpc)
+         (versions
+          (((version 1)
+            (digest (One_way (msg e2d261c6c291b94bf6aa68ec2b08cb00)))))))
+        ((name test-pipe-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (initial_response 86ba5df747eec837f0b391dd49f33f9e)
+              (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (error 52966f4a49a77bfdff668e9cc61511b3)))))))
+        ((name test-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (response e2d261c6c291b94bf6aa68ec2b08cb00))))
+           ((version 2)
+            (digest
+             (Rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (response e2d261c6c291b94bf6aa68ec2b08cb00)))))))
+        ((name test-state-rpc)
+         (versions
+          (((version 1)
+            (digest
+             (Streaming_rpc (query e2d261c6c291b94bf6aa68ec2b08cb00)
+              (initial_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (update_response e2d261c6c291b94bf6aa68ec2b08cb00)
+              (error 52966f4a49a77bfdff668e9cc61511b3)))))))))))
+    |}];
+  (* v6 -> v2, we don't send any menu *)
+  let%bind () =
+    connection_test
+      ~server_header:Test_helpers.Header.v6
+      ~client_header:Test_helpers.Header.v2
+      ~f:connection_test_menu
+  in
+  [%expect
+    {|
+    (client_menu (Ok ()))
+    (server_menu (Ok ()))
+    |}];
+  return ()
+;;
+
 let%expect_test "V3 identification string addition" =
   let%bind () =
     connection_test
@@ -182,34 +267,28 @@ let%expect_test "V3 identification string addition" =
     0773 6572 762d 6964                             serv-id (7 bytes)
     01                                       menu= Some
     06                                              List: 6 items
-    0874 6573 742d 7270    ...
-    63                                              0: 1.    name= test-rpc (8 bytes)
-    02                                                    version= 2 (int)
+    0473 6f72 74                                    0: 1.    name= sort (4 bytes)
+    01                                                    version= 1 (int)
     00                                                 2. Rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                      query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   response= (md5)
-    0d74 6573 742d 7069    ...
-    7065 2d72 7063                                  1: 1.     name= test-pi... (13 bytes)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                      query= (md5)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                   response= (md5)
+    1074 6573 742d 6f6e    ...
+    652d 7761 792d 7270    ...
+    63                                              1: 1.     name= test-on... (16 bytes)
     01                                                     version= 1 (int)
+    01                                                 2. One_way
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                       msg= (md5)
+    0d74 6573 742d 7069    ...
+    7065 2d72 7063                                  2: 1.    name= test-pi... (13 bytes)
+    01                                                    version= 1 (int)
     02                                                 2. Streaming_rpc
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                              query= (md5)
     86ba 5df7 47ee c837    ...
     f0b3 91dd 49f3 3f9e                                   initial_response= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                    update_response= (md5)
-    5296 6f4a 49a7 7bfd    ...
-    ff66 8e9c c615 11b3                                              error= (md5)
-    0e74 6573 742d 7374    ...
-    6174 652d 7270 63                               2: 1.             name= test-st... (14 bytes)
-    01                                                             version= 1 (int)
-    02                                                 2. Streaming_rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                              query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                    update_response= (md5)
     5296 6f4a 49a7 7bfd    ...
@@ -222,20 +301,26 @@ let%expect_test "V3 identification string addition" =
     f6aa 68ec 2b08 cb00                                      query= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                   response= (md5)
-    0473 6f72 74                                    4: 1.     name= sort (4 bytes)
-    01                                                     version= 1 (int)
+    0874 6573 742d 7270    ...
+    63                                              4: 1.     name= test-rpc (8 bytes)
+    02                                                     version= 2 (int)
     00                                                 2. Rpc
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                      query= (md5)
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                   response= (md5)
-    1074 6573 742d 6f6e    ...
-    652d 7761 792d 7270    ...
-    63                                              5: 1.     name= test-on... (16 bytes)
-    01                                                     version= 1 (int)
-    01                                                 2. One_way
     e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   msg= (md5)
+    f6aa 68ec 2b08 cb00                                      query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   response= (md5)
+    0e74 6573 742d 7374    ...
+    6174 652d 7270 63                               5: 1.     name= test-st... (14 bytes)
+    01                                                     version= 1 (int)
+    02                                                 2. Streaming_rpc
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                              query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                    update_response= (md5)
+    5296 6f4a 49a7 7bfd    ...
+    ff66 8e9c c615 11b3                                              error= (md5)
 
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
@@ -346,34 +431,28 @@ let%expect_test "V4 close reason addition" =
     0773 6572 762d 6964                             serv-id (7 bytes)
     01                                       menu= Some
     06                                              List: 6 items
-    0874 6573 742d 7270    ...
-    63                                              0: 1.    name= test-rpc (8 bytes)
-    02                                                    version= 2 (int)
+    0473 6f72 74                                    0: 1.    name= sort (4 bytes)
+    01                                                    version= 1 (int)
     00                                                 2. Rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                      query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   response= (md5)
-    0d74 6573 742d 7069    ...
-    7065 2d72 7063                                  1: 1.     name= test-pi... (13 bytes)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                      query= (md5)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                   response= (md5)
+    1074 6573 742d 6f6e    ...
+    652d 7761 792d 7270    ...
+    63                                              1: 1.     name= test-on... (16 bytes)
     01                                                     version= 1 (int)
+    01                                                 2. One_way
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                       msg= (md5)
+    0d74 6573 742d 7069    ...
+    7065 2d72 7063                                  2: 1.    name= test-pi... (13 bytes)
+    01                                                    version= 1 (int)
     02                                                 2. Streaming_rpc
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                              query= (md5)
     86ba 5df7 47ee c837    ...
     f0b3 91dd 49f3 3f9e                                   initial_response= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                    update_response= (md5)
-    5296 6f4a 49a7 7bfd    ...
-    ff66 8e9c c615 11b3                                              error= (md5)
-    0e74 6573 742d 7374    ...
-    6174 652d 7270 63                               2: 1.             name= test-st... (14 bytes)
-    01                                                             version= 1 (int)
-    02                                                 2. Streaming_rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                              query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                    update_response= (md5)
     5296 6f4a 49a7 7bfd    ...
@@ -386,20 +465,26 @@ let%expect_test "V4 close reason addition" =
     f6aa 68ec 2b08 cb00                                      query= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                   response= (md5)
-    0473 6f72 74                                    4: 1.     name= sort (4 bytes)
-    01                                                     version= 1 (int)
+    0874 6573 742d 7270    ...
+    63                                              4: 1.     name= test-rpc (8 bytes)
+    02                                                     version= 2 (int)
     00                                                 2. Rpc
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                      query= (md5)
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                   response= (md5)
-    1074 6573 742d 6f6e    ...
-    652d 7761 792d 7270    ...
-    63                                              5: 1.     name= test-on... (16 bytes)
-    01                                                     version= 1 (int)
-    01                                                 2. One_way
     e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   msg= (md5)
+    f6aa 68ec 2b08 cb00                                      query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   response= (md5)
+    0e74 6573 742d 7374    ...
+    6174 652d 7270 63                               5: 1.     name= test-st... (14 bytes)
+    01                                                     version= 1 (int)
+    02                                                 2. Streaming_rpc
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                              query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                    update_response= (md5)
+    5296 6f4a 49a7 7bfd    ...
+    ff66 8e9c c615 11b3                                              error= (md5)
 
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
@@ -442,34 +527,28 @@ let%expect_test "V4 close reason addition" =
     0773 6572 762d 6964                             serv-id (7 bytes)
     01                                       menu= Some
     06                                              List: 6 items
-    0874 6573 742d 7270    ...
-    63                                              0: 1.    name= test-rpc (8 bytes)
-    02                                                    version= 2 (int)
+    0473 6f72 74                                    0: 1.    name= sort (4 bytes)
+    01                                                    version= 1 (int)
     00                                                 2. Rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                      query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   response= (md5)
-    0d74 6573 742d 7069    ...
-    7065 2d72 7063                                  1: 1.     name= test-pi... (13 bytes)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                      query= (md5)
+    4c13 8035 aa69 ec9d    ...
+    d8b7 a711 9090 f84a                                   response= (md5)
+    1074 6573 742d 6f6e    ...
+    652d 7761 792d 7270    ...
+    63                                              1: 1.     name= test-on... (16 bytes)
     01                                                     version= 1 (int)
+    01                                                 2. One_way
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                       msg= (md5)
+    0d74 6573 742d 7069    ...
+    7065 2d72 7063                                  2: 1.    name= test-pi... (13 bytes)
+    01                                                    version= 1 (int)
     02                                                 2. Streaming_rpc
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                              query= (md5)
     86ba 5df7 47ee c837    ...
     f0b3 91dd 49f3 3f9e                                   initial_response= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                    update_response= (md5)
-    5296 6f4a 49a7 7bfd    ...
-    ff66 8e9c c615 11b3                                              error= (md5)
-    0e74 6573 742d 7374    ...
-    6174 652d 7270 63                               2: 1.             name= test-st... (14 bytes)
-    01                                                             version= 1 (int)
-    02                                                 2. Streaming_rpc
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                              query= (md5)
-    e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                    update_response= (md5)
     5296 6f4a 49a7 7bfd    ...
@@ -482,20 +561,26 @@ let%expect_test "V4 close reason addition" =
     f6aa 68ec 2b08 cb00                                      query= (md5)
     e2d2 61c6 c291 b94b    ...
     f6aa 68ec 2b08 cb00                                   response= (md5)
-    0473 6f72 74                                    4: 1.     name= sort (4 bytes)
-    01                                                     version= 1 (int)
+    0874 6573 742d 7270    ...
+    63                                              4: 1.     name= test-rpc (8 bytes)
+    02                                                     version= 2 (int)
     00                                                 2. Rpc
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                      query= (md5)
-    4c13 8035 aa69 ec9d    ...
-    d8b7 a711 9090 f84a                                   response= (md5)
-    1074 6573 742d 6f6e    ...
-    652d 7761 792d 7270    ...
-    63                                              5: 1.     name= test-on... (16 bytes)
-    01                                                     version= 1 (int)
-    01                                                 2. One_way
     e2d2 61c6 c291 b94b    ...
-    f6aa 68ec 2b08 cb00                                   msg= (md5)
+    f6aa 68ec 2b08 cb00                                      query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   response= (md5)
+    0e74 6573 742d 7374    ...
+    6174 652d 7270 63                               5: 1.     name= test-st... (14 bytes)
+    01                                                     version= 1 (int)
+    02                                                 2. Streaming_rpc
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                              query= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                   initial_response= (md5)
+    e2d2 61c6 c291 b94b    ...
+    f6aa 68ec 2b08 cb00                                    update_response= (md5)
+    5296 6f4a 49a7 7bfd    ...
+    ff66 8e9c c615 11b3                                              error= (md5)
 
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
@@ -1360,5 +1445,68 @@ let%expect_test "regression test: closing a connection before [connection_state]
   [%expect {| Connection object still held live: false |}];
   let%bind () = test ~when_to_close_connection:`Within_connection_state in
   [%expect {| Connection object still held live: false |}];
+  return ()
+;;
+
+let%expect_test "regression test: writer closing between handshake and metadata being \
+                 sent does not cause an exception to be thrown"
+  =
+  let time_source =
+    Synchronous_time_source.create ~now:Time_ns.epoch ()
+    |> Synchronous_time_source.read_only
+  in
+  let transport_a, transport_b =
+    Async_rpc_kernel.Pipe_transport.(create_pair Kind.string)
+  in
+  let%bind () =
+    Expect_test_helpers_async.show_raise_async ~hide_positions:true (fun () ->
+      let conn_a =
+        Async_rpc_kernel.Async_rpc_kernel_private.Connection.create
+          ~time_source
+          ~connection_state:(fun (_ : Rpc.Connection.t) -> ())
+          transport_a
+      in
+      let conn_b =
+        Async_rpc_kernel.Async_rpc_kernel_private.Connection.create
+          ~time_source
+          ~connection_state:(fun (_ : Rpc.Connection.t) -> ())
+          transport_b
+      in
+      (* At this point, conn_a and conn_b will have synchronously written the headers to
+         the pipe, and are binding on seeing the message from the other. If we close
+         conn_a's writer here, then both will successfully negotiate, but conn_a will fail
+         to write metadata and result in an error *)
+      don't_wait_for (Rpc.Transport.Writer.close transport_a.writer);
+      let wait_and_print_result conn =
+        let%map conn in
+        print_s [%sexp (conn : (_, exn) Result.t)]
+      in
+      let%bind () = wait_and_print_result conn_a in
+      let%bind () = wait_and_print_result conn_b in
+      return ())
+  in
+  [%expect
+    {|
+    (raised (
+      "RPC connection got closed writer"
+      ((description <created-directly>)
+       (writer (
+         (pipe (
+           (id <hidden_in_test>)
+           (buffer ())
+           (size_budget    0)
+           (reserved_space 0)
+           (pushback (Full ()))
+           (num_values_read 1)
+           (blocked_flushes ())
+           (blocked_reads   ())
+           (closed (Full ()))
+           (read_closed unset)
+           (consumers         ())
+           (upstream_flusheds ())))
+         (monitor ((id <hidden_in_test>)))
+         (bytes_written 18))))
+      lib/async_rpc/kernel/src/connection.ml:LINE:COL))
+    |}];
   return ()
 ;;

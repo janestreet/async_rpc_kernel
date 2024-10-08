@@ -6,51 +6,6 @@ type t [@@deriving sexp_of]
 val sexp_of_writer : t -> Sexp.t
 val create_before_negotiation : Transport.Writer.t -> t
 val set_negotiated_protocol_version : t -> int -> unit
-
-val send_query
-  :  t
-  -> 'query Protocol.Query.t
-  -> bin_writer_query:'query Bin_prot.Type_class.writer
-  -> unit Transport.Send_result.t
-
-val send_expert_query
-  :  t
-  -> unit Protocol.Query.t
-  -> buf:Bigstring.t
-  -> pos:int
-  -> len:int
-  -> send_bin_prot_and_bigstring:
-       (Transport.Writer.t
-        -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
-        -> Protocol.Message.nat0_t
-        -> buf:Bigstring.t
-        -> pos:int
-        -> len:int
-        -> 'result Transport.Send_result.t)
-  -> 'result Transport.Send_result.t
-
-val send_response
-  :  t
-  -> 'response Protocol.Response.t
-  -> bin_writer_response:'response Bin_prot.Type_class.writer
-  -> unit Transport.Send_result.t
-
-val send_expert_response
-  :  t
-  -> Protocol.Query_id.t
-  -> buf:Bigstring.t
-  -> pos:int
-  -> len:int
-  -> send_bin_prot_and_bigstring:
-       (Transport.Writer.t
-        -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
-        -> Protocol.Message.nat0_t
-        -> buf:Bigstring.t
-        -> pos:int
-        -> len:int
-        -> 'result Transport.Send_result.t)
-  -> 'result Transport.Send_result.t
-
 val send_heartbeat : t -> unit Transport.Send_result.t
 
 (** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
@@ -58,6 +13,18 @@ val send_heartbeat : t -> unit Transport.Send_result.t
 val send_close_reason_if_supported
   :  t
   -> reason:Info.t
+  -> unit Transport.Send_result.t option
+
+(** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
+    version doesn't support sending metadata. *)
+val send_connection_metadata_if_supported
+  :  t
+  -> Menu.t option
+  -> lazy_v2_menu:Menu.Stable.V2.response Lazy.t option
+       (* We need to thread through a lazy v2 menu so since protocol v3 required rpc
+          shapes to be sent over which was turned optional in v6. So a negotiated protocol
+          of v3-v5 must still support sending shapes. *)
+  -> identification:Bigstring.t option
   -> unit Transport.Send_result.t option
 
 val can_send : t -> bool
@@ -68,7 +35,55 @@ val stopped : t -> unit Deferred.t
 val close : t -> unit Deferred.t
 val is_closed : t -> bool
 
-module Unsafe_for_cached_bin_writer : sig
+module Query : sig
+  val send
+    :  t
+    -> 'query Protocol.Query.t
+    -> bin_writer_query:'query Bin_prot.Type_class.writer
+    -> unit Transport.Send_result.t
+
+  val send_expert
+    :  t
+    -> unit Protocol.Query.t
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> send_bin_prot_and_bigstring:
+         (Transport.Writer.t
+          -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
+          -> Protocol.Message.nat0_t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> 'result Transport.Send_result.t)
+    -> 'result Transport.Send_result.t
+end
+
+module Response : sig
+  val send
+    :  t
+    -> 'response Protocol.Response.t
+    -> bin_writer_response:'response Bin_prot.Type_class.writer
+    -> unit Transport.Send_result.t
+
+  val send_expert
+    :  t
+    -> Protocol.Query_id.t
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> send_bin_prot_and_bigstring:
+         (Transport.Writer.t
+          -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
+          -> Protocol.Message.nat0_t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> 'result Transport.Send_result.t)
+    -> 'result Transport.Send_result.t
+end
+
+module Unsafe_for_cached_streaming_response_writer : sig
   val send_bin_prot
     :  t
     -> 'a Bin_prot.Type_class.writer

@@ -72,8 +72,6 @@ open Rpc
 module Menu : sig
   include module type of Menu with type t = Menu.t (** @inline *)
 
-  (** [add impls] extends a list of rpc implementations with an additional rpc
-      implementation for providing a [Menu.t] when one is requested via [Menu.request]. *)
   val add : 's Implementation.t list -> 's Implementation.t list
 
   (** Specifies directly how to handle the version menu rpc. *)
@@ -92,12 +90,9 @@ module Menu : sig
     (** A directory of supported rpc names, versions, and query/response shapes. *)
     type t = (Description.t * Rpc_shapes.t) list
 
-    (** [add impls] extends a list of rpc implementations with two additional rpcs:
-        - One that serves a [Menu.t] that can be requested with [Menu.request]
-        - One that serves a [Menu.With_shapes.t] that can be requested with
-          [Menu.With_shapes.request].
-
-        (If you use [Menu.With_shapes.add], you never need to call [Menu.add]) *)
+    (** [add impls] extends a list of rpc implementations with an additional rpc that
+        serves a [Menu.With_shapes.t] that can be requested with
+        [Menu.With_shapes.request]. *)
     val add : 's Implementation.t list -> 's Implementation.t list
 
     (** Requests an rpc version menu with shapes from an rpc connection. *)

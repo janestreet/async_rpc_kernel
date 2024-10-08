@@ -16,91 +16,49 @@ let set_negotiated_protocol_version t negotiated_protocol_version =
   Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version
 ;;
 
-let query_message t query : _ Protocol.Message.t =
-  match Set_once.get_exn t.negotiated_protocol_version [%here] with
-  | 1 -> Query_v1 (Protocol.Query.to_v1 query)
-  | _ -> Query query
-;;
-
-let send_query t query ~bin_writer_query =
-  let message = query_message t query in
-  Transport.Writer.send_bin_prot
-    t.writer
-    (Protocol.Message.bin_writer_maybe_needs_length
-       (Writer_with_length.of_writer bin_writer_query))
-    message
-;;
-
-let send_expert_query t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
-  let header = query_message t { query with data = Nat0.of_int_exn len } in
-  send_bin_prot_and_bigstring
-    t.writer
-    Protocol.Message.bin_writer_nat0_t
-    header
-    ~buf
-    ~pos
-    ~len
-;;
-
 let send_heartbeat t =
   Transport.Writer.send_bin_prot t.writer Protocol.Message.bin_writer_nat0_t Heartbeat
 ;;
 
 let send_close_reason_if_supported t ~reason =
   match Set_once.get t.negotiated_protocol_version with
-  | Some version when Version_dependent_feature.is_supported Close_reason ~version ->
-    Some
-      (Transport.Writer.send_bin_prot
-         t.writer
-         Protocol.Message.bin_writer_nat0_t
-         (Close_reason reason))
-  | Some (_ : int) | None -> None
+  | None -> None
+  | Some version ->
+    if Version_dependent_feature.is_supported Close_reason ~version
+    then
+      Some
+        (Transport.Writer.send_bin_prot
+           t.writer
+           Protocol.Message.bin_writer_nat0_t
+           (Close_reason reason))
+    else None
 ;;
 
-let response_message (type a) t (response : a Protocol.Response.t) : a Protocol.Message.t =
-  let negotiated_protocol_version =
-    Set_once.get_exn t.negotiated_protocol_version [%here]
-  in
-  (match response.data with
-   | Ok (_ : a) -> response
-   | Error rpc_error ->
-     let error_implemented_in_protocol_version =
-       Rpc_error.implemented_in_protocol_version rpc_error
-     in
-     (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
-        v3 we used [Uncaught_exn] as the catchall. *)
-     if error_implemented_in_protocol_version <= negotiated_protocol_version
-     then response
-     else (
-       let error_sexp = [%sexp_of: Protocol.Rpc_error.t] rpc_error in
-       { response with
-         data =
-           Error
-             (if negotiated_protocol_version >= 3
-              then Unknown error_sexp
-              else Uncaught_exn error_sexp)
-       }))
-  |> Response
-;;
-
-let send_response t response ~bin_writer_response =
-  let message = response_message t response in
-  Transport.Writer.send_bin_prot
-    t.writer
-    (Protocol.Message.bin_writer_maybe_needs_length
-       (Writer_with_length.of_writer bin_writer_response))
-    message
-;;
-
-let send_expert_response t query_id ~buf ~pos ~len ~send_bin_prot_and_bigstring =
-  let header = response_message t { id = query_id; data = Ok (Nat0.of_int_exn len) } in
-  send_bin_prot_and_bigstring
-    t.writer
-    Protocol.Message.bin_writer_nat0_t
-    header
-    ~buf
-    ~pos
-    ~len
+let send_connection_metadata_if_supported t menu ~lazy_v2_menu ~identification =
+  match Set_once.get t.negotiated_protocol_version with
+  | Some version when Version_dependent_feature.is_supported Peer_metadata ~version ->
+    if Version_dependent_feature.is_supported Peer_metadata_v2 ~version
+    then
+      Transport.Writer.send_bin_prot
+        t.writer
+        (Protocol.Message.bin_writer_maybe_needs_length
+           Protocol.Connection_metadata.V2.bin_writer_t)
+        (Protocol.Message.Metadata_v2 { identification; menu })
+      |> Some
+    else (
+      let v2_menu =
+        Option.bind menu ~f:(fun menu ->
+          if Menu.includes_shape_digests menu
+          then Menu.Stable.V3.to_v2_response menu
+          else Option.map lazy_v2_menu ~f:Lazy.force)
+      in
+      Transport.Writer.send_bin_prot
+        t.writer
+        (Protocol.Message.bin_writer_maybe_needs_length
+           Protocol.Connection_metadata.V1.bin_writer_t)
+        (Protocol.Message.Metadata { identification; menu = v2_menu })
+      |> Some)
+  | None | Some (_ (* Version before [Metadata] *) : int) -> None
 ;;
 
 let of_writer f t = f t.writer
@@ -112,7 +70,85 @@ let stopped = of_writer Transport.Writer.stopped
 let close = of_writer Transport.Writer.close
 let is_closed = of_writer Transport.Writer.is_closed
 
-module Unsafe_for_cached_bin_writer = struct
+module Query = struct
+  let query_message t query : _ Protocol.Message.t =
+    match Set_once.get_exn t.negotiated_protocol_version [%here] with
+    | 1 -> Query_v1 (Protocol.Query.to_v1 query)
+    | _ -> Query query
+  ;;
+
+  let send t query ~bin_writer_query =
+    let message = query_message t query in
+    Transport.Writer.send_bin_prot
+      t.writer
+      (Protocol.Message.bin_writer_maybe_needs_length
+         (Writer_with_length.of_writer bin_writer_query))
+      message
+  ;;
+
+  let send_expert t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
+    let header = query_message t { query with data = Nat0.of_int_exn len } in
+    send_bin_prot_and_bigstring
+      t.writer
+      Protocol.Message.bin_writer_nat0_t
+      header
+      ~buf
+      ~pos
+      ~len
+  ;;
+end
+
+module Response = struct
+  let response_message (type a) t (response : a Protocol.Response.t)
+    : a Protocol.Message.t
+    =
+    let negotiated_protocol_version =
+      Set_once.get_exn t.negotiated_protocol_version [%here]
+    in
+    (match response.data with
+     | Ok (_ : a) -> response
+     | Error rpc_error ->
+       let error_implemented_in_protocol_version =
+         Rpc_error.implemented_in_protocol_version rpc_error
+       in
+       (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
+        v3 we used [Uncaught_exn] as the catchall. *)
+       if error_implemented_in_protocol_version <= negotiated_protocol_version
+       then response
+       else (
+         let error_sexp = [%sexp_of: Protocol.Rpc_error.t] rpc_error in
+         { response with
+           data =
+             Error
+               (if negotiated_protocol_version >= 3
+                then Unknown error_sexp
+                else Uncaught_exn error_sexp)
+         }))
+    |> Response
+  ;;
+
+  let send t response ~bin_writer_response =
+    let message = response_message t response in
+    Transport.Writer.send_bin_prot
+      t.writer
+      (Protocol.Message.bin_writer_maybe_needs_length
+         (Writer_with_length.of_writer bin_writer_response))
+      message
+  ;;
+
+  let send_expert t query_id ~buf ~pos ~len ~send_bin_prot_and_bigstring =
+    let header = response_message t { id = query_id; data = Ok (Nat0.of_int_exn len) } in
+    send_bin_prot_and_bigstring
+      t.writer
+      Protocol.Message.bin_writer_nat0_t
+      header
+      ~buf
+      ~pos
+      ~len
+  ;;
+end
+
+module Unsafe_for_cached_streaming_response_writer = struct
   let send_bin_prot t bin_writer a = Transport.Writer.send_bin_prot t.writer bin_writer a
 
   let send_bin_prot_and_bigstring t bin_writer a ~buf ~pos ~len =

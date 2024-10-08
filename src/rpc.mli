@@ -574,6 +574,21 @@ module Pipe_rpc : sig
     val write : 'a t -> 'a -> [ `Flushed of unit Deferred.t | `Closed ]
 
     val write_without_pushback : 'a t -> 'a -> [ `Ok | `Closed ]
+
+    (** [started t] will become determined once the implementation has completed successfully
+        and [t] has started to write stream updates, including having written all updates that
+        were queued by calling one of the write functions before it was started.
+
+        It is guaranteed that:
+        - if [started t] is determined, any update written to [t] will immediately be
+          serialized to the output stream.
+        - if [started t] is not determined, then any update written to [t] will be
+          enqueued until it is started.
+
+        Note that if the implementation does not complete successfully, [started] may
+        never become determined. *)
+    val started : _ t -> unit Deferred.t
+
     val close : _ t -> unit
     val closed : _ t -> unit Deferred.t
     val flushed : _ t -> unit Deferred.t

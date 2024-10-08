@@ -1,6 +1,5 @@
 open Core
 open Async_kernel
-open Int.Replace_polymorphic_compare
 
 include struct
   open Transport
@@ -298,6 +297,14 @@ let create kind reader writer =
   { Transport.reader = make_reader kind reader; writer = make_writer kind writer }
 ;;
 
+let create_pair kind =
+  let reader__b_to_a, writer__b_to_a = Pipe.create () in
+  let reader__a_to_b, writer__a_to_b = Pipe.create () in
+  let transport_a = create kind reader__b_to_a writer__a_to_b in
+  let transport_b = create kind reader__a_to_b writer__b_to_a in
+  transport_a, transport_b
+;;
+
 (* Testing *)
 
 module type Transport_reader = sig
@@ -455,8 +462,8 @@ module Test_reader (Transport_reader : Transport_reader) = struct
   ;;
 end
 
-let%test_module "Test_reader_string" = (module Test_reader (String_pipe_reader))
-let%test_module "Test_reader_bigstring" = (module Test_reader (Bigstring_pipe_reader))
+module%test Test_reader_string = Test_reader (String_pipe_reader)
+module%test Test_reader_bigstring = Test_reader (Bigstring_pipe_reader)
 
 module Bench_reader (Transport_reader : Transport_reader) = struct
   open Transport_reader.For_testing

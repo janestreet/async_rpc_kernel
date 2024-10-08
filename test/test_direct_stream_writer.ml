@@ -107,6 +107,47 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
       return ())
 ;;
 
+let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped before \
+                 the implementation completes"
+  =
+  Backtrace.elide := true;
+  let%map () =
+    with_server_and_client'
+      ~rpc:rpc_with_pushback
+      ~on_writer:(fun writer ->
+        let response = Bigstring.create 1_000 in
+        let buf =
+          Bin_prot.Writer.to_bigstring [%bin_writer: Bigstring.Stable.V1.t] response
+        in
+        let (`Closed | `Flushed { global = (_ : unit Deferred.t) }) =
+          Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
+            writer
+            ~buf
+            ~pos:0
+            ~len:(Bigstring.length buf)
+        in
+        Rpc.Pipe_rpc.Direct_stream_writer.close writer)
+      ~f:(fun (_ : (Socket.Address.Inet.t, int) Tcp.Server.t) connection ->
+        let%bind (_ : Bigstring.t Pipe.Reader.t), (_ : Rpc.Pipe_rpc.Metadata.t) =
+          Rpc.Pipe_rpc.dispatch_exn rpc_with_pushback connection ()
+        in
+        let%bind () =
+          Rpc.Connection.close_reason connection ~on_close:`finished
+          >>| [%sexp_of: Info.t]
+          >>| print_s
+        in
+        [%expect
+          {|
+          ("Connection closed by peer:"
+           ("exn raised in RPC connection loop"
+            (monitor.ml.Error ("Ivar.fill_exn called on full ivar" (t (Full _)))
+             ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
+          |}];
+        return ())
+  in
+  Backtrace.elide := false
+;;
+
 let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] sends values \
                  written with [write] and [Expert.write]"
   =

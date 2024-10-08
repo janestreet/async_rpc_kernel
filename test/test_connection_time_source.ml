@@ -56,14 +56,7 @@ let establish_connection transport time_source description =
 let%expect_test "test connection with time_source <> wall_clock" =
   let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
   let client_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
-  let server_r, server_w = Pipe.create () in
-  let client_r, client_w = Pipe.create () in
-  let server_transport =
-    Pipe_transport.create Pipe_transport.Kind.bigstring client_r server_w
-  in
-  let client_transport =
-    Pipe_transport.create Pipe_transport.Kind.bigstring server_r client_w
-  in
+  let client_transport, server_transport = Pipe_transport.(create_pair Kind.bigstring) in
   let server_conn =
     establish_connection
       server_transport

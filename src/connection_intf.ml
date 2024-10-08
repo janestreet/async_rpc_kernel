@@ -72,7 +72,11 @@ module type S = sig
       write end of the connection has closed, the connection will attempt to keep reading
       for up to this long from the read end to attempt to receive a close reason message.
       Default: 5s.
-  *)
+
+      [always_provide_rpc_shapes] configures whether the automatic menu sent to peers will
+      always contain the rpc shapes digests or not. When talking to old peers (protocol
+      version 3 -> 5) we always need compute digests but setting this value to [false]
+      will prevent sending the digests to newer peers. Default: [true] *)
   val create
     :  ?implementations:'s Implementations.t
     -> ?protocol_version_headers:Protocol_version_header.Pair.t
@@ -84,6 +88,7 @@ module type S = sig
     -> ?time_source:Synchronous_time_source.t
     -> ?identification:Bigstring.t
     -> ?reader_drain_timeout:Time_ns.Span.t
+    -> ?always_provide_rpc_shapes:bool
     -> Transport.t
     -> (t, Exn.t) Result.t Deferred.t
 
@@ -197,6 +202,8 @@ module type S = sig
     -> ?heartbeat_config:Heartbeat_config.t
     -> ?description:Info.t
     -> ?time_source:Synchronous_time_source.t
+    -> ?identification:Bigstring.t
+    -> ?always_provide_rpc_shapes:bool
     -> connection_state:(t -> 's)
     -> Transport.t
     -> dispatch_queries:(t -> 'a Deferred.t)
@@ -211,6 +218,8 @@ module type S = sig
     -> ?heartbeat_config:Heartbeat_config.t
     -> ?description:Info.t
     -> ?time_source:Synchronous_time_source.t
+    -> ?identification:Bigstring.t
+    -> ?always_provide_rpc_shapes:bool
     -> Transport.t
     -> implementations:'s Implementations.t
     -> connection_state:(t -> 's)
@@ -232,7 +241,7 @@ module type S_private = sig
       | Pipe_eof
       | Expert_indeterminate
       | Determinable :
-          'a Rpc_result.t * 'a Implementation.F.error_mode
+          'a Rpc_result.t * 'a Implementation_mode.Error_mode.t
           -> response_with_determinable_status
 
     type t =
@@ -344,6 +353,7 @@ module type S_private = sig
       val v3 : t
       val v4 : t
       val v5 : t
+      val v6 : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

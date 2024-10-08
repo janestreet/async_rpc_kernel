@@ -33,6 +33,7 @@ module Header : sig
   val v3 : t
   val v4 : t
   val v5 : t
+  val v6 : t
   val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
 end = struct
   include P.Header
@@ -41,6 +42,7 @@ end = struct
     Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
   ;;
 
+  let v6 = create ~supported_versions:[ 1; 2; 3; 4; 5; 6 ]
   let v5 = create ~supported_versions:[ 1; 2; 3; 4; 5 ]
   let v4 = create ~supported_versions:[ 1; 2; 3; 4 ]
   let v3 = create ~supported_versions:[ 1; 2; 3 ]
@@ -58,7 +60,7 @@ module Peer_metadata = struct
   type t =
     | Unsupported
     | Expected of
-        (Bigstring.t option * Menu.t option, [ `Connection_closed ]) Result.t Ivar.t
+        (Protocol.Connection_metadata.V2.t, [ `Connection_closed ]) Result.t Ivar.t
   [@@deriving sexp_of]
 end
 
@@ -102,7 +104,7 @@ module Response_handler_action = struct
     | Pipe_eof
     | Expert_indeterminate
     | Determinable :
-        'a Rpc_result.t * 'a Implementation.F.error_mode
+        'a Rpc_result.t * 'a Implementation_mode.Error_mode.t
         -> response_with_determinable_status
 
   type t =
@@ -190,21 +192,21 @@ let map_metadata t ~kind_of_metadata ~f =
 
 let peer_identification t =
   map_metadata t ~kind_of_metadata:"peer_identification" ~f:(function
-    | Ok (id, (_ : Menu.t option)) -> return id
+    | Ok metadata -> return metadata.identification
     | Error `Unsupported | Error `No_handshake | Error (`Closed (_ : Sexp.t lazy_t)) ->
       return None)
 ;;
 
 let peer_menu t =
   map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
-    | Ok ((_ : Bigstring.t option), menu) -> return (Ok menu)
+    | Ok metadata -> return (Ok metadata.menu)
     | Error `Unsupported | Error `No_handshake -> return (Ok None)
     | Error (`Closed info) -> return (Error (Error.of_lazy_sexp info)))
 ;;
 
 let peer_menu' t =
   map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
-    | Ok ((_ : Bigstring.t option), menu) -> return (Ok menu)
+    | Ok metadata -> return (Ok metadata.menu)
     | Error `Unsupported | Error `No_handshake -> return (Ok None)
     | Error (`Closed (_ : Sexp.t lazy_t)) -> return (Error Rpc_error.Connection_closed))
 ;;
@@ -307,11 +309,14 @@ let handle_send_result
 ;;
 
 (* Used for heartbeats and protocol negotiation *)
-let handle_special_send_result t (result : unit Transport.Send_result.t) =
+let handle_special_send_result
+  ?(here = Stdlib.Lexing.dummy_pos)
+  t
+  (result : unit Transport.Send_result.t)
+  =
   match result with
   | Sent { result = (); bytes = (_ : int) } -> ()
-  | Closed ->
-    failwiths ~here:[%here] "RPC connection got closed writer" t sexp_of_t_hum_writer
+  | Closed -> failwiths ~here "RPC connection got closed writer" t sexp_of_t_hum_writer
   | Message_too_big _ ->
     raise_s
       [%sexp
@@ -370,7 +375,7 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) 
       query
       ~response_handler
       ~kind
-      ~send_query:(fun query -> Protocol_writer.send_query writer query ~bin_writer_query) 
+      ~send_query:(fun query -> Protocol_writer.Query.send writer query ~bin_writer_query) 
     [@nontail]
 ;;
 
@@ -398,7 +403,7 @@ let make_dispatch_bigstring
       ~response_handler
       ~kind:Query
       ~send_query:(fun query ->
-        Protocol_writer.send_expert_query
+        Protocol_writer.Query.send_expert
           writer
           query
           ~buf
@@ -531,6 +536,17 @@ let handle_response
            | Lift_error _ -> Stop (Error e))))
 ;;
 
+let set_peer_metadata t connection_metadata =
+  match Set_once.get t.peer_metadata with
+  | None | Some Unsupported ->
+    raise_s
+      [%message
+        "Inconsistent state: receiving a metadata message is unsupported, but a metadata \
+         message was received"]
+  | Some (Expected ivar) ->
+    if Ivar.is_empty t.close_started then Ivar.fill_exn ivar (Ok connection_metadata)
+;;
+
 let handle_msg
   t
   (msg : _ P.Message.t)
@@ -542,18 +558,10 @@ let handle_msg
   =
   match msg with
   | Metadata metadata ->
-    (match Set_once.get t.peer_metadata with
-     | None | Some Unsupported ->
-       raise_s
-         [%message
-           "Inconsistent state: receiving a metadata message is unsupported, but a \
-            metadata message was received"]
-     | Some (Expected ivar) ->
-       if Ivar.is_empty t.close_started
-       then
-         Ivar.fill_exn
-           ivar
-           (Ok (metadata.identification, Option.map metadata.menu ~f:Menu.of_v2_response)));
+    set_peer_metadata t (P.Connection_metadata.V2.of_v1 metadata);
+    Continue
+  | Metadata_v2 metadata ->
+    set_peer_metadata t metadata;
     Continue
   | Heartbeat ->
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
@@ -579,7 +587,7 @@ let handle_msg
       ~read_buffer_pos_ref
       ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
       ~close_connection_monitor
-  | Close_reason info ->
+  | Close_reason info | Close_reason_duplicated info ->
     let info = Info.tag info ~tag:"Connection closed by peer:" in
     Set_once.set_exn t.received_close_reason [%here] info;
     Stop (Ok ())
@@ -848,14 +856,7 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
-let run_after_handshake
-  t
-  ~negotiated_protocol_version
-  ~implementations
-  ~connection_state
-  ~writer_monitor_exns
-  =
-  Protocol_writer.set_negotiated_protocol_version t.writer negotiated_protocol_version;
+let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns =
   let connection_state = connection_state t in
   if not (is_closed t)
   then (
@@ -865,30 +866,29 @@ let run_after_handshake
     if is_closed t then abort_heartbeating t)
 ;;
 
-let send_metadata t writer ~menu ?identification () =
-  P.Message.Metadata { identification; menu }
-  |> Writer.send_bin_prot
-       writer
-       (P.Message.bin_writer_maybe_needs_length P.Connection_metadata.V1.bin_t.writer)
-  |> handle_special_send_result t;
-  ()
+let negotiate ?identification t ~header ~peer ~menu ~lazy_v2_menu =
+  let%map.Result version = Header.negotiate ~us:header ~peer in
+  Protocol_writer.set_negotiated_protocol_version t.writer version;
+  if Version_dependent_feature.is_supported Peer_metadata ~version
+  then (
+    let ivar = Ivar.create () in
+    upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
+      Ivar.fill_if_empty ivar (Error `Connection_closed));
+    Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
+    (match
+       Protocol_writer.send_connection_metadata_if_supported
+         t.writer
+         menu
+         ~identification
+         ~lazy_v2_menu
+     with
+     | Some result -> handle_special_send_result t result
+     | None -> ());
+    ())
+  else Set_once.set_exn t.peer_metadata [%here] Unsupported
 ;;
 
-let negotiate t ?identification ~header ~peer ~writer ~menu () =
-  let negotiate_result = Header.negotiate ~us:header ~peer in
-  Result.iter negotiate_result ~f:(fun version ->
-    if Version_dependent_feature.(is_supported Peer_metadata ~version)
-    then (
-      let ivar = Ivar.create () in
-      upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
-        Ivar.fill_if_empty ivar (Error `Connection_closed));
-      Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
-      send_metadata t writer ~menu ?identification ())
-    else Set_once.set_exn t.peer_metadata [%here] Unsupported);
-  negotiate_result
-;;
-
-let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
+let do_handshake ?identification t writer ~handshake_timeout ~header ~menu ~lazy_v2_menu =
   if not (Writer.can_send writer)
   then return (Error Handshake_error.Transport_closed)
   else (
@@ -926,7 +926,7 @@ let do_handshake t writer ~handshake_timeout ~header ~menu ?identification () =
     | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
     | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
     | `Result (Ok (Ok peer)) ->
-      return (negotiate t ?identification ~writer ~peer ~header ~menu ()))
+      return (negotiate ?identification t ~peer ~header ~menu ~lazy_v2_menu))
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
@@ -969,6 +969,7 @@ let create
   ?(time_source = Synchronous_time_source.wall_clock ())
   ?identification
   ?(reader_drain_timeout = default_reader_drain_timeout)
+  ?(always_provide_rpc_shapes = true)
   ({ reader; writer } : Transport.t)
   =
   let implementations =
@@ -976,44 +977,38 @@ let create
     | None -> Implementations.null ()
     | Some s -> s
   in
-  let menu, implementations =
-    (* There are three cases:
-
-       1. [Versioned_rpc.Menu.add] inserted the default menu
-       2. [Versioned_rpc.Menu.implement_multi] inserted a custom menu
-       3. No menu was inserted into the implementations
-
-       We need to be able to distinguish between the three to preserve behaviour for old
-       clients so we have modified [Versioned_rpc.Menu.add] that inserts a special
-       implementation type that allows us to precompute the menu. *)
+  let menu, lazy_v2_menu, implementations =
     match
       Implementations.find
         implementations
         { name = Menu.version_menu_rpc_name; version = 1 }
     with
-    | Some { f = Legacy_menu_rpc menu; _ } ->
-      (* 1. There exists a default menu rpc. We can dispatch it to retrieve the menu then
-         include this in the metadata. menu rpc or a custom rpc to figure out whether we
-         can dispatch it to retrieve the menu. *)
-      Some (force menu), implementations
     | Some (_ : _ Implementation.t) ->
-      (* 2. There was a custom menu rpc implemented. We cannot include a menu in the
+      (* 1. There was a custom menu rpc implemented. We cannot include a menu in the
          metadata. *)
-      None, implementations
+      None, None, implementations
     | None ->
-      (* 3. There is no menu so we are free to send a menu containing all of the
+      (* 2. There is no menu so we are free to send a menu containing all of the
          implementations in the metadata. We should also include the menu rpc in the
          implementation so that we can eventually deprecate the custom implementation
          type. Old clients can't complain about the menu rpc being added because they
          don't have a way to figure out the list of available rpcs ;) *)
-      let menu = Implementations.descriptions_and_shapes implementations in
+      let lazy_v2_menu = lazy (Implementations.descriptions_and_shapes implementations) in
+      let menu =
+        if always_provide_rpc_shapes
+        then force lazy_v2_menu |> Menu.of_supported_rpcs_and_shapes
+        else
+          Implementations.descriptions implementations
+          |> Menu.of_supported_rpcs ~rpc_shapes:`Unknown
+      in
       ( Some menu
+      , Some lazy_v2_menu
       , Implementations.add_exn
           implementations
           { Implementation_types.Implementation.tag =
               Protocol.Rpc_tag.of_string Menu.version_menu_rpc_name
           ; version = 1
-          ; f = Legacy_menu_rpc (lazy menu)
+          ; f = Menu_rpc (lazy menu)
           ; shapes =
               lazy
                 (Rpc_shapes.Rpc
@@ -1047,7 +1042,7 @@ let create
     ; metadata_for_dispatch = Moption.create ()
     ; peer_metadata = Set_once.create ()
     ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
-    ; my_menu = Option.map menu ~f:Menu.of_v2_response
+    ; my_menu = menu
     ; received_close_reason = Set_once.create ()
     ; has_drained_reader = Set_once.create ()
     ; reader_drain_timeout
@@ -1063,20 +1058,16 @@ let create
        close t ~reason ~send_reason_to_peer:false));
   upon (Ivar.read t.close_finished) (fun () -> Bus.close t.tracing_events);
   let header = get_handshake_header () in
-  let negotiated_protocol_version =
+  let handshake_result =
     match protocol_version_headers with
-    | None -> do_handshake t writer ~handshake_timeout ~header ~menu ?identification ()
+    | None ->
+      do_handshake ?identification t writer ~handshake_timeout ~header ~menu ~lazy_v2_menu
     | Some { Protocol_version_header.Pair.us = header; peer } ->
-      return (negotiate t ~writer ~header ~peer ~menu ?identification ())
+      return (negotiate ?identification t ~header ~peer ~menu ~lazy_v2_menu)
   in
-  match%map negotiated_protocol_version with
-  | Ok negotiated_protocol_version ->
-    run_after_handshake
-      t
-      ~negotiated_protocol_version
-      ~implementations
-      ~connection_state
-      ~writer_monitor_exns;
+  match%map handshake_result with
+  | Ok () ->
+    run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns;
     Ok t
   | Error error ->
     Error (Handshake_error.to_exn ~connection_description:description error)
@@ -1089,6 +1080,8 @@ let with_close
   ?heartbeat_config
   ?description
   ?time_source
+  ?identification
+  ?always_provide_rpc_shapes
   ~connection_state
   transport
   ~dispatch_queries
@@ -1107,6 +1100,8 @@ let with_close
       ?heartbeat_config
       ?description
       ?time_source
+      ?identification
+      ?always_provide_rpc_shapes
       ~connection_state
       transport
   in
@@ -1138,6 +1133,8 @@ let server_with_close
   ?heartbeat_config
   ?description
   ?time_source
+  ?identification
+  ?always_provide_rpc_shapes
   transport
   ~implementations
   ~connection_state
@@ -1154,6 +1151,8 @@ let server_with_close
     ?heartbeat_config
     ?description
     ?time_source
+    ?identification
+    ?always_provide_rpc_shapes
     transport
     ~implementations
     ~connection_state

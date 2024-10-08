@@ -1,5 +1,4 @@
 open Core
-open! Poly
 open Async
 
 let max_message_size = 16 lsl 20
@@ -124,50 +123,44 @@ let bin_writer_int_int = [%bin_writer: int * int]
 let buf = Bigstring.create 8192
 
 let%bench "direct write" =
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer data = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer data
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench "direct write expert" =
   let len = bin_writer_int_int.write buf ~pos:0 data in
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
-      direct_writer
-      ~buf
-      ~pos:0
-      ~len
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
+    direct_writer
+    ~buf
+    ~pos:0
+    ~len
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let big_data = Base.Sys.opaque_identity (List.init 1000 ~f:(fun x -> x * 1000))
 let bin_writer_int_list = [%bin_writer: int list]
 
 let%bench "direct write (big)" =
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
-      direct_writers_big.(0)
-      big_data
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writers_big.(0) big_data
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench "direct write expert (big)" =
   let len = bin_writer_int_list.write buf ~pos:0 big_data in
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
-      direct_writers_big.(0)
-      ~buf
-      ~pos:0
-      ~len
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
+    direct_writers_big.(0)
+    ~buf
+    ~pos:0
+    ~len
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench ("iter direct write (big)" [@indexed n = [ 1; 10; 100 ]]) =
   for i = 0 to n - 1 do
-    assert (
-      Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
-        direct_writers_big.(i)
-        big_data
-      = `Ok)
+    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
+      direct_writers_big.(i)
+      big_data
+    |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
   done
 ;;
 
@@ -205,13 +198,9 @@ let server_handle_connection ?(with_tracing_subscriber = false) transport implem
 ;;
 
 let create_connection ?with_tracing_subscriber implementations =
-  let to_server_reader, to_server_writer = Pipe.create () in
-  let to_client_reader, to_client_writer = Pipe.create () in
-  let one_transport =
-    Async_rpc_kernel.Pipe_transport.create Async_rpc_kernel.Pipe_transport.Kind.string
+  let client_end, server_end =
+    Async_rpc_kernel.Pipe_transport.(create_pair Kind.string)
   in
-  let client_end = one_transport to_client_reader to_server_writer in
-  let server_end = one_transport to_server_reader to_client_writer in
   don't_wait_for
     (server_handle_connection server_end implementations ?with_tracing_subscriber);
   let%map client_conn =

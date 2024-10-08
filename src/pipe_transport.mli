@@ -12,3 +12,5 @@ end
     The resulting transport will not perform any buffering. It will always write to
     the pipe writer without push-back and always be considered flushed. *)
 val create : 'a Kind.t -> 'a Pipe.Reader.t -> 'a Pipe.Writer.t -> Transport.t
+
+val create_pair : _ Kind.t -> Transport.t * Transport.t

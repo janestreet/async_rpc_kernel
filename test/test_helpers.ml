@@ -288,6 +288,7 @@ let with_rpc_server_connection ~server_header ~client_header ~f =
           ())
         ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
         ~identification:server_identification
+        ~always_provide_rpc_shapes:false
         ())
   in
   let%bind taps, server_proxy = tap_server server in

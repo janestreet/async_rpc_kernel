@@ -52,7 +52,7 @@ let serve_with_client ~implementations =
       ~implementations
       ~initial_connection_state:(fun (_ : [< Socket.Address.t ]) connection ->
         Ivar.fill_if_empty server_conn connection;
-        ())
+        connection)
       ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
       ()
   in
@@ -76,10 +76,10 @@ let%expect_test "Receiving an invalid message via pipe rpc closes the pipe but d
   let%bind client_conn =
     serve_with_client
       ~implementations:
-        [ Rpc.Pipe_rpc.implement_direct pipe_rpc (fun () () writer ->
+        [ Rpc.Pipe_rpc.implement_direct pipe_rpc (fun (_ : Rpc.Connection.t) () writer ->
             Ivar.fill_exn stream_writer writer;
             return (Ok ()))
-        ; Rpc.Rpc.implement plain_rpc (fun () () -> return ())
+        ; Rpc.Rpc.implement plain_rpc (fun (_ : Rpc.Connection.t) () -> return ())
         ]
   in
   let%bind reader, metadata = Rpc.Pipe_rpc.dispatch_exn pipe_rpc client_conn () in
@@ -109,14 +109,18 @@ let%expect_test "Receiving an invalid message via pipe rpc closes the pipe but d
   let%bind () = read_and_print reader in
   [%expect {| Eof |}];
   let%bind reason = Rpc.Pipe_rpc.close_reason metadata in
-  print_s ([%sexp_of: Rpc.Pipe_close_reason.t] reason);
+  Expect_test_helpers_core.print_s
+    ([%sexp_of: Rpc.Pipe_close_reason.t] reason)
+    ~hide_positions:true;
   [%expect
     {|
-    (Error
-     (Bin_io_exn
-      ((location
-        "client-side streaming_rpc response un-bin-io'ing to [bin_reader_update]")
-       (exn (Failure "message length (1) did not match expected length (2)")))))
+    (Error (
+      Bin_io_exn (
+        (location
+         "client-side streaming_rpc response un-bin-io'ing to [bin_reader_update]")
+        (exn (
+          Failure
+          "lib/async_rpc/kernel/src/rpc.ml:LINE:COL message length (1) did not match expected length (2)")))))
     |}];
   (* Send a [plain_rpc] to show that the connection isn't closed and ensure the abort
      message is transmitted. *)
@@ -145,11 +149,11 @@ let%expect_test "Receiving an overly large message via pipe rpc closes the pipe 
   let%bind client_conn =
     serve_with_client
       ~implementations:
-        [ Rpc.Pipe_rpc.implement pipe_rpc (fun () () ->
+        [ Rpc.Pipe_rpc.implement pipe_rpc (fun (_ : Rpc.Connection.t) () ->
             let reader, writer = Pipe.create () in
             Ivar.fill_exn stream_writer writer;
             return (Ok reader))
-        ; Rpc.Rpc.implement plain_rpc (fun () () -> return ())
+        ; Rpc.Rpc.implement plain_rpc (fun (_ : Rpc.Connection.t) () -> return ())
         ]
   in
   let%bind reader, metadata = Rpc.Pipe_rpc.dispatch_exn pipe_rpc client_conn () in
@@ -172,11 +176,11 @@ let%expect_test "Receiving an overly large message via state rpc initial update 
   let%bind client_conn =
     serve_with_client
       ~implementations:
-        [ Rpc.State_rpc.implement state_rpc (fun () () ->
+        [ Rpc.State_rpc.implement state_rpc (fun (_ : Rpc.Connection.t) () ->
             let reader, writer = Pipe.create () in
             Ivar.fill_exn stream_writer writer;
             return (Ok (Lazy.force overlarge_string, reader)))
-        ; Rpc.Rpc.implement plain_rpc (fun () () -> return ())
+        ; Rpc.Rpc.implement plain_rpc (fun (_ : Rpc.Connection.t) () -> return ())
         ]
   in
   let%bind () =
@@ -201,108 +205,143 @@ let%expect_test "Receiving an overly large message via state rpc initial update 
   return ()
 ;;
 
-let%test_module "[dispatch_with_close_reason]" =
-  (module struct
-    let number_of_messages = 5
-    let continue_bvar = Bvar.create ()
+module%test [@name "[dispatch_with_close_reason]"] _ = struct
+  let number_of_messages = 5
+  let continue_bvar = Bvar.create ()
 
-    let continue_read_and_print pipe_with_close_reason =
-      Bvar.broadcast continue_bvar ();
-      Pipe_with_writer_error.read pipe_with_close_reason
-      >>| [%sexp_of: [ `Eof | `Ok of string ] Or_error.t]
-      >>| print_s
-    ;;
+  let continue_read_and_print pipe_with_close_reason =
+    Bvar.broadcast continue_bvar ();
+    Pipe_with_writer_error.read pipe_with_close_reason
+    >>| [%sexp_of: [ `Eof | `Ok of string ] Or_error.t]
+    >>| print_s
+  ;;
 
-    let dispatch_with_close_reason_exn
-      (pipe_rpc : ('query, 'response, 'error) Rpc.Pipe_rpc.t)
-      client_connection
-      (query : 'query)
-      =
-      match%map
-        Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_connection query
-      with
-      | Ok (Ok pipe) -> pipe
-      | (_ : (('response, Error.t) Pipe_with_writer_error.t, 'error) result Or_error.t) ->
-        raise_s [%message "Failed to dispatch pipe in test"]
-    ;;
+  let dispatch_with_close_reason_exn
+    (pipe_rpc : ('query, 'response, 'error) Rpc.Pipe_rpc.t)
+    client_connection
+    (query : 'query)
+    =
+    match%map
+      Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_connection query
+    with
+    | Ok (Ok pipe) -> pipe
+    | (_ : (('response, Error.t) Pipe_with_writer_error.t, 'error) result Or_error.t) ->
+      raise_s [%message "Failed to dispatch pipe in test"]
+  ;;
 
-    let implementations =
-      [ Rpc.Pipe_rpc.implement pipe_rpc (fun () () ->
-          Pipe.create_reader ~close_on_exception:true (fun writer ->
-            let%map () =
-              List.init number_of_messages ~f:Fn.id
-              |> Deferred.List.iter ~how:`Sequential ~f:(fun i ->
-                let%bind () = Bvar.wait continue_bvar in
-                Pipe.write_if_open writer (Int.to_string i))
+  let implementations =
+    [ Rpc.Pipe_rpc.implement pipe_rpc (fun (_ : Rpc.Connection.t) () ->
+        Pipe.create_reader ~close_on_exception:true (fun writer ->
+          let%map () =
+            List.init number_of_messages ~f:Fn.id
+            |> Deferred.List.iter ~how:`Sequential ~f:(fun i ->
+              let%bind () = Bvar.wait continue_bvar in
+              Pipe.write_if_open writer (Int.to_string i))
+          in
+          Pipe.close writer)
+        |> Deferred.Result.return)
+    ]
+  ;;
+
+  let%expect_test "Close mid-stream" =
+    let%bind client_conn = serve_with_client ~implementations in
+    let%bind pipe_with_close_reason =
+      dispatch_with_close_reason_exn pipe_rpc client_conn ()
+    in
+    let%bind () = continue_read_and_print pipe_with_close_reason in
+    let%bind () = continue_read_and_print pipe_with_close_reason in
+    let%bind () = Rpc.Connection.close client_conn in
+    let%map () = continue_read_and_print pipe_with_close_reason in
+    [%expect
+      {|
+      (Ok (Ok 0))
+      (Ok (Ok 1))
+      (Error (Connection_closed (Rpc.Connection.close)))
+      |}]
+  ;;
+
+  let%expect_test "Clean close" =
+    let%bind client_conn = serve_with_client ~implementations in
+    let%bind pipe_with_close_reason =
+      dispatch_with_close_reason_exn pipe_rpc client_conn ()
+    in
+    let%map () =
+      List.init number_of_messages ~f:ignore
+      |> Deferred.List.iter ~how:`Sequential ~f:(fun () ->
+        continue_read_and_print pipe_with_close_reason)
+    in
+    [%expect
+      {|
+      (Ok (Ok 0))
+      (Ok (Ok 1))
+      (Ok (Ok 2))
+      (Ok (Ok 3))
+      (Ok (Ok 4))
+      |}]
+  ;;
+
+  let%expect_test "Raise immediately" =
+    let%bind client_conn =
+      serve_with_client
+        ~implementations:
+          [ Rpc.Pipe_rpc.implement pipe_rpc (fun (_ : Rpc.Connection.t) () ->
+              raise_s [%message "Immediate raise"])
+          ]
+    in
+    Backtrace.elide := true;
+    let%map () =
+      let%map result = Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_conn () in
+      print_s [%message "" ~_:(Result.error result : Error.t option)]
+    in
+    Backtrace.elide := false;
+    [%expect
+      {|
+      (((rpc_error
+         (Uncaught_exn
+          ((location "server-side pipe_rpc computation")
+           (exn
+            (monitor.ml.Error "Immediate raise" ("<backtrace elided in test>"))))))
+        (connection_description ("Client connected via TCP" 0.0.0.0:PORT))
+        (rpc_name pipe-rpc) (rpc_version 1)))
+      |}]
+  ;;
+end
+
+let%expect_test "Direct_stream_writer queues updates before [started], and writes them \
+                 directly afterward"
+  =
+  let%bind client_conn =
+    serve_with_client
+      ~implementations:
+        [ Rpc.Pipe_rpc.implement_direct pipe_rpc (fun connection () writer ->
+            let total_bytes_sent () =
+              Rpc.Connection.bytes_to_write connection
+              + (Rpc.Connection.bytes_written connection |> Int63.to_int_exn)
             in
-            Pipe.close writer)
-          |> Deferred.Result.return)
-      ]
-    ;;
-
-    let%expect_test "Close mid-stream" =
-      let%bind client_conn = serve_with_client ~implementations in
-      let%bind pipe_with_close_reason =
-        dispatch_with_close_reason_exn pipe_rpc client_conn ()
-      in
-      let%bind () = continue_read_and_print pipe_with_close_reason in
-      let%bind () = continue_read_and_print pipe_with_close_reason in
-      let%bind () = Rpc.Connection.close client_conn in
-      let%map () = continue_read_and_print pipe_with_close_reason in
-      [%expect
-        {|
-        (Ok (Ok 0))
-        (Ok (Ok 1))
-        (Error (Connection_closed (Rpc.Connection.close)))
-        |}]
-    ;;
-
-    let%expect_test "Clean close" =
-      let%bind client_conn = serve_with_client ~implementations in
-      let%bind pipe_with_close_reason =
-        dispatch_with_close_reason_exn pipe_rpc client_conn ()
-      in
-      let%map () =
-        List.init number_of_messages ~f:ignore
-        |> Deferred.List.iter ~how:`Sequential ~f:(fun () ->
-          continue_read_and_print pipe_with_close_reason)
-      in
-      [%expect
-        {|
-        (Ok (Ok 0))
-        (Ok (Ok 1))
-        (Ok (Ok 2))
-        (Ok (Ok 3))
-        (Ok (Ok 4))
-        |}]
-    ;;
-
-    let%expect_test "Raise immediately" =
-      let%bind client_conn =
-        serve_with_client
-          ~implementations:
-            [ Rpc.Pipe_rpc.implement pipe_rpc (fun () () ->
-                raise_s [%message "Immediate raise"])
-            ]
-      in
-      Backtrace.elide := true;
-      let%map () =
-        let%map result =
-          Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_conn ()
-        in
-        print_s [%message "" ~_:(Result.error result : Error.t option)]
-      in
-      Backtrace.elide := false;
-      [%expect
-        {|
-        (((rpc_error
-           (Uncaught_exn
-            ((location "server-side pipe_rpc computation")
-             (exn
-              (monitor.ml.Error "Immediate raise" ("<backtrace elided in test>"))))))
-          (connection_description ("Client connected via TCP" 0.0.0.0:PORT))
-          (rpc_name pipe-rpc) (rpc_version 1)))
-        |}]
-    ;;
-  end)
+            let initial_bytes_sent = total_bytes_sent () in
+            let (`Ok | `Closed) =
+              Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback writer "foo"
+            in
+            assert (total_bytes_sent () = initial_bytes_sent);
+            upon (Rpc.Pipe_rpc.Direct_stream_writer.started writer) (fun () ->
+              let new_bytes_sent = total_bytes_sent () in
+              assert (new_bytes_sent > initial_bytes_sent);
+              let (`Ok | `Closed) =
+                Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback writer "bar"
+              in
+              assert (total_bytes_sent () > new_bytes_sent);
+              Rpc.Pipe_rpc.Direct_stream_writer.close writer);
+            return (Ok ()))
+        ]
+  in
+  let%bind reader, (_ : Rpc.Pipe_rpc.Metadata.t) =
+    Rpc.Pipe_rpc.dispatch_exn pipe_rpc client_conn ()
+  in
+  let%bind () = Pipe.iter_without_pushback reader ~f:print_endline in
+  [%expect
+    {|
+    foo
+    bar
+    |}];
+  return ()
 ;;

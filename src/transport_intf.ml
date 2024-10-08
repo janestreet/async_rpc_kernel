@@ -51,7 +51,7 @@ module Send_result = struct
         }
     | Closed
     | Message_too_big of message_too_big
-  [@@deriving sexp_of, globalize]
+  [@@deriving compare, globalize, sexp_of]
 end
 
 module type Writer = sig

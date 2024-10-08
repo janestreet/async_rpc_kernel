@@ -24,17 +24,6 @@ module rec Implementation : sig
   end
 
   module F : sig
-    type _ error_mode =
-      | Always_ok : _ error_mode
-      | Using_result : (_, _) Result.t error_mode
-      | Using_result_result : ((_, _) Result.t, _) Result.t error_mode
-      | Is_error : ('a -> bool) -> 'a error_mode
-      | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
-
-    type (_, _) result_mode =
-      | Blocking : ('a, 'a Or_not_authorized.t Or_error.t) result_mode
-      | Deferred : ('a, 'a Or_not_authorized.t Or_error.t Deferred.t) result_mode
-
     type ('connection_state, 'query, 'init, 'update) streaming_impl =
       | Pipe of
           ('connection_state
@@ -54,7 +43,7 @@ module rec Implementation : sig
       ; bin_update_writer : 'update Bin_prot.Type_class.writer
           (* 'init can be an error or an initial state *)
       ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
-      ; error_mode : 'init error_mode
+      ; error_mode : 'init Implementation_mode.Error_mode.t
       ; here : Source_code_position.t
       }
 
@@ -75,8 +64,8 @@ module rec Implementation : sig
           'query Bin_prot.Type_class.reader
           * 'response Bin_prot.Type_class.writer
           * ('connection_state -> 'query -> 'result)
-          * 'response error_mode
-          * ('response, 'result) result_mode
+          * 'response Implementation_mode.Error_mode.t
+          * ('response, 'result) Implementation_mode.Result_mode.t
           * Source_code_position.t
           -> 'connection_state t
       | Rpc_expert :
@@ -86,19 +75,18 @@ module rec Implementation : sig
            -> pos:int
            -> len:int
            -> 'result)
-          * (Expert.implementation_result, 'result) result_mode
+          * (Expert.implementation_result, 'result) Implementation_mode.Result_mode.t
           -> 'connection_state t
       | Streaming_rpc :
           ('connection_state, 'query, 'init, 'update) streaming_rpc
           -> 'connection_state t
-      (* [Legacy_menu_rpc] is a hack in order to allow us to share the versioned menu in
+      (* [Menu_rpc] is a hack in order to allow us to share the versioned menu in
          connection metadata. Old clients still require the [__Versioned_rpc.Menu] rpc to
          exist and the menu sent in the metadata must match whatever existed beforehand
          when calling [Menu.add] so we created a custom implementation type that is used
          in [Menu.add] that lets us dispatch the rpc without a ['connection_state].
-         Externally this looks and acts like a [Menu.Stable.V1.response]-returning server.
       *)
-      | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
+      | Menu_rpc : Menu.Stable.V3.response Lazy.t -> 'connection_state t
   end
 
   type 'connection_state t =
@@ -141,7 +129,7 @@ and Implementations : sig
 
   type 'connection_state implementations = 'connection_state t
 
-  module rec Instance : sig
+  module Instance : sig
     module Streaming_response : sig
       type t =
         | Pipe : _ Pipe.Reader.t Set_once.t -> t
@@ -196,11 +184,12 @@ and Direct_stream_writer : sig
   type 'a t =
     { id : Id.t
     ; mutable state : 'a State.t
+    ; started : unit Ivar.t
     ; closed : unit Ivar.t
     ; instance : Implementations.Instance.t
     ; query_id : Query_id.t
     ; rpc : Description.t
-    ; stream_writer : 'a Cached_bin_writer.t
+    ; stream_writer : 'a Cached_streaming_response_writer.t
     ; groups : 'a group_entry Bag.t
     }
 
@@ -232,12 +221,3 @@ and Direct_stream_writer : sig
     with type 'a direct_stream_writer := 'a t
 end =
   Direct_stream_writer
-
-and Cached_bin_writer : sig
-  type 'a t =
-    { header_prefix : string (* Bin_protted constant prefix of the message *)
-    ; mutable data_len : Nat0.t
-    ; bin_writer : 'a Bin_prot.Type_class.writer
-    }
-end =
-  Cached_bin_writer

@@ -21,17 +21,6 @@ module Expert = struct
 end
 
 module F = struct
-  type 'a error_mode = 'a F.error_mode =
-    | Always_ok : _ error_mode
-    | Using_result : (_, _) Result.t error_mode
-    | Using_result_result : ((_, _) Result.t, _) Result.t error_mode
-    | Is_error : ('a -> bool) -> 'a error_mode
-    | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
-
-  type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
-    | Blocking : ('a, 'a Or_not_authorized.t Or_error.t) result_mode
-    | Deferred : ('a, 'a Or_not_authorized.t Or_error.t Deferred.t) result_mode
-
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
         ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
@@ -52,7 +41,7 @@ module F = struct
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
-    ; error_mode : 'init error_mode
+    ; error_mode : 'init Implementation_mode.Error_mode.t
     ; here : Source_code_position.t
     }
 
@@ -73,8 +62,8 @@ module F = struct
         'query Bin_prot.Type_class.reader
         * 'response Bin_prot.Type_class.writer
         * ('connection_state -> 'query -> 'result)
-        * 'response error_mode
-        * ('response, 'result) result_mode
+        * 'response Implementation_mode.Error_mode.t
+        * ('response, 'result) Implementation_mode.Result_mode.t
         * Source_code_position.t
         -> 'connection_state t
     | Rpc_expert :
@@ -84,16 +73,16 @@ module F = struct
          -> pos:int
          -> len:int
          -> 'result)
-        * (Expert.implementation_result, 'result) result_mode
+        * (Expert.implementation_result, 'result) Implementation_mode.Result_mode.t
         -> 'connection_state t
     | Streaming_rpc :
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
-    | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
+    | Menu_rpc : Menu.Stable.V3.response Lazy.t -> 'connection_state t
 
   let sexp_of_t _ = function
     | One_way_expert _ | One_way _ -> [%message "one-way"]
-    | Rpc_expert _ | Rpc _ | Legacy_menu_rpc _ -> [%message "rpc"]
+    | Rpc_expert _ | Rpc _ | Menu_rpc _ -> [%message "rpc"]
     | Streaming_rpc _ -> [%message "streaming-rpc"]
   ;;
 
@@ -131,7 +120,7 @@ module F = struct
           impl authorized_state q)
       in
       Rpc (bin_query, bin_response, impl, error, Deferred, here)
-    | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
+    | Menu_rpc impl -> Menu_rpc impl
     | Rpc_expert (impl, Blocking) ->
       let impl state resp buf ~pos ~len =
         lift_result_bind (f state) ~f:(fun authorized_state ->
@@ -200,7 +189,7 @@ module F = struct
         , error
         , Deferred
         , here )
-    | Legacy_menu_rpc impl -> Legacy_menu_rpc impl
+    | Menu_rpc impl -> Menu_rpc impl
     | Rpc_expert (impl, Deferred) ->
       Rpc_expert
         ( (fun state resp buf ~pos ~len ->

@@ -651,34 +651,7 @@ module Menu = struct
   ;;
 
   let supported_versions = Menu.supported_versions
-
-  let add impls =
-    let menu =
-      lazy
-        (List.map impls ~f:(fun implementation ->
-           ( Implementation.description implementation
-           , Implementation.digests implementation )))
-    in
-    let implementation =
-      { Implementation_types.Implementation.tag =
-          Protocol.Rpc_tag.of_string (Rpc.name rpc)
-      ; version = Rpc.version rpc
-      ; f = Legacy_menu_rpc menu
-      ; shapes =
-          lazy
-            (Rpc_shapes.Rpc
-               { query = (Rpc.bin_query rpc).shape
-               ; response = (Rpc.bin_response rpc).shape
-               }
-             |> fun shapes -> shapes, Rpc_shapes.eval_to_digest shapes)
-      ; on_exception =
-          None
-          (* We don't set the on_exception so that whatever [Implementations]-level
-           configuration is set will be inherited here. *)
-      }
-    in
-    impls @ [ implementation ]
-  ;;
+  let add = Fn.id
 
   let aux_request dispatch conn =
     let%map result = dispatch rpc conn () in
@@ -746,7 +719,7 @@ module Menu = struct
           Implementation.description impl, Implementation.shapes impl)
       in
       let shape_menu_impls = implement_multi (fun _ ~version:_ () -> return shape_menu) in
-      add impls @ shape_menu_impls
+      impls @ shape_menu_impls
     ;;
 
     let request conn = Rpc.dispatch Current_version.rpc conn ()
