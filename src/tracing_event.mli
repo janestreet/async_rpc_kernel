@@ -113,9 +113,7 @@ end
 
 type t =
   { event : Event.t
-  ; rpc : Description.t option
-  (** Associated information for the RPC. This is [None] only for [Received (Response _)]
-      events. *)
+  ; rpc : Description.t (** Associated information for the RPC. *)
   ; global_ id : Int63.t
   (** A unique identifier per in-flight RPC, this can be used to tie together request
       and response events. The client and server see the same id. *)

@@ -15,7 +15,34 @@
     different versions of what is essentially the same RPC.  You can think of it as an
     extension to the name of the RPC, and in fact, each RPC is uniquely identified by its
     (name, version) pair.  RPCs with the same name but different versions should implement
-    similar functionality. *)
+    similar functionality.
+
+
+    {3 Ordering}
+    A single [Async_rpc] connection is an ordered stream of messages, where a message is
+    something like a query or a response. Functions that directly write a message, e.g.
+    dispatch functions, [Direct_stream_writer.write], etc., will synchronously enqueue
+    that message to be sent. Received messages will be processed in order, so functions
+    that receive a message, like RPC implementations, or the callback on
+    [Pipe_rpc.dispatch_iter], will be invoked as soon as the message is received.
+
+    This means that if careful, assumptions can be made about the ordering of messages,
+    e.g.:
+    - Multiple dispatches of RPCs will be received by the other end of the connection in
+    the order they were sent
+    - Once a [Direct_stream_writer] has been started (see {!Pipe_rpc.Direct_stream_writer.started}
+    for details on what that means), values written to it will be immediately added to the
+    message stream. This means if you write a value to a started writer, and the other end
+    of the connection used [dispatch_iter] to dispatch the streaming RPC, the callback is
+    guaranteed to be invoked on that message before any other message on the same
+    connection produced after the call to [Direct_stream_writer.write], e.g. responding to
+    RPC response, or an RPC dispatch.
+
+    Note that once asynchrony is introduced, e.g. with non-eager RPC implementations,
+    using [Pipe.t] to dispatch or implement streaming RPCs, or using functions like
+    [lift_deferred] or [with_authorization_deferred], it becomes much harder to make
+    assertions about the relative ordering of messages.
+ *)
 
 open! Core
 open! Async_kernel
@@ -553,16 +580,50 @@ module Pipe_rpc : sig
     -> 'connection_state Implementation.t
 
   (** A [Direct_stream_writer.t] is a simple object for responding to a [Pipe_rpc] or
-      {!State_rpc} query. *)
+      {!State_rpc} query, for use with functions below like [implement_direct].
+
+      It is the most basic and primitive way to write data to a client recieivng the
+      values.
+
+      When compared to using a Pipe - there is effectively a [Pipe.iter] in the library
+      that is writing those values to a direct stream writer.
+
+      If your code makes it more natural to create a [Pipe.Reader.t] and provide that,
+      then that's a reasonable thing to do, but generally if you don't already have a
+      pipe, avoiding the hop going through the pipe by using a [Direct_stream_writer] will
+      be more efficient, since the elements can be serialized immediately *)
   module Direct_stream_writer : sig
     type 'a t
 
     (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
-        the open case, [d] is determined when the message has been flushed from the
-        underlying [Transport.Writer.t]. *)
+        the open case, [d] is determined when the underlying [Transport.Writer.t] has been
+        flushed. Note that if [t] is not started yet (i.e. [started t] is not determined),
+        then [d] does not actually correspond to the message being flushed.
+
+        Until [started t] is determined, calls to [write] and [write_without_pushback]
+        will enqueue the messages until the RPC implementation completes. This can cause
+        high memory usage and/or long async cycles when the messages do actually get
+        serialized. *)
     val write : 'a t -> 'a -> [ `Flushed of unit Deferred.t | `Closed ]
 
     val write_without_pushback : 'a t -> 'a -> [ `Ok | `Closed ]
+
+    (** [started t] will become determined once the implementation has completed
+        successfully (i.e. the implementation returned a value and [Async_rpc] processed
+        it and sent it to the client) and [t] has started to write stream updates,
+        including having written all updates that were queued by calling one of the write
+        functions before it was started.
+
+        It is guaranteed that:
+        - if [started t] is determined, any update written to [t] will immediately be
+          serialized to the output stream.
+        - if [started t] is not determined, then any update written to [t] will be
+          enqueued until it is started.
+
+        Note that if the implementation does not complete successfully, [started] may
+        never become determined. *)
+    val started : _ t -> unit Deferred.t
+
     val close : _ t -> unit
     val closed : _ t -> unit Deferred.t
     val flushed : _ t -> unit Deferred.t

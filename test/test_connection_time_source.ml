@@ -56,14 +56,7 @@ let establish_connection transport time_source description =
 let%expect_test "test connection with time_source <> wall_clock" =
   let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
   let client_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
-  let server_r, server_w = Pipe.create () in
-  let client_r, client_w = Pipe.create () in
-  let server_transport =
-    Pipe_transport.create Pipe_transport.Kind.bigstring client_r server_w
-  in
-  let client_transport =
-    Pipe_transport.create Pipe_transport.Kind.bigstring server_r client_w
-  in
+  let client_transport, server_transport = Pipe_transport.(create_pair Kind.bigstring) in
   let server_conn =
     establish_connection
       server_transport
@@ -153,11 +146,14 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:14Z")
       (description server)
-      (reason      "No heartbeats received for 10s."))
+      (reason
+       "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00."))
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
-      (reason ("Connection closed by peer:" "No heartbeats received for 10s.")))
+      (reason (
+        "Connection closed by peer:"
+        "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")))
     |}];
   print_liveness server_conn;
   print_liveness client_conn;

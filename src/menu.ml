@@ -43,6 +43,34 @@ module Stable = struct
       [%expect {| bfa1a67e3782922212d253c848e49da8 |}]
     ;;
   end
+
+  module V3 = struct
+    let version = 3
+
+    type query = unit [@@deriving bin_io]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: query];
+      [%expect {| 86ba5df747eec837f0b391dd49f33f9e |}]
+    ;;
+
+    type response =
+      { descriptions : Description.Stable.V1.t array
+      ; digests : Rpc_shapes.Stable.Just_digests.V1.t array option
+      }
+    [@@deriving bin_io, sexp_of]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: response];
+      [%expect {| 59ecd3468dc49f69d0993360e80aff6d |}]
+    ;;
+
+    let to_v2_response response =
+      let open Core.Option.Let_syntax in
+      let%bind digests = response.digests in
+      Core.Array.zip response.descriptions digests >>| Core.Array.to_list
+    ;;
+  end
 end
 
 open Core
@@ -59,7 +87,7 @@ let version_menu_rpc_name = "__Versioned_rpc.Menu"
    contiguous) instead of some multi-level scheme. This means a bit less pointer-chasing
    than with a Map.t but is otherwise straightforward. We keep digests separately because
    they are rarely used. *)
-type t =
+type t = Stable.V3.response =
   { descriptions : Description.t array
       (* strictly sorted. One thing we don't do but might want is to make equal names phys_equal *)
   ; digests : Rpc_shapes.Just_digests.t array option
@@ -122,6 +150,8 @@ let mem t description =
   | Some (_ : int) -> true
   | None -> false
 ;;
+
+let includes_shape_digests t = Option.is_some t.digests
 
 let shape_digests t description =
   match index t description with
@@ -198,6 +228,18 @@ let of_supported_rpcs descriptions ~rpc_shapes:`Unknown =
   Array.sort descriptions ~compare:[%compare: Description.t];
   ensure_no_duplicates descriptions;
   { descriptions; digests = None }
+;;
+
+let of_supported_rpcs_and_shapes descriptions_and_shapes =
+  let descriptions, digests =
+    List.sort
+      descriptions_and_shapes
+      ~compare:(Comparable.lift [%compare: Description.t] ~f:fst)
+    |> Array.of_list
+    |> Array.unzip
+  in
+  ensure_no_duplicates descriptions;
+  { descriptions; digests = Some digests }
 ;;
 
 let of_v1_response (v1_response : Stable.V1.response) : t =

@@ -4,52 +4,28 @@ open Async_kernel
 type t [@@deriving sexp_of]
 
 val sexp_of_writer : t -> Sexp.t
-val create_before_negotiation : Transport.Writer.t -> t
+
+val create_before_negotiation
+  :  Transport.Writer.t
+  -> tracing_events:(local_ Tracing_event.t -> unit) Bus.Read_write.t
+  -> t
+
 val set_negotiated_protocol_version : t -> int -> unit
 
-val send_query
-  :  t
-  -> 'query Protocol.Query.t
-  -> bin_writer_query:'query Bin_prot.Type_class.writer
-  -> local_ unit Transport.Send_result.t
+module For_handshake : sig
+  val send_handshake_header
+    :  t
+    -> Protocol_version_header.t
+    -> (unit, Handshake_error.t) Result.t
 
-val send_expert_query
-  :  t
-  -> unit Protocol.Query.t
-  -> buf:Bigstring.t
-  -> pos:int
-  -> len:int
-  -> send_bin_prot_and_bigstring:
-       (Transport.Writer.t
-        -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
-        -> Protocol.Message.nat0_t
-        -> buf:Bigstring.t
-        -> pos:int
-        -> len:int
-        -> local_ 'result Transport.Send_result.t)
-  -> local_ 'result Transport.Send_result.t
-
-val send_response
-  :  t
-  -> 'response Protocol.Response.t
-  -> bin_writer_response:'response Bin_prot.Type_class.writer
-  -> local_ unit Transport.Send_result.t
-
-val send_expert_response
-  :  t
-  -> Protocol.Query_id.t
-  -> buf:Bigstring.t
-  -> pos:int
-  -> len:int
-  -> send_bin_prot_and_bigstring:
-       (Transport.Writer.t
-        -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
-        -> Protocol.Message.nat0_t
-        -> buf:Bigstring.t
-        -> pos:int
-        -> len:int
-        -> local_ 'result Transport.Send_result.t)
-  -> local_ 'result Transport.Send_result.t
+  (** Returns [Ok ()] if we successfully sent, haven't negotiated a protocol version yet,
+      or if the protocol version doesn't support sending the connection metadata. *)
+  val send_connection_metadata_if_supported
+    :  t
+    -> Menu.t option
+    -> identification:Bigstring.t option
+    -> (unit, Handshake_error.t) Result.t
+end
 
 val send_heartbeat : t -> local_ unit Transport.Send_result.t
 
@@ -68,7 +44,63 @@ val stopped : t -> unit Deferred.t
 val close : t -> unit Deferred.t
 val is_closed : t -> bool
 
-module Unsafe_for_cached_bin_writer : sig
+module Query : sig
+  val send
+    :  t
+    -> 'query Protocol.Query.t
+    -> bin_writer_query:'query Bin_prot.Type_class.writer
+    -> local_ unit Transport.Send_result.t
+
+  val send_expert
+    :  t
+    -> unit Protocol.Query.t
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> send_bin_prot_and_bigstring:
+         (Transport.Writer.t
+          -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
+          -> Protocol.Message.nat0_t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> local_ 'result Transport.Send_result.t)
+    -> local_ 'result Transport.Send_result.t
+end
+
+module Response : sig
+  val send
+    :  t
+    -> 'response Protocol.Response.t
+    -> bin_writer_response:'response Bin_prot.Type_class.writer
+    -> local_ unit Transport.Send_result.t
+
+  val send_expert
+    :  t
+    -> Protocol.Query_id.t
+    -> buf:Bigstring.t
+    -> pos:int
+    -> len:int
+    -> send_bin_prot_and_bigstring:
+         (Transport.Writer.t
+          -> Protocol.Message.nat0_t Bin_prot.Type_class.writer
+          -> Protocol.Message.nat0_t
+          -> buf:Bigstring.t
+          -> pos:int
+          -> len:int
+          -> local_ 'result Transport.Send_result.t)
+    -> local_ 'result Transport.Send_result.t
+
+  val handle_send_result
+    :  t
+    -> local_ Protocol.Query_id.t
+    -> local_ Description.t
+    -> local_ Tracing_event.Sent_response_kind.t
+    -> local_ 'a Transport_intf.Send_result.t
+    -> unit
+end
+
+module Unsafe_for_cached_streaming_response_writer : sig
   val send_bin_prot
     :  t
     -> 'a Bin_prot.Type_class.writer

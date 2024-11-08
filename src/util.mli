@@ -1,7 +1,8 @@
 open Core
 
 val bin_read_from_bigstring
-  :  'a Bin_prot.Type_class.reader
+  :  here:[%call_pos]
+  -> 'a Bin_prot.Type_class.reader
   -> ?add_len:('a -> int)
   -> Bin_prot.Common.buf
   -> pos_ref:int ref

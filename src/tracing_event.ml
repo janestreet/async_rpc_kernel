@@ -49,8 +49,10 @@ end
 
 type t =
   { event : Event.t
-  ; rpc : Description.t option
+  ; rpc : Description.t
   ; global_ id : Int63.t (* Protocol.Query_id.t is not exposed. *)
   ; payload_bytes : int
   }
-[@@deriving globalize, sexp_of]
+[@@deriving sexp_of, globalize]
+
+let globalize x = globalize x

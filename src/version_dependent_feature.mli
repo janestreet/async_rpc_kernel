@@ -4,6 +4,7 @@ open! Core
 type t =
   | Peer_metadata
   | Close_reason
+  | Peer_metadata_v2
 [@@deriving enumerate]
 
 val is_supported : t -> version:int -> bool

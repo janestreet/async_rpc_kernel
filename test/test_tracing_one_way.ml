@@ -84,12 +84,12 @@ let%expect_test "Single one-way rpc call" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 100)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 100)
       (payload_bytes 40)))
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     |}];
   Ivar.fill_exn rpc_response1 (Ok ());
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -112,16 +112,16 @@ let%expect_test "One-way immediately raises with on_exception:Close_connection" 
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name plain) (version 1)))) (id 99)
+     ((event (Received Query)) (rpc ((name plain) (version 1))) (id 99)
       (payload_bytes 13)))
     (Implementation_called "plain -1")
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 100)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 100)
       (payload_bytes 40)))
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     (Send
      (message
       ("00000000  05 07 00 02 01 21 52 70  63 20 6d 65 73 73 61 67  |.....!Rpc messag|"
@@ -163,23 +163,23 @@ let%expect_test "One-way asynchronously raises with on_exception:Close_connectio
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name plain) (version 1)))) (id 99)
+     ((event (Received Query)) (rpc ((name plain) (version 1))) (id 99)
       (payload_bytes 13)))
     (Implementation_called "plain -1")
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 100)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 100)
       (payload_bytes 40)))
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 200)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 200)
       (payload_bytes 42)))
     (Implementation_called "example message (id = 200)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 200) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 200) (payload_bytes 0)))
     (Send
      (message
       ("00000000  05 03 01 02 00 24 55 6e  63 61 75 67 68 74 20 65  |.....$Uncaught e|"
@@ -214,23 +214,23 @@ let%expect_test "One-way immediately raises, with on_exception:Log_on_background
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name plain) (version 1)))) (id 99)
+     ((event (Received Query)) (rpc ((name plain) (version 1))) (id 99)
       (payload_bytes 13)))
     (Implementation_called "plain -1")
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 100)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 100)
       (payload_bytes 40)))
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 200)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 200)
       (payload_bytes 42)))
     (Implementation_called "example message (id = 200)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 200) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 200) (payload_bytes 0)))
     |}];
   return ()
 ;;
@@ -249,23 +249,23 @@ let%expect_test "One-way asynchronously raises, with on_exception:Log_on_backgro
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name plain) (version 1)))) (id 99)
+     ((event (Received Query)) (rpc ((name plain) (version 1))) (id 99)
       (payload_bytes 13)))
     (Implementation_called "plain -1")
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 100)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 100)
       (payload_bytes 40)))
     (Implementation_called "example message (id = 100)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 100) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     (Tracing_event
-     ((event (Received Query)) (rpc (((name one-way) (version 1)))) (id 200)
+     ((event (Received Query)) (rpc ((name one-way) (version 1))) (id 200)
       (payload_bytes 42)))
     (Implementation_called "example message (id = 200)")
     (Tracing_event
      ((event (Sent (Response One_way_so_no_response)))
-      (rpc (((name one-way) (version 1)))) (id 200) (payload_bytes 0)))
+      (rpc ((name one-way) (version 1))) (id 200) (payload_bytes 0)))
     1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error(Failure"injected error")("<backtrace elided in test>"))))
     |}];
   return ()

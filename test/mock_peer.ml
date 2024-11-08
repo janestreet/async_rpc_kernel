@@ -391,7 +391,8 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
   in
   let nat0 =
     match message with
-    | (Heartbeat | Metadata _ | Close_reason _) as x -> x
+    | (Heartbeat | Metadata _ | Metadata_v2 _ | Close_reason _ | Close_reason_duplicated _)
+      as x -> x
     | Query_v1 x -> Query_v1 { x with data = length x.data }
     | Response { data = Error _; _ } as x -> x
     | Response ({ data = Ok data; _ } as x) -> Response { x with data = Ok (length data) }
@@ -439,7 +440,7 @@ let connect ?implementations ?(send_handshake = Some `v4) t =
       ?implementations
       transport
       ~connection_state:(fun conn ->
-        let bus = Connection.events conn in
+        let bus = Connection.tracing_events conn in
         Bus.iter_exn bus [%here] ~f:(fun event ->
           let event = [%globalize: Tracing_event.t] event in
           emit t (Tracing_event event));

@@ -58,7 +58,7 @@ module Rpc = struct
     ; bin_response : 'response Bin_prot.Type_class.t
     ; query_type_id : 'query Type_equal.Id.t
     ; response_type_id : 'response Type_equal.Id.t
-    ; has_errors : 'response Implementation.F.error_mode
+    ; has_errors : 'response Implementation_mode.Error_mode.t
     }
 
   let aux_create ~name ~version ~bin_query ~bin_response ~has_errors =

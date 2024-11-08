@@ -31,6 +31,7 @@ module Direct_stream_writer : sig
 
   module Id = Implementation_types.Direct_stream_writer.Id
 
+  val started : _ t -> unit Deferred.t
   val close : _ t -> unit
   val closed : _ t -> unit Deferred.t
   val is_closed : _ t -> bool
@@ -98,7 +99,7 @@ val instantiate
   -> connection_close_started:Info.t Deferred.t
   -> connection_state:'a
   -> writer:Protocol_writer.t
-  -> events:(local_ Tracing_event.t -> unit) Bus.Read_write.t
+  -> tracing_events:(local_ Tracing_event.t -> unit) Bus.Read_write.t
   -> Instance.t
 
 val create_exn

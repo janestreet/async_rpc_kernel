@@ -1,5 +1,4 @@
 open Core
-open! Poly
 open Async
 
 let max_message_size = 16 lsl 20
@@ -9,6 +8,15 @@ let config =
   (* Always batch, we don't care about measuring the syscall time here *)
     ~start_batching_after_num_messages:0
     ()
+;;
+
+let plain_rpc =
+  Rpc.Rpc.create
+    ~name:"plain-rpc"
+    ~version:1
+    ~bin_query:[%bin_type_class: unit]
+    ~bin_response:[%bin_type_class: int]
+    ~include_in_error_count:Only_on_exn
 ;;
 
 let basic_rpc name =
@@ -124,50 +132,44 @@ let bin_writer_int_int = [%bin_writer: int * int]
 let buf = Bigstring.create 8192
 
 let%bench "direct write" =
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer data = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writer data
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench "direct write expert" =
   let len = bin_writer_int_int.write buf ~pos:0 data in
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
-      direct_writer
-      ~buf
-      ~pos:0
-      ~len
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
+    direct_writer
+    ~buf
+    ~pos:0
+    ~len
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let big_data = Base.Sys.opaque_identity (List.init 1000 ~f:(fun x -> x * 1000))
 let bin_writer_int_list = [%bin_writer: int list]
 
 let%bench "direct write (big)" =
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
-      direct_writers_big.(0)
-      big_data
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback direct_writers_big.(0) big_data
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench "direct write expert (big)" =
   let len = bin_writer_int_list.write buf ~pos:0 big_data in
-  assert (
-    Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
-      direct_writers_big.(0)
-      ~buf
-      ~pos:0
-      ~len
-    = `Ok)
+  Rpc.Pipe_rpc.Direct_stream_writer.Expert.write_without_pushback
+    direct_writers_big.(0)
+    ~buf
+    ~pos:0
+    ~len
+  |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
 ;;
 
 let%bench ("iter direct write (big)" [@indexed n = [ 1; 10; 100 ]]) =
   for i = 0 to n - 1 do
-    assert (
-      Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
-        direct_writers_big.(i)
-        big_data
-      = `Ok)
+    Rpc.Pipe_rpc.Direct_stream_writer.write_without_pushback
+      direct_writers_big.(i)
+      big_data
+    |> [%test_result: [ `Ok | `Closed ]] ~expect:`Ok
   done
 ;;
 
@@ -179,7 +181,7 @@ let%bench_fun ("direct write to group (big)" [@indexed n = [ 1; 10; 100 ]]) =
 let add_tracing_subscriber connection =
   let _subscriber =
     Bus.subscribe_exn
-      (Async_rpc_kernel.Async_rpc_kernel_private.Connection.events connection)
+      (Async_rpc_kernel.Async_rpc_kernel_private.Connection.tracing_events connection)
       [%here]
       ~f:(fun event ->
         let (_ : _) = Base.Sys.opaque_identity event in
@@ -205,13 +207,9 @@ let server_handle_connection ?(with_tracing_subscriber = false) transport implem
 ;;
 
 let create_connection ?with_tracing_subscriber implementations =
-  let to_server_reader, to_server_writer = Pipe.create () in
-  let to_client_reader, to_client_writer = Pipe.create () in
-  let one_transport =
-    Async_rpc_kernel.Pipe_transport.create Async_rpc_kernel.Pipe_transport.Kind.string
+  let client_end, server_end =
+    Async_rpc_kernel.Pipe_transport.(create_pair Kind.string)
   in
-  let client_end = one_transport to_client_reader to_server_writer in
-  let server_end = one_transport to_server_reader to_client_writer in
   don't_wait_for
     (server_handle_connection server_end implementations ?with_tracing_subscriber);
   let%map client_conn =
@@ -297,4 +295,22 @@ let%bench_fun ("end-to-end Pipe write (big)" [@indexed num_messages = [ 5; 500; 
   =
   let client_conn = pipe_setup_conn rpc_pipe_big ~num_messages ~message_data:big_data in
   fun () -> read_messages rpc_pipe_big client_conn ~num_messages
+;;
+
+let%bench_fun ("dispatch plain RPC" [@indexed num_dispatches = [ 1; 10; 100; 1_000 ]]) =
+  let client_conn =
+    Thread_safe.block_on_async_exn (fun () ->
+      let implementations =
+        Rpc.Implementations.create_exn
+          ~implementations:
+            [ Rpc.Rpc.implement plain_rpc (fun () () -> Deferred.never ()) ]
+          ~on_unknown_rpc:`Raise
+          ~on_exception:Log_on_background_exn
+      in
+      create_connection implementations)
+  in
+  fun () ->
+    for _ = 1 to num_dispatches do
+      ignore (Rpc.Rpc.dispatch plain_rpc client_conn () : int Or_error.t Deferred.t)
+    done
 ;;

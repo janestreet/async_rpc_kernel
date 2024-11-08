@@ -50,7 +50,7 @@ module Private = struct
     | Custom { is_error } -> stage is_error
   ;;
 
-  let[@inline] to_error_mode (type r) (errors : r t) : r Implementation.F.error_mode =
+  let[@inline] to_error_mode (type r) (errors : r t) : r Implementation_mode.Error_mode.t =
     match errors with
     | Only_on_exn -> Always_ok
     | Or_error -> Using_result

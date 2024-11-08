@@ -47,5 +47,5 @@ type _ t =
       the most likely to be broken by future changes to the API. *)
 
 module Private : sig
-  val to_error_mode : 'a t -> 'a Implementation.F.error_mode
+  val to_error_mode : 'a t -> 'a Implementation_mode.Error_mode.t
 end

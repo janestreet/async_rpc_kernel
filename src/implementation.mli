@@ -3,11 +3,10 @@
 open! Core
 open! Async_kernel
 open Protocol
-open Implementation_types.Implementation
 
 module Expert : sig
   module Responder : sig
-    type t = Expert.Responder.t =
+    type t =
       { query_id : Query_id.t
       ; writer : Protocol_writer.t
       ; mutable responded : bool
@@ -17,25 +16,13 @@ module Expert : sig
     val create : Query_id.t -> Protocol_writer.t -> t
   end
 
-  type implementation_result = Expert.implementation_result =
+  type implementation_result =
     | Replied
     | Delayed_response of unit Deferred.t
 end
 
 module F : sig
-  type 'a error_mode = 'a F.error_mode =
-    | Always_ok : _ error_mode
-    | Using_result : (_, _) Result.t error_mode
-    | Using_result_result : ((_, _) Result.t, _) Result.t error_mode
-    | Is_error : ('a -> bool) -> 'a error_mode
-    | Streaming_initial_message : (_, _) Protocol.Stream_initial_message.t error_mode
-
-  type ('a, 'b) result_mode = ('a, 'b) F.result_mode =
-    | Blocking : ('a, 'a Or_not_authorized.t Or_error.t) result_mode
-    | Deferred : ('a, 'a Or_not_authorized.t Or_error.t Deferred.t) result_mode
-
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
-        ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
@@ -48,17 +35,16 @@ module F : sig
          -> ('init, 'init) Result.t Or_not_authorized.t Or_error.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
-        ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
     { bin_query_reader : 'query Bin_prot.Type_class.reader
     ; bin_init_writer : 'init Bin_prot.Type_class.writer
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
-    ; error_mode : 'init error_mode
+    ; error_mode : 'init Implementation_mode.Error_mode.t
     ; here : Source_code_position.t
     }
 
-  type 'connection_state t = 'connection_state F.t =
+  type 'connection_state t =
     | One_way :
         'msg Bin_prot.Type_class.reader
         * ('connection_state -> 'msg -> unit Or_not_authorized.t Or_error.t Deferred.t)
@@ -75,8 +61,8 @@ module F : sig
         'query Bin_prot.Type_class.reader
         * 'response Bin_prot.Type_class.writer
         * ('connection_state -> 'query -> 'result)
-        * 'response error_mode
-        * ('response, 'result) result_mode
+        * 'response Implementation_mode.Error_mode.t
+        * ('response, 'result) Implementation_mode.Result_mode.t
         * Source_code_position.t
         -> 'connection_state t
     | Rpc_expert :
@@ -86,12 +72,12 @@ module F : sig
          -> pos:int
          -> len:int
          -> 'result)
-        * (Expert.implementation_result, 'result) result_mode
+        * (Expert.implementation_result, 'result) Implementation_mode.Result_mode.t
         -> 'connection_state t
     | Streaming_rpc :
         ('connection_state, 'query, 'init, 'update) streaming_rpc
         -> 'connection_state t
-    | Legacy_menu_rpc : Menu.Stable.V2.response Lazy.t -> 'connection_state t
+    | Menu_rpc : Menu.Stable.V3.response Lazy.t -> 'connection_state t
 
   val lift : 'a t -> f:('b -> 'a Or_not_authorized.t Or_error.t) -> 'b t
 
@@ -101,7 +87,7 @@ module F : sig
     -> 'b t
 end
 
-type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
+type 'connection_state t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t

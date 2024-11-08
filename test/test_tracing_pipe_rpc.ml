@@ -130,7 +130,7 @@ let%expect_test "Single pipe-rpc implementation returning error" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -144,7 +144,7 @@ let%expect_test "Single pipe-rpc implementation returning error" =
        (data (Ok ((unused_query_id 0) (initial (Error "example error"))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   return ()
@@ -156,7 +156,7 @@ let%expect_test "Single pipe-rpc implementation raising" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -178,7 +178,7 @@ let%expect_test "Single pipe-rpc implementation raising" =
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   return ()
@@ -190,7 +190,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -203,7 +203,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
      (Response ((id 55) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   expect_pipe_message t;
   Pipe.write_without_pushback w "foo";
@@ -213,7 +213,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
     (Send (Response ((id 55) (data (Ok (Ok foo))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     Wait_for_writer_ready
     |}];
   expect_pipe_message t;
@@ -228,7 +228,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
     (Send (Response ((id 55) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   return ()
@@ -251,7 +251,7 @@ let%expect_test "Malformed query for pipe-rpc" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 99)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 99)
       (payload_bytes 24)))
     (Send
      (Response
@@ -265,7 +265,7 @@ let%expect_test "Malformed query for pipe-rpc" =
              "Variant / protocol.ml.Stream_query.needs_length" 18)))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 99) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 99) (payload_bytes 1)))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| |}];
@@ -282,7 +282,7 @@ let%expect_test "direct stream writer impl raises synchronously" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     (Send
@@ -297,7 +297,7 @@ let%expect_test "direct stream writer impl raises synchronously" =
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   let%bind writer in
   print_s
@@ -317,7 +317,7 @@ let%expect_test "direct stream writer impl raises asynchronously" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -344,7 +344,7 @@ let%expect_test "direct stream writer impl raises asynchronously" =
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   print_s
     ([%sexp_of: bool]
@@ -370,7 +370,7 @@ let%expect_test "direct stream writer returns error" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     (Send
@@ -378,7 +378,7 @@ let%expect_test "direct stream writer returns error" =
       ((id 55) (data (Ok ((unused_query_id 0) (initial (Error error))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   let%bind writer in
   print_s
@@ -398,7 +398,7 @@ let%expect_test "direct stream writer" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -451,21 +451,21 @@ let%expect_test "direct stream writer" =
      (Response ((id 55) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Send (Response ((id 55) (data (Ok (Ok write))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Send (Response ((id 55) (data (Ok (Ok write_without_pushback))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Send_with_bigstring_non_copying
      (Response ((id 55) (data (Ok (Ok schedule_write))))))
     Wait_for_writer_ready
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   Bvar.broadcast writes_finished ();
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -478,20 +478,20 @@ let%expect_test "direct stream writer" =
     (Send (Response ((id 55) (data (Ok (Ok write))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Wait_for_flushed 1)
     (Send_with_bigstring
      (Response ((id 55) (data (Ok (Ok write_without_pushback))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     write_without_pushback -> ok
     (Send_with_bigstring_non_copying
      (Response ((id 55) (data (Ok (Ok schedule_write))))))
     Wait_for_writer_ready
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   Bvar.broadcast writes_finished ();
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -506,11 +506,11 @@ let%expect_test "direct stream writer" =
     {|
     (Tracing_event
      ((event (Received Abort_streaming_rpc_query))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 18)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 18)))
     (Send (Response ((id 55) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   print_s
     ([%sexp_of: bool]
@@ -533,7 +533,7 @@ let%expect_test "direct stream writer errors after a scheduled write" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -562,7 +562,7 @@ let%expect_test "direct stream writer errors after a scheduled write" =
       ((id 55) (data (Ok ((unused_query_id 0) (initial (Error error))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     |}];
   print_s ([%sexp_of: unit Deferred.t option] can_reuse_bigstring);
   [%expect {| ((Full ())) |}];
@@ -578,7 +578,7 @@ let%expect_test "direct stream writer connection closed after a scheduled write,
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 55)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 55)
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
@@ -611,7 +611,7 @@ let%expect_test "direct stream writer connection closed after a scheduled write,
     (Tracing_event
      ((event
        (Failed_to_send (Response Single_or_streaming_user_defined_error) Closed))
-      (rpc (((name pipe-rpc) (version 1)))) (id 55) (payload_bytes 0)))
+      (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 0)))
     |}];
   print_s ([%sexp_of: unit Deferred.t option] can_reuse_bigstring);
   [%expect {| ((Full ())) |}];
@@ -628,7 +628,7 @@ let%expect_test "error dispatching a pipe rpc" =
      (Query
       ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     |}];
   Mock_peer.write_message
@@ -646,7 +646,7 @@ let%expect_test "error dispatching a pipe rpc" =
        (Received
         (Response
          (Response_finished_rpc_error_or_exn (Uncaught_exn "injected error")))))
-      (rpc ()) (id 1) (payload_bytes 20)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 20)))
     |}];
   let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
@@ -664,7 +664,7 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
      (Query
       ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     |}];
   Mock_peer.write_message
@@ -683,7 +683,7 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
     {|
     (Tracing_event
      ((event (Received (Response Response_finished_user_defined_error)))
-      (rpc ()) (id 1) (payload_bytes 16)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 16)))
     |}];
   let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
@@ -707,7 +707,7 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
     {|
     (Send (Query ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     |}];
   Mock_peer.write_message
@@ -726,7 +726,7 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
         (Response
          (Response_finished_rpc_error_or_exn
           (Bin_io_exn "binio error reading query")))))
-      (rpc ()) (id 1) (payload_bytes 31)))
+      (rpc ((name rpc) (version 1))) (id 1) (payload_bytes 31)))
     |}];
   let%bind result in
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
@@ -748,11 +748,11 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
     {|
     (Send (Query ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     (Tracing_event
      ((event (Received (Response One_way_so_no_response)))
-      (rpc (((name rpc) (version 1)))) (id 1) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 1) (payload_bytes 1)))
     |}];
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
   [%expect {| (Ok ()) |}];
@@ -790,7 +790,7 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
      (Query
       ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     |}];
   Mock_peer.write_message
@@ -805,8 +805,8 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received (Response Partial_response))) (rpc ()) (id 1)
-      (payload_bytes 7)))
+     ((event (Received (Response Partial_response)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 7)))
     |}];
   let%bind pipe, _metadata = result in
   expect_stream_query t;
@@ -817,10 +817,10 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
     (Send (Query ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data Abort))))
     (Tracing_event
      ((event (Sent Abort_streaming_rpc_query))
-      (rpc (((name pipe-rpc) (version 1)))) (id 1) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 1)))
     (Tracing_event
      ((event (Received (Response One_way_so_no_response)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 1) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 1)))
     |}];
   Mock_peer.write_message
     t
@@ -838,7 +838,7 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
         (Response
          (Response_finished_rpc_error_or_exn
           (Bin_io_exn "binio error reading query")))))
-      (rpc ()) (id 1) (payload_bytes 31)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 31)))
     |}];
   return ()
 ;;
@@ -850,7 +850,7 @@ let%expect_test "Client sends abort after server closes pipe" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name pipe-rpc) (version 1)))) (id 1234)
+     ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 1234)
       (payload_bytes 47)))
     (Implementation_called "example query (id = 1234)")
     |}];
@@ -862,7 +862,7 @@ let%expect_test "Client sends abort after server closes pipe" =
      (Response ((id 1234) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 1234) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1234) (payload_bytes 1)))
     (Wait_for_flushed 0)
     |}];
   Mock_peer.mark_flushed_up_to t 0;
@@ -873,7 +873,7 @@ let%expect_test "Client sends abort after server closes pipe" =
     (Send (Response ((id 1234) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
-      (rpc (((name pipe-rpc) (version 1)))) (id 1234) (payload_bytes 1)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1234) (payload_bytes 1)))
     |}];
   write_abort ~id t;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -881,7 +881,7 @@ let%expect_test "Client sends abort after server closes pipe" =
     {|
     (Tracing_event
      ((event (Received Abort_streaming_rpc_query))
-      (rpc (((name pipe-rpc) (version 1)))) (id 1234) (payload_bytes 20)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1234) (payload_bytes 20)))
     |}];
   return ()
 ;;

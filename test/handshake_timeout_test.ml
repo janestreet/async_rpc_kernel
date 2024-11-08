@@ -102,34 +102,40 @@ let%expect_test "client 60s, server 60s" =
   [%expect
     {|
     c_to_s
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     s_to_c
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     ((client_conn (Ok _)) (server_conn (Ok _)))
     c_to_s
-    0400 0000 0000 0000    length= 4 (64-bit LE)
-    04                       body= Metadata
+    0500 0000 0000 0000    length= 5 (64-bit LE)
+    07                       body= Metadata_v2
     00                             identification= None
     01                                       menu= Some
-    00                                              List: 0 items
+    00                                              descriptions= Array: 0 items
+    00                                                   digests= None
     s_to_c
-    0400 0000 0000 0000    length= 4 (64-bit LE)
-    04                       body= Metadata
+    0500 0000 0000 0000    length= 5 (64-bit LE)
+    07                       body= Metadata_v2
     00                             identification= None
     01                                       menu= Some
-    00                                              List: 0 items
+    00                                              descriptions= Array: 0 items
+    00                                                   digests= None
     (client_menu_from_server (Ok (_)))
     (server_menu_from_client (Ok (_)))
     |}];
@@ -143,25 +149,27 @@ let%expect_test "client 0s, server 60s" =
   [%expect
     {|
     c_to_s
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     s_to_c
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     ((client_conn
-      (Error
-       (connection.ml.Handshake_error.Handshake_error
-        (Timeout <created-directly>))))
+      (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
      (server_conn (Ok _)))
     (server_menu_from_client
      (Error
@@ -179,26 +187,28 @@ let%expect_test "client 60s, server 0s" =
   [%expect
     {|
     c_to_s
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     s_to_c
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     ((client_conn (Ok _))
      (server_conn
-      (Error
-       (connection.ml.Handshake_error.Handshake_error
-        (Timeout <created-directly>)))))
+      (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>)))))
     (client_menu_from_server
      (Error
       ("Connection closed before we could get peer metadata"
@@ -215,29 +225,29 @@ let%expect_test "client 0s, server 0s" =
   [%expect
     {|
     c_to_s
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     s_to_c
-    0a00 0000 0000 0000    length= 10 (64-bit LE)
-    05                       body= List: 5 items
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    07                       body= List: 7 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+    05                             5: 5 (int)
+    06                             6: 6 (int)
     ((client_conn
-      (Error
-       (connection.ml.Handshake_error.Handshake_error
-        (Timeout <created-directly>))))
+      (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
      (server_conn
-      (Error
-       (connection.ml.Handshake_error.Handshake_error
-        (Timeout <created-directly>)))))
+      (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>)))))
     |}];
   [%expect {| |}];
   return ()
