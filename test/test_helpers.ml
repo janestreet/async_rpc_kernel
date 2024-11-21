@@ -272,11 +272,12 @@ let only_heartbeat_once_at_the_beginning =
     ()
 ;;
 
-let with_rpc_server_connection ~server_header ~client_header ~f =
+let with_rpc_server_connection ?provide_rpc_shapes () ~server_header ~client_header ~f =
   let server_ivar = Ivar.create () in
   let%bind server =
     with_handshake_header server_header ~f:(fun () ->
       Rpc.Connection.serve
+        ?provide_rpc_shapes
         ~heartbeat_config:only_heartbeat_once_at_the_beginning
         ~implementations:
           (Rpc.Implementations.create_exn
@@ -288,7 +289,6 @@ let with_rpc_server_connection ~server_header ~client_header ~f =
           ())
         ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
         ~identification:server_identification
-        ~always_provide_rpc_shapes:false
         ())
   in
   let%bind taps, server_proxy = tap_server server in

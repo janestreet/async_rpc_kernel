@@ -1,11 +1,10 @@
 open Core
 open Async_kernel
 open Protocol
-open Implementation_types.Implementation
 
 module Expert = struct
   module Responder = struct
-    type t = Expert.Responder.t =
+    type t =
       { query_id : Query_id.t
       ; writer : Protocol_writer.t
       ; mutable responded : bool
@@ -15,14 +14,13 @@ module Expert = struct
     let create query_id writer = { query_id; writer; responded = false }
   end
 
-  type implementation_result = Expert.implementation_result =
+  type implementation_result =
     | Replied
     | Delayed_response of unit Deferred.t
 end
 
 module F = struct
   type ('connection_state, 'query, 'init, 'update) streaming_impl =
-        ('connection_state, 'query, 'init, 'update) F.streaming_impl =
     | Pipe of
         ('connection_state
          -> 'query
@@ -35,17 +33,17 @@ module F = struct
          -> ('init, 'init) Result.t Or_not_authorized.t Or_error.t Deferred.t)
 
   type ('connection_state, 'query, 'init, 'update) streaming_rpc =
-        ('connection_state, 'query, 'init, 'update) F.streaming_rpc =
     { bin_query_reader : 'query Bin_prot.Type_class.reader
     ; bin_init_writer : 'init Bin_prot.Type_class.writer
     ; bin_update_writer : 'update Bin_prot.Type_class.writer
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
     ; error_mode : 'init Implementation_mode.Error_mode.t
+    ; leave_open_on_exception : bool
     ; here : Source_code_position.t
     }
 
-  type 'connection_state t = 'connection_state F.t =
+  type 'connection_state t =
     | One_way :
         'msg Bin_prot.Type_class.reader
         * ('connection_state -> 'msg -> unit Or_not_authorized.t Or_error.t Deferred.t)
@@ -134,8 +132,14 @@ module F = struct
       in
       Rpc_expert (impl, Deferred)
     | Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
-      ->
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -150,7 +154,14 @@ module F = struct
                 impl authorized_state q w))
       in
       Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        }
   ;;
 
   let lift_deferred
@@ -201,8 +212,14 @@ module F = struct
             lift_and_bind state ~f:(fun state -> return (impl state resp buf ~pos ~len)))
         , Deferred )
     | Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
-      ->
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -211,7 +228,14 @@ module F = struct
           Direct (fun state q w -> lift_and_bind state ~f:(fun state -> impl state q w))
       in
       Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        }
   ;;
 end
 
@@ -223,7 +247,7 @@ module Shapes_and_digests = struct
   let sexp_of_t ((_, digests) : t) = [%sexp_of: Rpc_shapes.Just_digests.t] digests
 end
 
-type 'connection_state t = 'connection_state Implementation_types.Implementation.t =
+type 'connection_state t =
   { tag : Rpc_tag.t
   ; version : int
   ; f : 'connection_state F.t

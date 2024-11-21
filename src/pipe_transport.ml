@@ -559,5 +559,5 @@ module Bench_reader (Transport_reader : Transport_reader) = struct
   ;;
 end
 
-let%bench_module "Test_reader_string" = (module Bench_reader (String_pipe_reader))
-let%bench_module "Test_reader_bigstring" = (module Bench_reader (Bigstring_pipe_reader))
+module%bench Test_reader_string = Bench_reader (String_pipe_reader)
+module%bench Test_reader_bigstring = Bench_reader (Bigstring_pipe_reader)

@@ -8,6 +8,25 @@ module Exception_type = struct
   (* [Monitor.try_with ~rest] *) [@@deriving compare, sexp_of]
 end
 
+module Background_monitor_rest = struct
+  type t =
+    [ `Log
+    | `Call of exn -> unit
+    ]
+
+  module Expert = struct
+    let merge (`Call callback) t =
+      `Call
+        (fun exn ->
+          callback exn;
+          match t with
+          | None -> ()
+          | Some (`Call second_callback) -> second_callback exn
+          | Some `Log -> !Monitor.Expert.try_with_log_exn exn)
+    ;;
+  end
+end
+
 type t =
   | Call of (Exception_type.t -> exn -> Description.t -> unit)
   | Log_on_background_exn

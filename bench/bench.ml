@@ -10,6 +10,15 @@ let config =
     ()
 ;;
 
+let plain_rpc =
+  Rpc.Rpc.create
+    ~name:"plain-rpc"
+    ~version:1
+    ~bin_query:[%bin_type_class: unit]
+    ~bin_response:[%bin_type_class: int]
+    ~include_in_error_count:Only_on_exn
+;;
+
 let basic_rpc name =
   Rpc.Pipe_rpc.create
     ~name
@@ -286,4 +295,22 @@ let%bench_fun ("end-to-end Pipe write (big)" [@indexed num_messages = [ 5; 500; 
   =
   let client_conn = pipe_setup_conn rpc_pipe_big ~num_messages ~message_data:big_data in
   fun () -> read_messages rpc_pipe_big client_conn ~num_messages
+;;
+
+let%bench_fun ("dispatch plain RPC" [@indexed num_dispatches = [ 1; 10; 100; 1_000 ]]) =
+  let client_conn =
+    Thread_safe.block_on_async_exn (fun () ->
+      let implementations =
+        Rpc.Implementations.create_exn
+          ~implementations:
+            [ Rpc.Rpc.implement plain_rpc (fun () () -> Deferred.never ()) ]
+          ~on_unknown_rpc:`Raise
+          ~on_exception:Log_on_background_exn
+      in
+      create_connection implementations)
+  in
+  fun () ->
+    for _ = 1 to num_dispatches do
+      ignore (Rpc.Rpc.dispatch plain_rpc client_conn () : int Or_error.t Deferred.t)
+    done
 ;;

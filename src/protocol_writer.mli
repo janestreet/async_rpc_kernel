@@ -4,8 +4,29 @@ open Async_kernel
 type t [@@deriving sexp_of]
 
 val sexp_of_writer : t -> Sexp.t
-val create_before_negotiation : Transport.Writer.t -> t
+
+val create_before_negotiation
+  :  Transport.Writer.t
+  -> tracing_events:(Tracing_event.t -> unit) Bus.Read_write.t
+  -> t
+
 val set_negotiated_protocol_version : t -> int -> unit
+
+module For_handshake : sig
+  val send_handshake_header
+    :  t
+    -> Protocol_version_header.t
+    -> (unit, Handshake_error.t) Result.t
+
+  (** Returns [Ok ()] if we successfully sent, haven't negotiated a protocol version yet,
+      or if the protocol version doesn't support sending the connection metadata. *)
+  val send_connection_metadata_if_supported
+    :  t
+    -> Menu.t option
+    -> identification:Bigstring.t option
+    -> (unit, Handshake_error.t) Result.t
+end
+
 val send_heartbeat : t -> unit Transport.Send_result.t
 
 (** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
@@ -13,18 +34,6 @@ val send_heartbeat : t -> unit Transport.Send_result.t
 val send_close_reason_if_supported
   :  t
   -> reason:Info.t
-  -> unit Transport.Send_result.t option
-
-(** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
-    version doesn't support sending metadata. *)
-val send_connection_metadata_if_supported
-  :  t
-  -> Menu.t option
-  -> lazy_v2_menu:Menu.Stable.V2.response Lazy.t option
-       (* We need to thread through a lazy v2 menu so since protocol v3 required rpc
-          shapes to be sent over which was turned optional in v6. So a negotiated protocol
-          of v3-v5 must still support sending shapes. *)
-  -> identification:Bigstring.t option
   -> unit Transport.Send_result.t option
 
 val can_send : t -> bool
@@ -81,6 +90,14 @@ module Response : sig
           -> len:int
           -> 'result Transport.Send_result.t)
     -> 'result Transport.Send_result.t
+
+  val handle_send_result
+    :  t
+    -> Protocol.Query_id.t
+    -> Description.t
+    -> Tracing_event.Sent_response_kind.t
+    -> 'a Transport_intf.Send_result.t
+    -> unit
 end
 
 module Unsafe_for_cached_streaming_response_writer : sig

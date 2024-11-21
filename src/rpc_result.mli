@@ -11,10 +11,8 @@ val lift_error : location:string -> exn -> 'a t
 val try_with
   :  here:Source_code_position.t
   -> (unit -> 'a t Deferred.t)
-  -> Description.t
   -> location:string
-  -> on_background_exception:On_exception.t
-  -> close_connection_monitor:Monitor.t
+  -> on_background_exception:On_exception.Background_monitor_rest.t option
   -> 'a t Deferred.t
 
 val or_error

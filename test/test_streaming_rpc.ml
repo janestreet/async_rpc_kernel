@@ -205,28 +205,30 @@ let%expect_test "Receiving an overly large message via state rpc initial update 
   return ()
 ;;
 
+let dispatch_with_close_reason_exn
+  (pipe_rpc : ('query, 'response, 'error) Rpc.Pipe_rpc.t)
+  client_connection
+  (query : 'query)
+  =
+  match%map Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_connection query with
+  | Ok (Ok pipe) -> pipe
+  | (_ : (('response, Error.t) Pipe_with_writer_error.t, 'error) result Or_error.t) ->
+    raise_s [%message "Failed to dispatch pipe in test"]
+;;
+
+let pipe_with_writer_error_read_and_print pipe_with_writer_error =
+  Pipe_with_writer_error.read pipe_with_writer_error
+  >>| [%sexp_of: [ `Eof | `Ok of string ] Or_error.t]
+  >>| print_s
+;;
+
 module%test [@name "[dispatch_with_close_reason]"] _ = struct
   let number_of_messages = 5
   let continue_bvar = Bvar.create ()
 
   let continue_read_and_print pipe_with_close_reason =
     Bvar.broadcast continue_bvar ();
-    Pipe_with_writer_error.read pipe_with_close_reason
-    >>| [%sexp_of: [ `Eof | `Ok of string ] Or_error.t]
-    >>| print_s
-  ;;
-
-  let dispatch_with_close_reason_exn
-    (pipe_rpc : ('query, 'response, 'error) Rpc.Pipe_rpc.t)
-    client_connection
-    (query : 'query)
-    =
-    match%map
-      Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_connection query
-    with
-    | Ok (Ok pipe) -> pipe
-    | (_ : (('response, Error.t) Pipe_with_writer_error.t, 'error) result Or_error.t) ->
-      raise_s [%message "Failed to dispatch pipe in test"]
+    pipe_with_writer_error_read_and_print pipe_with_close_reason
   ;;
 
   let implementations =
@@ -345,3 +347,245 @@ let%expect_test "Direct_stream_writer queues updates before [started], and write
     |}];
   return ()
 ;;
+
+module%test [@name "[leave_open_on_exception]"] _ = struct
+  let dispatch_pipe_then_throw ~leave_open_on_exception =
+    let raise_ivar = Ivar.create () in
+    let pipe_writer = Ivar.create () in
+    let%bind client_conn =
+      serve_with_client
+        ~implementations:
+          [ Rpc.Pipe_rpc.implement
+              pipe_rpc
+              ~leave_open_on_exception
+              (fun (_ : Rpc.Connection.t) () ->
+                 Pipe.create_reader ~close_on_exception:false (fun writer ->
+                   Ivar.fill_exn pipe_writer writer;
+                   Pipe.write_without_pushback
+                     writer
+                     "Sending message to prove that the pipe was open initially";
+                   don't_wait_for
+                     (let%bind () = Ivar.read raise_ivar in
+                      raise_s [%message "Raising in the background"]);
+                   Deferred.never ())
+                 |> Deferred.Result.return)
+          ]
+    in
+    let%bind reader = dispatch_with_close_reason_exn pipe_rpc client_conn () in
+    let%bind writer = Ivar.read pipe_writer in
+    let%bind () = pipe_with_writer_error_read_and_print reader in
+    Backtrace.elide := true;
+    Ivar.fill_exn raise_ivar ();
+    let%bind () = Scheduler.yield_until_no_jobs_remain () in
+    Backtrace.elide := false;
+    (* We always expect the [Rpc.Connection.t] to remain intact. *)
+    [%test_result: bool] (Rpc.Connection.is_closed client_conn) ~expect:false;
+    Pipe.write_without_pushback_if_open
+      writer
+      "Sending another message prove that the pipe isn't closed";
+    pipe_with_writer_error_read_and_print reader
+  ;;
+
+  let%expect_test "[leave_open_on_exception:false]" =
+    let%map () = dispatch_pipe_then_throw ~leave_open_on_exception:false in
+    [%expect
+      {|
+      (Ok (Ok "Sending message to prove that the pipe was open initially"))
+      1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error"Raising in the background"("<backtrace elided in test>"))))
+      (Error
+       (Uncaught_exn
+        (monitor.ml.Error "Raising in the background"
+         ("<backtrace elided in test>"))))
+      |}]
+  ;;
+
+  let%expect_test "[leave_open_on_exception:true]" =
+    let%map () = dispatch_pipe_then_throw ~leave_open_on_exception:true in
+    [%expect
+      {|
+      (Ok (Ok "Sending message to prove that the pipe was open initially"))
+      1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error"Raising in the background"("<backtrace elided in test>"))))
+      (Ok (Ok "Sending another message prove that the pipe isn't closed"))
+      |}]
+  ;;
+
+  let%expect_test "[leave_open_on_exception:false] transmits all messages sent before \
+                   the exception was thrown"
+    =
+    let total_messages =
+      let transfer_default_max_num_values_per_read =
+        Async_rpc_kernel.Async_rpc_kernel_private.Transport.Writer
+        .transfer_default_max_num_values_per_read
+      in
+      let batches = 10 in
+      transfer_default_max_num_values_per_read * batches
+    in
+    let%bind client_conn =
+      serve_with_client
+        ~implementations:
+          [ Rpc.Pipe_rpc.implement
+              pipe_rpc
+              ~leave_open_on_exception:false
+              (fun (_ : Rpc.Connection.t) () ->
+                 Pipe.create_reader ~close_on_exception:false (fun writer ->
+                   let%bind () = Scheduler.yield () in
+                   List.init total_messages ~f:Int.to_string
+                   |> List.iter ~f:(Pipe.write_without_pushback writer);
+                   failwith "exn")
+                 |> Deferred.Result.return)
+          ]
+    in
+    let messages_received = ref 0 in
+    Backtrace.elide := true;
+    let%bind reader = dispatch_with_close_reason_exn pipe_rpc client_conn () in
+    let%bind result =
+      Pipe_with_writer_error.iter_without_pushback reader ~f:(fun (_ : string) ->
+        incr messages_received)
+    in
+    Backtrace.elide := false;
+    [%test_result: int] !messages_received ~expect:total_messages;
+    print_s [%sexp (result : unit Or_error.t)];
+    [%expect
+      {|
+      1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error(Failure exn)("<backtrace elided in test>"))))
+      (Error
+       (Uncaught_exn
+        (monitor.ml.Error (Failure exn) ("<backtrace elided in test>"))))
+      |}];
+    return ()
+  ;;
+
+  let%expect_test "regression test: [leave_open_on_exception:false] is resilient to the \
+                   case where a background exception is raised immediately after the \
+                   implementation completes successfully, and doesn't leave the pipe \
+                   hanging open"
+    =
+    let raise_after_schedule ~schedules =
+      let raise_after_schedule_pipe_rpc =
+        Rpc.Pipe_rpc.create
+          ~name:"raise-after-schedule-pipe-rpc"
+          ~version:1
+          ~bin_query:[%bin_type_class: int]
+          ~bin_response:[%bin_type_class: string]
+          ~bin_error:[%bin_type_class: Nothing.t]
+          ()
+      in
+      let pipe_ivar = Ivar.create () in
+      let%bind client_conn =
+        serve_with_client
+          ~implementations:
+            [ Rpc.Pipe_rpc.implement
+                raise_after_schedule_pipe_rpc
+                ~leave_open_on_exception:false
+                (fun (_ : Rpc.Connection.t) depth ->
+                   let reader, _ = Pipe.create () in
+                   Ivar.fill_exn pipe_ivar reader;
+                   let response = Ivar.create () in
+                   Scheduler.schedule (fun () -> Ivar.fill_exn response (Ok reader));
+                   let rec nested_schedule = function
+                     | 0 -> failwith "sneaky nested exn"
+                     | depth -> Scheduler.schedule (fun () -> nested_schedule (depth - 1))
+                   in
+                   nested_schedule depth;
+                   Ivar.read response)
+            ; Rpc.Rpc.implement plain_rpc (fun (_ : Rpc.Connection.t) () -> return ())
+            ]
+      in
+      Backtrace.elide := true;
+      let%bind () =
+        match%map
+          Rpc.Pipe_rpc.dispatch_with_close_reason
+            raise_after_schedule_pipe_rpc
+            client_conn
+            schedules
+        with
+        | Ok (Ok pipe_with_writer_error) ->
+          let peek_result = Pipe_with_writer_error.peek pipe_with_writer_error in
+          print_s
+            [%message
+              "Dispatch succeeded" (peek_result : (string option, Error.t) result)]
+        | Ok _ -> raise_s [%message "Expected error"]
+        | Error error -> print_s [%message "Dispatch failed with error" (error : Error.t)]
+      in
+      (* Ensure the connection is still open *)
+      let%bind () = Rpc.Rpc.dispatch_exn plain_rpc client_conn () in
+      Backtrace.elide := false;
+      let%map pipe = Ivar.read pipe_ivar in
+      [%test_result: bool] (Pipe.is_closed pipe) ~expect:true
+    in
+    (* Through experimentation we found out that
+       [schedules_required_for_implementation_to_complete_before_exn] schedules is the
+       exact number to force the exception to be thrown immediately after the
+       implementation returns. This is not stable to changes within the implementation
+       flow, but it should be the case that the first dispatch fails, and the second one
+       succeeds but then the pipe gets closed with an error close reason.
+
+       We discussed the possibility of, instead of hardcoding this number, instead writing
+       this test to exercise every number of schedules between e.g. 1 and 20 and asserting
+       that their behaviour is correct. We decided against it for two reasons:
+       1. We think the test would be noisier that way and it would be harder to validate
+       that the test is actually exercising the difference in behaviour that we expect it
+       to be testing.
+       2. We think that this won't change frequently and shouldn't be a pain to adjust by
+       hand if it does. If that assumption turns out false, we should re-evaluate. *)
+    let schedules_required_for_implementation_to_complete_before_exn = 5 in
+    let schedules_required_for_successful_response_before_exn =
+      schedules_required_for_implementation_to_complete_before_exn + 2
+    in
+    (* This is effectively a synchronous exception as far as the monitor can tell. The
+       pipe gets closed once the implementation completes. *)
+    let%bind () =
+      raise_after_schedule
+        ~schedules:(schedules_required_for_implementation_to_complete_before_exn - 1)
+    in
+    [%expect
+      {|
+      ("Dispatch failed with error"
+       (error
+        ((rpc_error
+          (Uncaught_exn
+           ((location "server-side pipe_rpc computation")
+            (exn
+             (monitor.ml.Error (Failure "sneaky nested exn")
+              ("<backtrace elided in test>"))))))
+         (connection_description ("Client connected via TCP" 0.0.0.0:PORT))
+         (rpc_name raise-after-schedule-pipe-rpc) (rpc_version 1))))
+      |}];
+    (* This is a background exn according to the monitor, but we process closing the pipe
+       RPC before the successful response gets sent, so the client still gets "dispatch
+       failed" *)
+    let%bind () =
+      raise_after_schedule
+        ~schedules:schedules_required_for_implementation_to_complete_before_exn
+    in
+    [%expect
+      {|
+      1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error(Failure"sneaky nested exn")("<backtrace elided in test>"))))
+      ("Dispatch failed with error"
+       (error
+        ((rpc_error
+          (Uncaught_exn
+           (monitor.ml.Error (Failure "sneaky nested exn")
+            ("<backtrace elided in test>"))))
+         (connection_description ("Client connected via TCP" 0.0.0.0:PORT))
+         (rpc_name raise-after-schedule-pipe-rpc) (rpc_version 1))))
+      |}];
+    (* If the exception takes long enough to show up, we send a successful response, and
+       then only observe the pipe getting closed by peeking the response pipe. *)
+    let%bind () =
+      raise_after_schedule
+        ~schedules:schedules_required_for_successful_response_before_exn
+    in
+    [%expect
+      {|
+      1969-12-31 19:00:00.000000-05:00 Error ("Exception raised to [Monitor.try_with] that already returned.""This error was captured by a default handler in [Async.Log]."(exn(monitor.ml.Error(Failure"sneaky nested exn")("<backtrace elided in test>"))))
+      ("Dispatch succeeded"
+       (peek_result
+        (Error
+         (Uncaught_exn
+          (monitor.ml.Error (Failure "sneaky nested exn")
+           ("<backtrace elided in test>"))))))
+      |}];
+    return ()
+  ;;
+end

@@ -15,7 +15,34 @@
     different versions of what is essentially the same RPC.  You can think of it as an
     extension to the name of the RPC, and in fact, each RPC is uniquely identified by its
     (name, version) pair.  RPCs with the same name but different versions should implement
-    similar functionality. *)
+    similar functionality.
+
+
+    {3 Ordering}
+    A single [Async_rpc] connection is an ordered stream of messages, where a message is
+    something like a query or a response. Functions that directly write a message, e.g.
+    dispatch functions, [Direct_stream_writer.write], etc., will synchronously enqueue
+    that message to be sent. Received messages will be processed in order, so functions
+    that receive a message, like RPC implementations, or the callback on
+    [Pipe_rpc.dispatch_iter], will be invoked as soon as the message is received.
+
+    This means that if careful, assumptions can be made about the ordering of messages,
+    e.g.:
+    - Multiple dispatches of RPCs will be received by the other end of the connection in
+    the order they were sent
+    - Once a [Direct_stream_writer] has been started (see {!Pipe_rpc.Direct_stream_writer.started}
+    for details on what that means), values written to it will be immediately added to the
+    message stream. This means if you write a value to a started writer, and the other end
+    of the connection used [dispatch_iter] to dispatch the streaming RPC, the callback is
+    guaranteed to be invoked on that message before any other message on the same
+    connection produced after the call to [Direct_stream_writer.write], e.g. responding to
+    RPC response, or an RPC dispatch.
+
+    Note that once asynchrony is introduced, e.g. with non-eager RPC implementations,
+    using [Pipe.t] to dispatch or implement streaming RPCs, or using functions like
+    [lift_deferred] or [with_authorization_deferred], it becomes much harder to make
+    assertions about the relative ordering of messages.
+ *)
 
 open! Core
 open! Async_kernel
@@ -466,6 +493,81 @@ module Pipe_response : sig
     | Wait of unit Deferred.t
 end
 
+(** The result of dispatching a [Pipe_rpc] is a stream of responses instead of a single
+    response. This can be used to implement long-running communication from a server to a
+    client, or to transmit large datasets in incremental chunks.
+
+    Once a [Pipe_rpc] implementation completes successfully, the server can stream
+    response messages to the client until either one of the ends of the connection closes
+    the stream, or the underlying [Rpc.Connection.t] closes. Pushback on the stream of
+    responses can only expressed with connection-level pushback, e.g. TCP pushback when
+    connecting over TCP.
+
+    On both the dispatching and implementing ends, there are two models for using
+    [Pipe_rpc]s: a [Pipe]-based model, and a direct model. The dispatch and implement ends
+    for a given RPC don't need to use the same model, the underlying messages are the same
+    either way and so the various approaches are inter-compatible.
+
+    In general, the direct model has a less convenient interface, but is more performant,
+    involves fewer allocations, and doesn't have to read/from write/to [Pipe.t]'s, which
+    avoids the write barrier. If any of those properties would be useful, consider using
+    the direct model instead of the pipe model.
+
+    {3 Pipe model}
+    In the pipe model, the implementer provides a ['response Pipe.Reader.t], and the
+    client receives a ['response Pipe.Reader.t].
+
+    {4 Implementing}
+    [Async_rpc] will automatically iterate over batches of messages in the pipe and send
+    them. It pulls up to 1_000 messages, writes them all to the underlying connection, and
+    thens wait until those messages have been flushed before polling for more messages
+    from the pipe.
+
+    If the underlying connection gets backed up, e.g. because not enough bandwidth is
+    available, the client is under load and can't read all the incoming messages, or
+    intentionally pushes back on the stream and refuses to read more messages, then
+    [Async_rpc] will stop pulling from the pipe. At that point, methods to fill the pipe
+    that do respect pushback, like [Pipe.write] or [Pipe.map], will naturally block.
+    Methods to fill the pipe that don't respect pushback, like
+    [Pipe.write_without_pushback], will cause messages to buffer up inside the [Pipe], and
+    can cause memory usage to grow in the server.
+
+    {4 Dispatching}
+    [Async_rpc] will create a pipe to return from [dispatch], and write all incoming
+    messages to it. By default, [Async_rpc] won't pay attention to pushback on the pipe,
+    it will just keep reading incoming messages from the connection and adding them to the
+    pipe. This means that messages could end up being buffered locally, if the client
+    isn't reading from the pipe fast enough.
+
+    If [client_pushes_back] is set on the [Pipe_rpc], then if the client isn't reading
+    from the pipe fast enough, [Async_rpc] will stop reading from the underlying
+    connection until the contents of the pipe have been filled. See the docs on
+    [Pipe_rpc.create] for more details.
+
+    {3 Direct model}
+    In the direct model, messages are written/read directly to/from the underlying
+    connection.
+
+    {4 Implementing}
+    When implementing with [implement_direct], instead of returning a ['response
+    Pipe.Reader.t], your implementation is given a ['response Direct_stream_writer.t], to
+    which you can write messages with functions like [Direct_stream_writer.write]. Values
+    written with a [Direct_stream_writer] are immediately serialized to the underlying
+    connection. Pushback has to be handled manually, otherwise messages will be buffered
+    in the transport's buffer waiting to be sent.
+
+    {4 Dispatching}
+    Using [dispatch_iter], you can provide a callback which will be called on each
+    incoming message as soon as it's processed. This can be useful for avoiding async
+    overhead in the case of many small messages, and can also be useful in cases where you
+    care about the relative ordering of messages for different RPCs within the same
+    connection, as the next message on the connection won't be processed until the
+    callback is invoked.
+
+    [dispatch_iter] also gives finegrained control over pushback on the connection. Note
+    that pushback in this case pushes back on the entire connection, not just the one
+    pipe.
+*)
 module Pipe_rpc : sig
   type ('query, 'response, 'error) t
 
@@ -479,40 +581,40 @@ module Pipe_rpc : sig
     val id : t -> Id.t
   end
 
+  (** @param client_pushes_back If the connection is backed up, the rpc server
+      library stops consuming elements from the pipe being filled by [implement]'s caller.
+      Servers should pay attention to the pipe's pushback, otherwise they risk running out
+      of memory if they fill the pipe much faster than the transport can handle, or if the
+      client pushes back as discussed next.
+
+      If [client_pushes_back] is set, the client side of the connection will stop
+      reading from the underlying file descriptor when the client's pipe has more elements
+      enqueued than its [size_budget], waiting until [Pipe.downstream_flushed]. This will
+      eventually cause writes on the server's side to block, indicating to the server it
+      should slow down.
+
+      There are some drawbacks to using [client_pushes_back]:
+
+      - RPC multiplexing doesn't work as well.  The client will stop reading *all*
+        messages on the connection if any pipe gets saturated, not just ones relating
+        to that pipe.
+
+      - This includes RPC heartbeats. If the pipe consumer takes too long to
+        process items this will cause the RPC connection to closed with a
+        "No heartbeats received" error.
+
+      - A server that doesn't pay attention to pushback on its end will accumulate
+        elements on its side of the connection, rather than on the client's side,
+        meaning a slow client can make the server run out of memory.
+
+      - NOTE that the client only resumes once [Pipe.downstream_flushed] completes,
+        which is a stronger condition than just waiting on [Pipe.pushback]. This can be
+        especially unintuitive if [Pipe.fork] is used on the response pipe, as
+        [downstream_flushed] on [Pipe.fork] only becomes determined once both of the
+        downstream pipes flush the elements.
+    *)
   val create
     :  ?client_pushes_back:unit
-         (** If the connection is backed up, the rpc server library stops consuming elements
-        from the pipe being filled by [implement]'s caller. Servers should pay attention
-        to the pipe's pushback, otherwise they risk running out of memory if they fill the
-        pipe much faster than the transport can handle, or if the client pushes back as
-        discussed next.
-
-        If [client_pushes_back] is set, the client side of the connection will stop
-        reading from the underlying file descriptor when the client's pipe has more
-        elements enqueued than its [size_budget], waiting until [Pipe.downstream_flushed].
-        This will eventually cause writes on the server's side to block, indicating to the
-        server it should slow down.
-
-        There are some drawbacks to using [client_pushes_back]:
-
-        - RPC multiplexing doesn't work as well.  The client will stop reading *all*
-          messages on the connection if any pipe gets saturated, not just ones relating
-          to that pipe.
-
-        - This includes RPC heartbeats. If the pipe consumer takes too long to
-          process items this will cause the RPC connection to closed with a
-          "No heartbeats received" error.
-
-        - A server that doesn't pay attention to pushback on its end will accumulate
-          elements on its side of the connection, rather than on the client's side,
-          meaning a slow client can make the server run out of memory.
-
-        - NOTE that the client only resumes once [Pipe.downstream_flushed] completes,
-          which is a stronger condition than just waiting on [Pipe.pushback]. This can be
-          especially unintuitive if [Pipe.fork] is used on the response pipe, as
-          [downstream_flushed] on [Pipe.fork] only becomes determined once both of the
-          downstream pipes flush the elements.
-    *)
     -> name:string
     -> version:int
     -> bin_query:'query Bin_prot.Type_class.t
@@ -537,6 +639,7 @@ module Pipe_rpc : sig
   val implement
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -546,6 +649,7 @@ module Pipe_rpc : sig
   val implement_with_auth
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -569,15 +673,28 @@ module Pipe_rpc : sig
     type 'a t
 
     (** [write t x] returns [`Closed] if [t] is closed, or [`Flushed d] if it is open. In
-        the open case, [d] is determined when the message has been flushed from the
-        underlying [Transport.Writer.t]. *)
+        the open case, [d] is determined when the underlying [Transport.Writer.t] has been
+        flushed. Note that if [t] is not started yet (i.e. [started t] is not determined),
+        then [d] does not actually correspond to the message being flushed.
+
+        Waiting on [`Flushed d] after every message is most likely a mistake, as that
+        means you're only able to get one message through the stream for each flush of the
+        underlying connection (e.g. per [write] syscall for a TCP socket-backed
+        connection).
+
+        Until [started t] is determined, calls to [write] and [write_without_pushback]
+        will enqueue the messages until the RPC implementation completes. This can cause
+        high memory usage and/or long async cycles when the messages do actually get
+        serialized. *)
     val write : 'a t -> 'a -> [ `Flushed of unit Deferred.t | `Closed ]
 
     val write_without_pushback : 'a t -> 'a -> [ `Ok | `Closed ]
 
-    (** [started t] will become determined once the implementation has completed successfully
-        and [t] has started to write stream updates, including having written all updates that
-        were queued by calling one of the write functions before it was started.
+    (** [started t] will become determined once the implementation has completed
+        successfully (i.e. the implementation returned a value and [Async_rpc] processed
+        it and sent it to the client) and [t] has started to write stream updates,
+        including having written all updates that were queued by calling one of the write
+        functions before it was started.
 
         It is guaranteed that:
         - if [started t] is determined, any update written to [t] will immediately be
@@ -713,6 +830,7 @@ module Pipe_rpc : sig
   val implement_direct
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -723,6 +841,7 @@ module Pipe_rpc : sig
   val implement_direct_with_auth
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'response, 'error) t
     -> ('connection_state
         -> 'query
@@ -860,7 +979,7 @@ end
 (** A state rpc is an easy way for two processes to synchronize a data structure by
     sending updates over the wire.  It's basically a pipe rpc that sends/receives an
     initial state of the data structure, and then updates, and applies the updates under
-    the covers. *)
+    the covers. All the docs that apply to [Pipe_rpc] apply to [State_rpc] as well. *)
 module State_rpc : sig
   type ('query, 'state, 'update, 'error) t
 
@@ -894,6 +1013,7 @@ module State_rpc : sig
   val implement
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -903,6 +1023,7 @@ module State_rpc : sig
   val implement_with_auth
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -913,6 +1034,7 @@ module State_rpc : sig
   val implement_direct
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query
@@ -923,6 +1045,7 @@ module State_rpc : sig
   val implement_direct_with_auth
     :  ?here:Stdlib.Lexing.position
     -> ?on_exception:On_exception.t
+    -> ?leave_open_on_exception:bool (* Default [true] *)
     -> ('query, 'state, 'update, 'error) t
     -> ('connection_state
         -> 'query

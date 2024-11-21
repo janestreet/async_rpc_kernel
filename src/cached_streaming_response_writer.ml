@@ -13,6 +13,9 @@ type 'a t =
     *)
     mutable data_len : Nat0.t
   ; bin_writer : 'a Bin_prot.Type_class.writer
+  ; protocol_writer : Protocol_writer.t
+  ; id : Protocol.Query_id.t
+  ; description : Description.t
   }
 
 type void = Void
@@ -33,11 +36,17 @@ let cache_bin_protted (bin_writer : _ Bin_prot.Type_class.writer) x =
   Bigstring.To_string.sub buffer ~pos:0 ~len
 ;;
 
-let create (type a) ~id ~bin_writer : a t =
+let create (type a) protocol_writer id description ~bin_writer : a t =
   let header_prefix =
     cache_bin_protted bin_writer_void_message (Response { id; data = Ok Void })
   in
-  { header_prefix; bin_writer; data_len = Nat0.of_int_exn 0 }
+  { protocol_writer
+  ; id
+  ; description
+  ; header_prefix
+  ; bin_writer
+  ; data_len = Nat0.of_int_exn 0
+  }
 ;;
 
 let bin_writer t = t.bin_writer
@@ -144,17 +153,78 @@ let bin_writer_message_as_string : _ Bin_prot.Type_class.writer =
   { size = bin_size_message_as_string; write = bin_write_message_as_string }
 ;;
 
-let prep_write t data =
+let flushed t = Protocol_writer.flushed t.protocol_writer
+
+let write t data =
   t.data_len <- Nat0.of_int_exn (t.bin_writer.size data);
-  bin_writer_message
+  Protocol_writer.Unsafe_for_cached_streaming_response_writer.send_bin_prot
+    t.protocol_writer
+    bin_writer_message
+    (t, data)
+  |> Protocol_writer.Response.handle_send_result
+       t.protocol_writer
+       t.id
+       t.description
+       Streaming_update;
+  ()
 ;;
 
-let prep_write_string t str =
+let write_string t str =
   t.data_len <- Nat0.of_int_exn (String.length str);
-  bin_writer_message_as_string
+  Protocol_writer.Unsafe_for_cached_streaming_response_writer.send_bin_prot
+    t.protocol_writer
+    bin_writer_message_as_string
+    (t, str)
+  |> Protocol_writer.Response.handle_send_result
+       t.protocol_writer
+       t.id
+       t.description
+       Streaming_update;
+  ()
 ;;
 
-let prep_write_expert t ~len =
+let write_expert t ~buf ~pos ~len =
   t.data_len <- Nat0.of_int_exn len;
-  bin_writer_nat0_header
+  Protocol_writer.Unsafe_for_cached_streaming_response_writer.send_bin_prot_and_bigstring
+    t.protocol_writer
+    bin_writer_nat0_header
+    t
+    ~buf
+    ~pos
+    ~len
+  |> Protocol_writer.Response.handle_send_result
+       t.protocol_writer
+       t.id
+       t.description
+       Streaming_update;
+  ()
+;;
+
+let schedule_write_expert ?(here = Stdlib.Lexing.dummy_pos) t ~buf ~pos ~len =
+  t.data_len <- Nat0.of_int_exn len;
+  let result =
+    Protocol_writer.Unsafe_for_cached_streaming_response_writer
+    .send_bin_prot_and_bigstring_non_copying
+      t.protocol_writer
+      bin_writer_nat0_header
+      t
+      ~buf
+      ~pos
+      ~len
+  in
+  Protocol_writer.Response.handle_send_result
+    t.protocol_writer
+    t.id
+    t.description
+    Streaming_update
+    result;
+  match result with
+  | Sent { result; bytes = _ } -> `Flushed { global = result }
+  | Closed -> `Closed
+  | Message_too_big too_big ->
+    failwiths
+      ~here
+      "could not send as message too big"
+      ([%globalize: Transport_intf.Send_result.message_too_big] too_big)
+      [%sexp_of: Transport_intf.Send_result.message_too_big]
 ;;

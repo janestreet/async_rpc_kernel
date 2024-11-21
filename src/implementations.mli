@@ -32,7 +32,7 @@ module Direct_stream_writer : sig
   module Id = Implementation_types.Direct_stream_writer.Id
 
   val started : _ t -> unit Deferred.t
-  val close : _ t -> unit
+  val close : ?result:[ `Eof ] Rpc_result.t (* Default [Ok `Eof] *) -> _ t -> unit
   val closed : _ t -> unit Deferred.t
   val is_closed : _ t -> bool
   val write : 'a t -> 'a -> [ `Flushed of unit Deferred.t | `Closed ]

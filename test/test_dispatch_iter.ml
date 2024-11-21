@@ -4,6 +4,7 @@ open! Async
 let%expect_test "test Pipe_rpc.dispatch_iter" =
   let%map () =
     Test_helpers.with_rpc_server_connection
+      ()
       ~server_header:Test_helpers.Header.v2
       ~client_header:Test_helpers.Header.v2
       ~f:(fun ~client ~server:_ ~s_to_c:_ ~c_to_s:_ ->
@@ -52,6 +53,7 @@ let%expect_test "test Pipe_rpc.dispatch_iter" =
 let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
   let%map () =
     Test_helpers.with_rpc_server_connection
+      ()
       ~server_header:Test_helpers.Header.v2
       ~client_header:Test_helpers.Header.v2
       ~f:(fun ~client ~server:_ ~s_to_c:_ ~c_to_s:_ ->
@@ -105,6 +107,7 @@ let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
 let%expect_test "test State_rpc.dispatch_fold" =
   let%map () =
     Test_helpers.with_rpc_server_connection
+      ()
       ~server_header:Test_helpers.Header.v2
       ~client_header:Test_helpers.Header.v2
       ~f:(fun ~client ~server:_ ~s_to_c:_ ~c_to_s:_ ->

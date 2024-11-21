@@ -5,57 +5,6 @@ module P = Protocol
 module Reader = Transport.Reader
 module Writer = Transport.Writer
 
-module Handshake_error = struct
-  module T = struct
-    type t =
-      | Eof
-      | Transport_closed
-      | Timeout
-      | Reading_header_failed of Error.t
-      | Negotiation_failed of Error.t
-      | Negotiated_unexpected_version of int
-    [@@deriving sexp]
-  end
-
-  include T
-  include Sexpable.To_stringable (T)
-
-  exception Handshake_error of (t * Info.t) [@@deriving sexp]
-
-  let to_exn ~connection_description t = Handshake_error (t, connection_description)
-end
-
-module Header : sig
-  type t = Protocol_version_header.t [@@deriving bin_io, sexp_of]
-
-  val v1 : t
-  val v2 : t
-  val v3 : t
-  val v4 : t
-  val v5 : t
-  val v6 : t
-  val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result
-end = struct
-  include P.Header
-
-  let create ~supported_versions =
-    Protocol_version_header.create_exn () ~protocol:Rpc ~supported_versions
-  ;;
-
-  let v6 = create ~supported_versions:[ 1; 2; 3; 4; 5; 6 ]
-  let v5 = create ~supported_versions:[ 1; 2; 3; 4; 5 ]
-  let v4 = create ~supported_versions:[ 1; 2; 3; 4 ]
-  let v3 = create ~supported_versions:[ 1; 2; 3 ]
-  let v2 = create ~supported_versions:[ 1; 2 ]
-  let v1 = create ~supported_versions:[ 1 ]
-
-  let negotiate ~us ~peer =
-    match negotiate ~allow_legacy_peer:true ~us ~peer with
-    | Error e -> Error (Handshake_error.Negotiation_failed e)
-    | Ok i -> Ok i
-  ;;
-end
-
 module Peer_metadata = struct
   type t =
     | Unsupported
@@ -130,7 +79,8 @@ type t =
   ; max_metadata_size : Byte_units.t
   ; reader : Reader.t
   ; writer : Protocol_writer.t
-  ; open_queries : (P.Query_id.t, (Response_handler.t[@sexp.opaque])) Hashtbl.t
+  ; open_queries :
+      (P.Query_id.t, Description.t * (Response_handler.t[@sexp.opaque])) Hashtbl.t
   ; close_started : Info.t Ivar.t
   ; close_finished : unit Ivar.t
       (* There's a circular dependency between connections and their implementation instances
@@ -282,9 +232,7 @@ let handle_send_result
   let id = (id :> Int63.t) in
   match r with
   | Sent { result = x; bytes } ->
-    let ev : Tracing_event.t =
-      { event = Sent kind; rpc = Some rpc; id; payload_bytes = bytes }
-    in
+    let ev : Tracing_event.t = { event = Sent kind; rpc; id; payload_bytes = bytes } in
     write_tracing_event t ev;
     if sending_one_way_rpc
     then
@@ -293,39 +241,15 @@ let handle_send_result
   | Closed ->
     write_tracing_event
       t
-      { event = Failed_to_send (kind, Closed); rpc = Some rpc; id; payload_bytes = 0 };
+      { event = Failed_to_send (kind, Closed); rpc; id; payload_bytes = 0 };
     Error Dispatch_error.Closed
   | Message_too_big err ->
     write_tracing_event
       t
-      { event = Failed_to_send (kind, Too_large)
-      ; rpc = Some rpc
-      ; id
-      ; payload_bytes = err.size
-      };
+      { event = Failed_to_send (kind, Too_large); rpc; id; payload_bytes = err.size };
     Error
       (Dispatch_error.Message_too_big
          ([%globalize: Transport.Send_result.message_too_big] err))
-;;
-
-(* Used for heartbeats and protocol negotiation *)
-let handle_special_send_result
-  ?(here = Stdlib.Lexing.dummy_pos)
-  t
-  (result : unit Transport.Send_result.t)
-  =
-  match result with
-  | Sent { result = (); bytes = (_ : int) } -> ()
-  | Closed -> failwiths ~here "RPC connection got closed writer" t sexp_of_t_hum_writer
-  | Message_too_big _ ->
-    raise_s
-      [%sexp
-        "Message cannot be sent"
-        , { reason =
-              ([%globalize: unit Transport.Send_result.t] result
-               : unit Transport.Send_result.t)
-          ; connection = (t : t_hum_writer)
-          }]
 ;;
 
 let send_query_with_registered_response_handler
@@ -336,10 +260,13 @@ let send_query_with_registered_response_handler
   ~(send_query : 'query P.Query.t -> 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
+  let rpc : Description.t =
+    { name = P.Rpc_tag.to_string query.tag; version = query.version }
+  in
   let registered_response_handler =
     match response_handler with
     | Some response_handler ->
-      Hashtbl.set t.open_queries ~key:query.id ~data:response_handler;
+      Hashtbl.set t.open_queries ~key:query.id ~data:(rpc, response_handler);
       true
     | None -> false
   in
@@ -347,7 +274,7 @@ let send_query_with_registered_response_handler
     send_query query
     |> handle_send_result
          t
-         ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+         ~rpc
          ~kind
          ~id:query.id
          ~sending_one_way_rpc:(Option.is_none response_handler)
@@ -442,7 +369,7 @@ let handle_response
   =
   match Hashtbl.find t.open_queries response.id with
   | None -> Stop (Error (Rpc_error.Unknown_query_id response.id))
-  | Some response_handler ->
+  | Some (rpc, response_handler) ->
     let payload_bytes =
       protocol_message_len
       +
@@ -454,7 +381,7 @@ let handle_response
       write_tracing_event
         t
         { Tracing_event.event = Received (Response kind)
-        ; rpc = None
+        ; rpc
         ; id = (response.id :> Int63.t)
         ; payload_bytes
         };
@@ -744,11 +671,15 @@ let heartbeat_now t =
     in
     don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true))
   else (
-    match writer t with
-    | Error `Closed -> ()
-    | Ok writer ->
-      Protocol_writer.send_heartbeat writer |> handle_special_send_result t;
-      ())
+    match Protocol_writer.send_heartbeat t.writer with
+    | Sent { result = (); bytes = (_ : int) } -> ()
+    | Closed -> ()
+    | Message_too_big _ as result ->
+      let reason = [%globalize: unit Transport.Send_result.t] result in
+      raise_s
+        [%sexp
+          "Heartbeat cannot be sent"
+          , { reason : unit Transport.Send_result.t; connection = (t : t_hum_writer) }])
 ;;
 
 let default_handshake_timeout = Time_ns.Span.of_int_sec 30
@@ -768,12 +699,14 @@ let cleanup t ~reason ~send_reason_to_peer exn =
        to read following a response where [data] is an error *)
     let dummy_buffer = Bigstring.create 1 in
     let dummy_ref = ref 0 in
-    Hashtbl.iteri t.open_queries ~f:(fun ~key:query_id ~data:response_handler ->
-      ignore
-        (response_handler
-           ~read_buffer:dummy_buffer
-           ~read_buffer_pos_ref:dummy_ref
-           { id = query_id; data = Error error }));
+    Hashtbl.iteri
+      t.open_queries
+      ~f:(fun ~key:query_id ~data:((_ : Description.t), response_handler) ->
+        ignore
+          (response_handler
+             ~read_buffer:dummy_buffer
+             ~read_buffer_pos_ref:dummy_ref
+             { id = query_id; data = Error error }));
     Hashtbl.clear t.open_queries;
     Bigstring.unsafe_destroy dummy_buffer)
 ;;
@@ -866,33 +799,28 @@ let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exn
     if is_closed t then abort_heartbeating t)
 ;;
 
-let negotiate ?identification t ~header ~peer ~menu ~lazy_v2_menu =
-  let%map.Result version = Header.negotiate ~us:header ~peer in
+let negotiate ?identification t ~header ~peer ~menu =
+  let%bind.Result version = Header.negotiate ~us:header ~peer in
   Protocol_writer.set_negotiated_protocol_version t.writer version;
-  if Version_dependent_feature.is_supported Peer_metadata ~version
+  if Version_dependent_feature.(is_supported Peer_metadata ~version)
   then (
     let ivar = Ivar.create () in
     upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
       Ivar.fill_if_empty ivar (Error `Connection_closed));
     Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
-    (match
-       Protocol_writer.send_connection_metadata_if_supported
-         t.writer
-         menu
-         ~identification
-         ~lazy_v2_menu
-     with
-     | Some result -> handle_special_send_result t result
-     | None -> ());
-    ())
-  else Set_once.set_exn t.peer_metadata [%here] Unsupported
+    Protocol_writer.For_handshake.send_connection_metadata_if_supported
+      t.writer
+      menu
+      ~identification)
+  else (
+    Set_once.set_exn t.peer_metadata [%here] Unsupported;
+    Ok ())
 ;;
 
-let do_handshake ?identification t writer ~handshake_timeout ~header ~menu ~lazy_v2_menu =
-  if not (Writer.can_send writer)
-  then return (Error Handshake_error.Transport_closed)
-  else (
-    Writer.send_bin_prot writer Header.bin_t.writer header |> handle_special_send_result t;
+let do_handshake ?identification t ~handshake_timeout ~header ~menu =
+  match Protocol_writer.For_handshake.send_handshake_header t.writer header with
+  | Error error -> return (Error error)
+  | Ok () ->
     (* If we use [max_connections] in the server, then this read may just hang until the
        server starts accepting new connections (which could be never).  That is why a
        timeout is used *)
@@ -901,36 +829,35 @@ let do_handshake ?identification t writer ~handshake_timeout ~header ~menu ~lazy
         Reader.read_one_message_bin_prot t.reader Header.bin_t.reader)
     in
     let handshake_started_at = Synchronous_time_source.now t.time_source in
-    match%bind
-      Time_source.with_timeout
-        (Time_source.of_synchronous t.time_source)
-        handshake_timeout
-        result
-    with
-    | `Timeout ->
-      let now = Synchronous_time_source.now t.time_source in
-      let reason () =
-        [%string
-          "Handshake timeout after %{handshake_timeout#Time_ns.Span}. Handshake started \
-           at %{time_ns_to_microsecond_string handshake_started_at}, now: \
-           %{time_ns_to_microsecond_string now}."]
-      in
-      (* There's a pending read, the reader is basically useless now, so we clean it
+    (match%bind
+       Time_source.with_timeout
+         (Time_source.of_synchronous t.time_source)
+         handshake_timeout
+         result
+     with
+     | `Timeout ->
+       let now = Synchronous_time_source.now t.time_source in
+       let reason () =
+         [%string
+           "Handshake timeout after %{handshake_timeout#Time_ns.Span}. Handshake started \
+            at %{time_ns_to_microsecond_string handshake_started_at}, now: \
+            %{time_ns_to_microsecond_string now}."]
+       in
+       (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
-      don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true);
-      return (Error Handshake_error.Timeout)
-    | `Result (Error exn) ->
-      let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
-      don't_wait_for (close t ~reason ~send_reason_to_peer:true);
-      return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
-    | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
-    | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
-    | `Result (Ok (Ok peer)) ->
-      return (negotiate ?identification t ~peer ~header ~menu ~lazy_v2_menu))
+       don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true);
+       return (Error Handshake_error.Timeout)
+     | `Result (Error exn) ->
+       let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
+       don't_wait_for (close t ~reason ~send_reason_to_peer:true);
+       return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
+     | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
+     | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
+     | `Result (Ok (Ok peer)) -> return (negotiate ?identification t ~peer ~header ~menu))
 ;;
 
 let contains_magic_prefix = Protocol_version_header.contains_magic_prefix ~protocol:Rpc
-let default_handshake_header = Header.v4
+let default_handshake_header = Header.latest
 
 let handshake_header_override_key =
   Univ_map.Key.create ~name:"async rpc handshake header override" [%sexp_of: Header.t]
@@ -969,7 +896,7 @@ let create
   ?(time_source = Synchronous_time_source.wall_clock ())
   ?identification
   ?(reader_drain_timeout = default_reader_drain_timeout)
-  ?(always_provide_rpc_shapes = true)
+  ?(provide_rpc_shapes = false)
   ({ reader; writer } : Transport.t)
   =
   let implementations =
@@ -977,7 +904,7 @@ let create
     | None -> Implementations.null ()
     | Some s -> s
   in
-  let menu, lazy_v2_menu, implementations =
+  let menu, implementations =
     match
       Implementations.find
         implementations
@@ -986,27 +913,26 @@ let create
     | Some (_ : _ Implementation.t) ->
       (* 1. There was a custom menu rpc implemented. We cannot include a menu in the
          metadata. *)
-      None, None, implementations
+      None, implementations
     | None ->
       (* 2. There is no menu so we are free to send a menu containing all of the
          implementations in the metadata. We should also include the menu rpc in the
          implementation so that we can eventually deprecate the custom implementation
          type. Old clients can't complain about the menu rpc being added because they
          don't have a way to figure out the list of available rpcs ;) *)
-      let lazy_v2_menu = lazy (Implementations.descriptions_and_shapes implementations) in
       let menu =
-        if always_provide_rpc_shapes
-        then force lazy_v2_menu |> Menu.of_supported_rpcs_and_shapes
+        if provide_rpc_shapes
+        then
+          Implementations.descriptions_and_shapes implementations
+          |> Menu.of_supported_rpcs_and_shapes
         else
           Implementations.descriptions implementations
           |> Menu.of_supported_rpcs ~rpc_shapes:`Unknown
       in
       ( Some menu
-      , Some lazy_v2_menu
       , Implementations.add_exn
           implementations
-          { Implementation_types.Implementation.tag =
-              Protocol.Rpc_tag.of_string Menu.version_menu_rpc_name
+          { Implementation.tag = Protocol.Rpc_tag.of_string Menu.version_menu_rpc_name
           ; version = 1
           ; f = Menu_rpc (lazy menu)
           ; shapes =
@@ -1019,6 +945,13 @@ let create
           ; on_exception = Some Log_on_background_exn
           } )
   in
+  let tracing_events =
+    Bus.create_exn
+      [%here]
+      Arity1_local
+      ~on_subscription_after_first_write:Allow
+      ~on_callback_raise:Error.raise
+  in
   let t =
     { description
     ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
@@ -1026,19 +959,14 @@ let create
     ; last_seen_alive = Synchronous_time_source.now time_source
     ; max_metadata_size
     ; reader
-    ; writer = Protocol_writer.create_before_negotiation writer
+    ; writer = Protocol_writer.create_before_negotiation writer ~tracing_events
     ; open_queries = Hashtbl.Poly.create ~size:10 ()
     ; close_started = Ivar.create ()
     ; close_finished = Ivar.create ()
     ; implementations_instance = Set_once.create ()
     ; time_source
     ; heartbeat_event = Set_once.create ()
-    ; tracing_events =
-        Bus.create_exn
-          [%here]
-          Arity1_local
-          ~on_subscription_after_first_write:Allow
-          ~on_callback_raise:Error.raise
+    ; tracing_events
     ; metadata_for_dispatch = Moption.create ()
     ; peer_metadata = Set_once.create ()
     ; metadata_on_receive_to_add_to_implementations_instance = Set_once.create ()
@@ -1060,10 +988,9 @@ let create
   let header = get_handshake_header () in
   let handshake_result =
     match protocol_version_headers with
-    | None ->
-      do_handshake ?identification t writer ~handshake_timeout ~header ~menu ~lazy_v2_menu
+    | None -> do_handshake ?identification t ~handshake_timeout ~header ~menu
     | Some { Protocol_version_header.Pair.us = header; peer } ->
-      return (negotiate ?identification t ~header ~peer ~menu ~lazy_v2_menu)
+      return (negotiate ?identification t ~header ~peer ~menu)
   in
   match%map handshake_result with
   | Ok () ->
@@ -1081,7 +1008,7 @@ let with_close
   ?description
   ?time_source
   ?identification
-  ?always_provide_rpc_shapes
+  ?provide_rpc_shapes
   ~connection_state
   transport
   ~dispatch_queries
@@ -1101,7 +1028,7 @@ let with_close
       ?description
       ?time_source
       ?identification
-      ?always_provide_rpc_shapes
+      ?provide_rpc_shapes
       ~connection_state
       transport
   in
@@ -1134,7 +1061,7 @@ let server_with_close
   ?description
   ?time_source
   ?identification
-  ?always_provide_rpc_shapes
+  ?provide_rpc_shapes
   transport
   ~implementations
   ~connection_state
@@ -1152,7 +1079,7 @@ let server_with_close
     ?description
     ?time_source
     ?identification
-    ?always_provide_rpc_shapes
+    ?provide_rpc_shapes
     transport
     ~implementations
     ~connection_state

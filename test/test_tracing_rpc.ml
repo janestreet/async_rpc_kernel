@@ -77,7 +77,7 @@ let%expect_test "Single successful rpc implementation" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -87,7 +87,7 @@ let%expect_test "Single successful rpc implementation" =
     {|
     (Send (Response ((id 123) (data (Ok (Ok "example response"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
+     ((event (Sent (Response Single_succeeded))) (rpc ((name rpc) (version 1)))
       (id 123) (payload_bytes 1)))
     |}];
   return ()
@@ -99,7 +99,7 @@ let%expect_test "Single successful rpc implementation, returning user-defined er
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -110,7 +110,7 @@ let%expect_test "Single successful rpc implementation, returning user-defined er
     (Send (Response ((id 123) (data (Ok (Error "user error"))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 1)))
     |}];
   return ()
 ;;
@@ -121,7 +121,7 @@ let%expect_test "Single raising rpc implementation" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -143,7 +143,7 @@ let%expect_test "Single raising rpc implementation" =
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 1)))
     |}];
   return ()
 ;;
@@ -154,7 +154,7 @@ let%expect_test "Single rpc implementation raising rpc error" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -179,7 +179,7 @@ let%expect_test "Single rpc implementation raising rpc error" =
              ("<backtrace elided in test>"))))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_rpc_error_or_exn)))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 1)))
     |}];
   return ()
 ;;
@@ -190,7 +190,7 @@ let%expect_test "Single rpc implementation fails to send once" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -203,7 +203,7 @@ let%expect_test "Single rpc implementation fails to send once" =
     (Send (Response ((id 123) (data (Ok (Ok "attempted response"))))))
     (Tracing_event
      ((event (Failed_to_send (Response Single_succeeded) Too_large))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 100)))
     (Send
      (Response
       ((id 123)
@@ -220,7 +220,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -238,7 +238,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
     (Send (Response ((id 123) (data (Ok (Ok "attempted response"))))))
     (Tracing_event
      ((event (Failed_to_send (Response Single_succeeded) Too_large))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 100)))
     (Send
      (Response
       ((id 123)
@@ -286,7 +286,7 @@ let%expect_test "connection closed for single rpc response" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -301,7 +301,7 @@ let%expect_test "connection closed for single rpc response" =
     (Send (Response ((id 123) (data (Ok (Ok "attempted response"))))))
     (Tracing_event
      ((event (Failed_to_send (Response Single_succeeded) Closed))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 0)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   return ()
 ;;
@@ -312,7 +312,7 @@ let%expect_test "connection fully closes before single rpc response" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -341,7 +341,7 @@ let%expect_test "Single rpc implementation fails to send user-defined error once
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -356,7 +356,7 @@ let%expect_test "Single rpc implementation fails to send user-defined error once
      ((event
        (Failed_to_send (Response Single_or_streaming_user_defined_error)
         Too_large))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 100)))
     (Send
      (Response
       ((id 123)
@@ -373,7 +373,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     (Implementation_called "example query (id = 123)")
     |}];
@@ -393,7 +393,7 @@ let%expect_test "Single rpc implementation fails to send twice" =
      ((event
        (Failed_to_send (Response Single_or_streaming_user_defined_error)
         Too_large))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 100)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 100)))
     (Send
      (Response
       ((id 123)
@@ -442,11 +442,11 @@ let%expect_test "two rpcs in one batch" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 25)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 25)
       (payload_bytes 33)))
     (Implementation_called "example query (id = 25)")
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 75)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 75)
       (payload_bytes 33)))
     (Implementation_called "example query (id = 75)")
     |}];
@@ -458,10 +458,10 @@ let%expect_test "two rpcs in one batch" =
     (Send (Response ((id 75) (data (Ok (Error "example error 2"))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name rpc) (version 1)))) (id 75) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 75) (payload_bytes 1)))
     (Send (Response ((id 25) (data (Ok (Ok "example response 1"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
+     ((event (Sent (Response Single_succeeded))) (rpc ((name rpc) (version 1)))
       (id 25) (payload_bytes 1)))
     |}];
   return ()
@@ -476,21 +476,21 @@ let%expect_test "two immediately-returning rpcs in one batch" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 25)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 25)
       (payload_bytes 33)))
     (Implementation_called "example query (id = 25)")
     (Send (Response ((id 25) (data (Ok (Ok "example response 1"))))))
     (Tracing_event
-     ((event (Sent (Response Single_succeeded))) (rpc (((name rpc) (version 1))))
+     ((event (Sent (Response Single_succeeded))) (rpc ((name rpc) (version 1)))
       (id 25) (payload_bytes 1)))
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 75)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 75)
       (payload_bytes 33)))
     (Implementation_called "example query (id = 75)")
     (Send (Response ((id 75) (data (Ok (Error "example error 2"))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
-      (rpc (((name rpc) (version 1)))) (id 75) (payload_bytes 1)))
+      (rpc ((name rpc) (version 1))) (id 75) (payload_bytes 1)))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| |}];
@@ -686,7 +686,7 @@ let%expect_test "connection closes before response received" =
     {|
     (Send (Query ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
-     ((event (Sent Query)) (rpc (((name rpc) (version 1)))) (id 1)
+     ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
     |}];
   Mock_peer.close_reader t;
@@ -737,7 +737,7 @@ let%expect_test "expert unknown rpc handler" =
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 34)))
     ("Unknown rpc" (rpc_tag rpc) (version 1) (metadata ())
      (data "example query (id = 123)"))
@@ -750,14 +750,14 @@ let%expect_test "expert unknown rpc handler" =
           ((location "server-side raw rpc computation") (exn "example error"))))))))
     (Tracing_event
      ((event (Sent (Response Expert_single_succeeded_or_failed)))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 0)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   Mock_peer.expect_message t [%bin_reader: Nothing.t] [%sexp_of: Nothing.t];
   write_query ~metadata:"example metadata" t;
   [%expect
     {|
     (Tracing_event
-     ((event (Received Query)) (rpc (((name rpc) (version 1)))) (id 123)
+     ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
       (payload_bytes 51)))
     ("Unknown rpc" (rpc_tag rpc) (version 1) (metadata ("example metadata"))
      (data "example query (id = 123)"))
@@ -770,7 +770,7 @@ let%expect_test "expert unknown rpc handler" =
           ((location "server-side raw rpc computation") (exn "example error"))))))))
     (Tracing_event
      ((event (Sent (Response Expert_single_succeeded_or_failed)))
-      (rpc (((name rpc) (version 1)))) (id 123) (payload_bytes 0)))
+      (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   return ()
 ;;

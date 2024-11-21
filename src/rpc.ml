@@ -588,7 +588,13 @@ module Streaming_rpc = struct
 
   let shapes_and_digest t = shapes t |> and_digest
 
-  let implement_gen ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t impl =
+  let implement_gen
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?(leave_open_on_exception = true)
+    ?on_exception
+    t
+    impl
+    =
     let bin_init_writer =
       Initial_message.bin_writer_t
         t.bin_initial_response.writer
@@ -603,6 +609,7 @@ module Streaming_rpc = struct
           ; bin_update_writer = t.bin_update_response.writer
           ; impl
           ; error_mode = Streaming_initial_message
+          ; leave_open_on_exception
           ; here
           }
     ; shapes = lazy (shapes_and_digest t)
@@ -610,17 +617,29 @@ module Streaming_rpc = struct
     }
   ;;
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f c query =
       match%map f c query with
       | Error err ->
         Ok (Or_not_authorized.Authorized (Error (initial_message (Error err))))
       | Ok (initial, pipe) -> Ok (Authorized (Ok (initial_message (Ok initial), pipe)))
     in
-    implement_gen ~here t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception ?leave_open_on_exception (Pipe f)
   ;;
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f c query =
       let%map response_or_not_authorized = f c query in
       Result.map response_or_not_authorized ~f:(fun response ->
@@ -628,19 +647,31 @@ module Streaming_rpc = struct
           | Error err -> Error (initial_message (Error err))
           | Ok (initial, pipe) -> Ok (initial_message (Ok initial), pipe)))
     in
-    implement_gen ~here t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception ?leave_open_on_exception (Pipe f)
   ;;
 
-  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f c query writer =
       match%map f c query writer with
       | Error _ as x -> Ok (Or_not_authorized.Authorized (Error (initial_message x)))
       | Ok _ as x -> Ok (Authorized (Ok (initial_message x)))
     in
-    implement_gen ~here ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception ?leave_open_on_exception t (Direct f)
   ;;
 
-  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f c query writer =
       let%map response_or_not_authorized = f c query writer in
       Result.map response_or_not_authorized ~f:(fun response ->
@@ -648,7 +679,7 @@ module Streaming_rpc = struct
           | Error _ as x -> Error (initial_message x)
           | Ok _ as x -> Ok (initial_message x)))
     in
-    implement_gen ~here ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception ?leave_open_on_exception t (Direct f)
   ;;
 
   let abort t conn id =
@@ -1075,22 +1106,43 @@ module Pipe_rpc = struct
   let shapes t = Streaming_rpc.shapes t
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
-  let implement ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
-    Streaming_rpc.implement ~here ?on_exception t (fun a query ->
+  let implement
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
+    Streaming_rpc.implement ~here ?on_exception ?leave_open_on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
   ;;
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
-    Streaming_rpc.implement_with_auth ~here ?on_exception t (fun a query ->
-      match%map f a query with
-      | Or_not_authorized.Not_authorized _ as r -> Ok r
-      | Authorized (Error _) as err -> Ok err
-      | Authorized (Ok pipe) -> Ok (Authorized (Ok ((), pipe))))
+  let implement_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
+    Streaming_rpc.implement_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      (fun a query ->
+         match%map f a query with
+         | Or_not_authorized.Not_authorized _ as r -> Ok r
+         | Authorized (Error _) as err -> Ok err
+         | Authorized (Ok pipe) -> Ok (Authorized (Ok ((), pipe))))
   ;;
 
   module Direct_stream_writer = struct
     include Implementations.Direct_stream_writer
+
+    (* Hiding the [result] optional parameter for now. See the someday in the interface
+       for more information *)
+    let close t = close t
 
     module Group = struct
       module Buffer = struct
@@ -1287,15 +1339,32 @@ module Pipe_rpc = struct
     end
   end
 
-  let implement_direct ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
-    Streaming_rpc.implement_direct ~here ?on_exception t f
+  let implement_direct
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
+    Streaming_rpc.implement_direct ~here ?on_exception ?leave_open_on_exception t f
   ;;
 
-  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f_ok state query writer =
       f state query writer |> Eager_deferred.map ~f:Or_error.return
     in
-    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_direct_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      f_ok
   ;;
 
   let dispatch' t conn query =
@@ -1408,16 +1477,33 @@ module State_rpc = struct
   let implement = Streaming_rpc.implement
   let implement_direct = Streaming_rpc.implement_direct
 
-  let implement_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f_ok state query = f state query |> Eager_deferred.map ~f:Or_error.return in
-    Streaming_rpc.implement_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_with_auth ~here ?on_exception ?leave_open_on_exception t f_ok
   ;;
 
-  let implement_direct_with_auth ?(here = Stdlib.Lexing.dummy_pos) ?on_exception t f =
+  let implement_direct_with_auth
+    ?(here = Stdlib.Lexing.dummy_pos)
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f_ok state query writer =
       f state query writer |> Eager_deferred.map ~f:Or_error.return
     in
-    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_direct_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      f_ok
   ;;
 
   let unwrap_dispatch_result rpc_result =
