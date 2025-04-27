@@ -18,7 +18,7 @@ let create_before_negotiation writer ~tracing_events =
 ;;
 
 let set_negotiated_protocol_version t negotiated_protocol_version =
-  Set_once.set_exn t.negotiated_protocol_version [%here] negotiated_protocol_version
+  Set_once.set_exn t.negotiated_protocol_version negotiated_protocol_version
 ;;
 
 module For_handshake = struct
@@ -33,7 +33,8 @@ module For_handshake = struct
 
   let send_handshake_header t header =
     (Transport.Writer.send_bin_prot t.writer Header.bin_t.writer header
-     |> handle_handshake_result) [@nontail]
+     |> handle_handshake_result)
+    [@nontail]
   ;;
 
   let send_connection_metadata_if_supported t menu ~identification =
@@ -46,7 +47,8 @@ module For_handshake = struct
             (Protocol.Message.bin_writer_maybe_needs_length
                Protocol.Connection_metadata.V2.bin_writer_t)
             (Protocol.Message.Metadata_v2 { identification; menu })
-          |> handle_handshake_result) [@nontail]))
+          |> handle_handshake_result)
+         [@nontail]))
       else (
         (* We used to unconditionally send rpc shapes over the wire. It turns out that
            nobody was using them so it's fine to break backwards compatibility and send some
@@ -66,7 +68,8 @@ module For_handshake = struct
            (Protocol.Message.bin_writer_maybe_needs_length
               Protocol.Connection_metadata.V1.bin_writer_t)
            (Protocol.Message.Metadata { identification; menu })
-         |> handle_handshake_result) [@nontail])
+         |> handle_handshake_result)
+        [@nontail])
     | None
     (* [None] should be impossible to hit, but it doesn't hurt much to not send metadata
        in the case where this assumption becomes broken by other changes *)
@@ -103,7 +106,7 @@ let is_closed = of_writer Transport.Writer.is_closed
 
 module Query = struct
   let query_message t query : _ Protocol.Message.t =
-    match Set_once.get_exn t.negotiated_protocol_version [%here] with
+    match Set_once.get_exn t.negotiated_protocol_version with
     | 1 -> Query_v1 (Protocol.Query.to_v1 query)
     | _ -> Query query
   ;;
@@ -130,36 +133,35 @@ module Query = struct
 end
 
 module Response = struct
-  let response_message (type a) t (response : a Protocol.Response.t)
-    : a Protocol.Message.t
-    =
-    let negotiated_protocol_version =
-      Set_once.get_exn t.negotiated_protocol_version [%here]
-    in
-    (match response.data with
-     | Ok (_ : a) -> response
-     | Error rpc_error ->
-       let error_implemented_in_protocol_version =
-         Rpc_error.implemented_in_protocol_version rpc_error
-       in
-       (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
+  let response_message (type a) t id impl_menu_index ~data : a Protocol.Message.t =
+    let negotiated_protocol_version = Set_once.get_exn t.negotiated_protocol_version in
+    let data =
+      match data with
+      | Ok (_ : a) -> data
+      | Error rpc_error ->
+        let error_implemented_in_protocol_version =
+          Rpc_error.implemented_in_protocol_version rpc_error
+        in
+        (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
         v3 we used [Uncaught_exn] as the catchall. *)
-       if error_implemented_in_protocol_version <= negotiated_protocol_version
-       then response
-       else (
-         let error_sexp = [%sexp_of: Protocol.Rpc_error.t] rpc_error in
-         { response with
-           data =
-             Error
-               (if negotiated_protocol_version >= 3
-                then Unknown error_sexp
-                else Uncaught_exn error_sexp)
-         }))
-    |> Response
+        if error_implemented_in_protocol_version <= negotiated_protocol_version
+        then data
+        else (
+          let error_sexp = [%sexp_of: Protocol.Rpc_error.t] rpc_error in
+          Error
+            (if negotiated_protocol_version >= 3
+             then Unknown error_sexp
+             else Uncaught_exn error_sexp))
+    in
+    if Version_dependent_feature.is_supported
+         Response_v2
+         ~version:negotiated_protocol_version
+    then Response_v2 { id; impl_menu_index; data }
+    else Response_v1 { id; data }
   ;;
 
-  let send t response ~bin_writer_response = exclave_
-    let message = response_message t response in
+  let send t id impl_menu_index ~data ~bin_writer_response = exclave_
+    let message = response_message t id impl_menu_index ~data in
     Transport.Writer.send_bin_prot
       t.writer
       (Protocol.Message.bin_writer_maybe_needs_length
@@ -167,11 +169,13 @@ module Response = struct
       message
   ;;
 
-  let send_write_error t id sexp =
+  let send_write_error t id sexp ~impl_menu_index =
     match
       send
         t
-        { id; data = Error (Write_error sexp) }
+        id
+        impl_menu_index
+        ~data:(Error (Write_error sexp))
         ~bin_writer_response:Nothing.bin_writer_t
     with
     | Sent { result = (); bytes = _ } | Closed -> ()
@@ -189,6 +193,7 @@ module Response = struct
   let handle_send_result
     t
     (local_ qid)
+    (local_ impl_menu_index)
     (local_ rpc)
     (local_ kind)
     (local_ (result : _ Transport.Send_result.t))
@@ -215,12 +220,16 @@ module Response = struct
          t
          qid
          ([%sexp_of: unit Transport.Send_result.t]
-            ([%globalize: unit Transport.Send_result.t] r)));
+            ([%globalize: unit Transport.Send_result.t] r))
+         ~impl_menu_index);
     ()
   ;;
 
-  let send_expert t query_id ~buf ~pos ~len ~send_bin_prot_and_bigstring = exclave_
-    let header = response_message t { id = query_id; data = Ok (Nat0.of_int_exn len) } in
+  let send_expert t query_id impl_menu_index ~buf ~pos ~len ~send_bin_prot_and_bigstring
+    = exclave_
+    let header =
+      response_message t query_id impl_menu_index ~data:(Ok (Nat0.of_int_exn len))
+    in
     send_bin_prot_and_bigstring
       t.writer
       Protocol.Message.bin_writer_nat0_t
@@ -232,6 +241,8 @@ module Response = struct
 end
 
 module Unsafe_for_cached_streaming_response_writer = struct
+  let response_message = Response.response_message
+
   let send_bin_prot t bin_writer a = exclave_
     Transport.Writer.send_bin_prot t.writer bin_writer a
   ;;

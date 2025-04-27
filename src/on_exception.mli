@@ -8,8 +8,19 @@ module Exception_type : sig
   [@@deriving compare, sexp_of]
 end
 
+module Background_monitor_rest : sig
+  type t =
+    [ `Log
+    | `Call of exn -> unit
+    ]
+
+  module Expert : sig
+    val merge : [ `Call of exn -> unit ] -> t option -> t
+  end
+end
+
 (** In all cases except for [Raise_to_monitor], if the exception was raised before the
-   implementation returned then it gets sent to the client as an [Uncaught_exn]. *)
+    implementation returned then it gets sent to the client as an [Uncaught_exn]. *)
 type t =
   | Call of (Exception_type.t -> exn -> Description.t -> unit)
   (** [Exception_type] represents whether the exception was raised before or after the
@@ -27,8 +38,8 @@ type t =
   | Close_connection
   | Raise_to_monitor of Monitor.t
   (** Raises the exception to the given monitor. To shut down the whole program you can
-   provide [Monitor.main]. Note that this applies both if the ecxception is thrown
-   before the implementation returns or afterwards. *)
+      provide [Monitor.main]. Note that this applies both if the exception is thrown
+      before the implementation returns or afterwards. *)
 [@@deriving sexp_of]
 
 (** Handle an exn that was raised before the implementation returned. It's possible that
@@ -46,4 +57,4 @@ val to_background_monitor_rest
   :  t
   -> Description.t
   -> close_connection_monitor:Monitor.t
-  -> [ `Log | `Raise | `Call of exn -> unit ] option
+  -> [> Background_monitor_rest.t ] option

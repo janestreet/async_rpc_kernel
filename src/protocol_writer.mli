@@ -71,13 +71,16 @@ end
 module Response : sig
   val send
     :  t
-    -> 'response Protocol.Response.t
+    -> Protocol.Query_id.t
+    -> Protocol.Impl_menu_index.t
+    -> data:'response Rpc_result.t
     -> bin_writer_response:'response Bin_prot.Type_class.writer
     -> local_ unit Transport.Send_result.t
 
   val send_expert
     :  t
     -> Protocol.Query_id.t
+    -> Protocol.Impl_menu_index.t
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
@@ -94,6 +97,7 @@ module Response : sig
   val handle_send_result
     :  t
     -> local_ Protocol.Query_id.t
+    -> local_ Protocol.Impl_menu_index.t
     -> local_ Description.t
     -> local_ Tracing_event.Sent_response_kind.t
     -> local_ 'a Transport_intf.Send_result.t
@@ -101,6 +105,13 @@ module Response : sig
 end
 
 module Unsafe_for_cached_streaming_response_writer : sig
+  val response_message
+    :  t
+    -> Protocol.Query_id.t
+    -> Protocol.Impl_menu_index.t
+    -> data:'response Rpc_result.t
+    -> 'response Protocol.Message.maybe_needs_length
+
   val send_bin_prot
     :  t
     -> 'a Bin_prot.Type_class.writer

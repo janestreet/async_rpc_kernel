@@ -28,9 +28,14 @@ module Async_rpc_kernel_private = struct
   module Connection : Connection_intf.S_private with type t = Rpc.Connection.t =
     Connection
 
+  module Handshake_error = Handshake_error
+  module Header = Header
   module Protocol = Protocol
+  module Protocol_local_readers = Protocol_local_readers
   module Transport = Transport
   module Util = Util
+  module Version_dependent_feature = Version_dependent_feature
+  module Writer_with_length = Writer_with_length
 
   let default_handshake_timeout = Connection.default_handshake_timeout
 end

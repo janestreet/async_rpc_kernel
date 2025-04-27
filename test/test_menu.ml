@@ -7,6 +7,11 @@ let generate_rpc_name =
     union [ String.gen_nonempty; of_list [ "foo"; "bar"; "baz"; "FOO"; "Foo" ] ])
 ;;
 
+module Response = struct
+  type t = (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
+  [@@deriving compare, globalize, sexp]
+end
+
 module V1_or_v2 = struct
   let digest_generator =
     [ [%bin_shape: unit]
@@ -95,8 +100,8 @@ module type Menu_intf = sig
   val highest_available_version
     :  t
     -> rpc_name:string
-    -> from_set:Int.Set.t
-    -> (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
+    -> from_sorted_array:int array
+    -> local_ (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
 end
 
 module Menu : Menu_intf = struct
@@ -137,8 +142,9 @@ module Reference_menu : Menu_intf = struct
     List.Assoc.find t ([%globalize: Description.t] desc) ~equal:[%equal: Description.t]
   ;;
 
-  let highest_available_version (t : t) ~rpc_name ~from_set =
+  let highest_available_version (t : t) ~rpc_name ~from_sorted_array = exclave_
     let available = supported_versions t ~rpc_name in
+    let from_set = Int.Set.of_array from_sorted_array in
     if Set.is_empty available
     then Error `No_rpcs_with_this_name
     else (
@@ -345,19 +351,28 @@ let%expect_test "shape_digests" =
 ;;
 
 let%expect_test "highest_available_version" =
-  let open struct
-    type x = (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
-    [@@deriving compare, sexp]
-  end in
   do_test'
-    [%sexp_of: x * (string * Int.Set.t)]
-    [%compare: x * _]
+    [%sexp_of: Response.t * (string * int array)]
+    [%compare: Response.t * _]
     ~seed:8636
     ~gen:(Int.Set.quickcheck_generator (Int.gen_incl (-2) 20))
-    ~f:(fun from_set (module M) x state ->
+    ~f:(fun query (module M) x state ->
+      let from_sorted_array = Set.to_array query in
+      let from_sorted_array_orig = Array.copy from_sorted_array in
       let t = M.of_v1_or_v2 x in
       let rpc_name = choose_rpc_name x state in
-      M.highest_available_version t ~rpc_name ~from_set, (rpc_name, from_set));
+      let version =
+        M.highest_available_version t ~rpc_name ~from_sorted_array |> Response.globalize
+      in
+      Array.iter2_exn from_sorted_array from_sorted_array_orig ~f:(fun a b ->
+        if a <> b
+        then
+          raise_s
+            [%message
+              "Contents of array were modified"
+                ~before:(from_sorted_array_orig : int array)
+                ~after:(from_sorted_array : int array)]);
+      version, (rpc_name, from_sorted_array));
   [%expect
     {|
     ("500th example"
@@ -368,7 +383,7 @@ let%expect_test "highest_available_version" =
     |}]
 ;;
 
-let%expect_test "highest_available_version 2" =
+let%expect_test "highest_available_version 2, no alloc" =
   Core.Quickcheck.test
     ~sizes:(Sequence.cycle_list_exn [ 1; 10; 50; 75; 100; 200; 300; 400; 500; 750; 1000 ])
     ~seed:(`Deterministic "fjdsakgfjdil")
@@ -383,17 +398,22 @@ let%expect_test "highest_available_version 2" =
        @ List.map bar_versions ~f:(fun v -> "bar", v)
      , (challenge_name, challenge) ))
     ~f:(fun (v1, (rpc_name, from_set)) ->
+      let from_sorted_array = Set.to_array from_set in
       let t = Menu.of_v1_or_v2 (`V1 v1) in
       let t_ref = Reference_menu.of_v1_or_v2 (`V1 v1) in
-      let res = Menu.highest_available_version t ~rpc_name ~from_set in
-      let expect = Reference_menu.highest_available_version t_ref ~rpc_name ~from_set in
-      [%test_result:
-        (int, [ `No_rpcs_with_this_name | `Some_versions_but_none_match ]) Result.t]
-        res
-        ~expect)
+      let res =
+        Expect_test_helpers_core.require_no_allocation_local (fun () ->
+          exclave_ Menu.highest_available_version t ~rpc_name ~from_sorted_array)
+        |> Response.globalize
+      in
+      let expect =
+        Reference_menu.highest_available_version t_ref ~rpc_name ~from_sorted_array
+        |> Response.globalize
+      in
+      [%test_result: Response.t] res ~expect)
 ;;
 
-let%expect_test "highest_available_version disjoint" =
+let%expect_test "highest_available_version disjoint, no alloc" =
   let one_run () =
     let rpc, query =
       let i = ref 0 in
@@ -402,11 +422,43 @@ let%expect_test "highest_available_version disjoint" =
         !i)
       |> List.partition_tf ~f:(fun _ -> Random.bool ())
     in
+    let query = Array.of_list query in
+    Array.sort ~compare:Int.compare query;
     let t = Menu.of_v1_or_v2 (`V1 (List.map rpc ~f:(fun v -> "foo", v))) in
-    [%test_result:
-      (int, [ `No_rpcs_with_this_name | `Some_versions_but_none_match ]) Result.t]
-      (Menu.highest_available_version t ~rpc_name:"foo" ~from_set:(Int.Set.of_list query))
-      ~expect:(Error `Some_versions_but_none_match)
+    let version =
+      Expect_test_helpers_core.require_no_allocation_local (fun () ->
+        exclave_ Menu.highest_available_version t ~rpc_name:"foo" ~from_sorted_array:query)
+      |> Response.globalize
+    in
+    [%test_result: Response.t] version ~expect:(Error `Some_versions_but_none_match)
   in
   List.init 5 ~f:Fn.id |> List.iter ~f:(fun (_ : int) -> one_run ())
+;;
+
+(* There's no good reason to ever pass in an array that has duplicates in it, but we
+   should make sure things don't blow up *)
+let%expect_test "highest_available_version works with dupes" =
+  do_test'
+    [%sexp_of: Response.t * (string * int array)]
+    [%compare: Response.t * _]
+    ~seed:9112
+    ~gen:(Int.Set.quickcheck_generator (Int.gen_incl (-2) 20))
+    ~f:(fun query (module M) x state ->
+      let query = Set.to_list query in
+      let from_sorted_array =
+        let arr = query @ query |> Array.of_list in
+        Array.sort arr ~compare:Int.compare;
+        arr
+      in
+      let t = M.of_v1_or_v2 x in
+      let rpc_name = choose_rpc_name x state in
+      let version =
+        M.highest_available_version t ~rpc_name ~from_sorted_array |> Response.globalize
+      in
+      version, (rpc_name, from_sorted_array));
+  [%expect
+    {|
+    ("500th example" (menu ())
+     (result ((Error No_rpcs_with_this_name) (not-in-menu ()))))
+    |}]
 ;;

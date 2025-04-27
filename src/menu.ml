@@ -28,7 +28,7 @@ module Stable = struct
   module V2 = struct
     let version = 2
 
-    type query = unit [@@deriving bin_io]
+    type query = unit [@@deriving bin_io ~localize]
 
     let%expect_test _ =
       print_endline [%bin_digest: query];
@@ -36,18 +36,28 @@ module Stable = struct
     ;;
 
     type response = (Description.Stable.V1.t * Rpc_shapes.Stable.Just_digests.V1.t) list
-    [@@deriving bin_io, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of]
 
     let%expect_test _ =
       print_endline [%bin_digest: response];
       [%expect {| bfa1a67e3782922212d253c848e49da8 |}]
+    ;;
+
+    let bin_read_response__local buf ~pos_ref = exclave_
+      let open Bin_prot.Read in
+      let bin_read_el =
+        bin_read_pair__local
+          Description.Stable.V1.bin_read_t__local
+          Rpc_shapes.Stable.Just_digests.V1.bin_read_t__local
+      in
+      bin_read_list__local bin_read_el buf ~pos_ref
     ;;
   end
 
   module V3 = struct
     let version = 3
 
-    type query = unit [@@deriving bin_io]
+    type query = unit [@@deriving bin_io ~localize]
 
     let%expect_test _ =
       print_endline [%bin_digest: query];
@@ -58,7 +68,21 @@ module Stable = struct
       { descriptions : Description.Stable.V1.t array
       ; digests : Rpc_shapes.Stable.Just_digests.V1.t array option
       }
-    [@@deriving bin_io, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    let bin_read_response__local buf ~pos_ref = exclave_
+      let open Bin_prot.Read in
+      let descriptions =
+        bin_read_array__local Description.Stable.V1.bin_read_t buf ~pos_ref
+      in
+      let digests =
+        bin_read_option__local
+          (bin_read_array__local Rpc_shapes.Stable.Just_digests.V1.bin_read_t)
+          buf
+          ~pos_ref
+      in
+      { descriptions; digests }
+    ;;
 
     let%expect_test _ =
       print_endline [%bin_digest: response];
@@ -93,6 +117,7 @@ type t = Stable.V3.response =
   ; digests : Rpc_shapes.Just_digests.t array option
   (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
   }
+[@@deriving globalize]
 
 let supported_rpcs (t : t) = Array.to_list t.descriptions
 
@@ -101,14 +126,20 @@ let supported_rpcs (t : t) = Array.to_list t.descriptions
    Error `No_versions if rpcs exist with this name but larger versions
    Error `No_rpcs if no rpcs exist with this name
 *)
-let versions_range t ~rpc_name ~max_version =
-  let max_version = Option.value max_version ~default:Int.max_value in
+let%template[@zero_alloc] versions_range t ~rpc_name ~(local_ max_version) = exclave_
+  let max_version = (Option.value [@mode local]) max_version ~default:Int.max_value in
   let compare (d : Description.t) x = [%compare: string] d.name x in
-  match Array.binary_search t.descriptions ~compare `First_equal_to rpc_name with
+  match
+    (Array.binary_search [@zero_alloc assume])
+      t.descriptions
+      ~compare
+      `First_equal_to
+      rpc_name
+  with
   | None -> Error `No_rpcs
   | Some lb ->
     (match
-       Array.binary_search_segmented
+       (Array.binary_search_segmented [@zero_alloc assume])
          t.descriptions
          ~segment_of:(fun d ->
            if [%compare_local: Description.t] d { name = rpc_name; version = max_version }
@@ -128,6 +159,12 @@ let supported_versions t ~rpc_name =
     Int.Set.of_increasing_iterator_unchecked
       ~len:(ub - lb + 1)
       ~f:(fun i -> t.descriptions.(lb + i).version)
+;;
+
+let get t index = exclave_
+  if index >= Array.length t.descriptions
+  then None
+  else Some (Modes.Global.wrap t.descriptions.(index))
 ;;
 
 let index t (local_ description) = exclave_
@@ -162,49 +199,52 @@ let shape_digests t description =
      | None -> Some Unknown)
 ;;
 
-(* This function is a bit ugly. We want to (a) reasonably avoid allocations, (b) be fast
-   in the case where max of the set is the same as or near to max of the versions in the
-   menu. *)
-let highest_available_version t ~rpc_name ~from_set =
-  (* If nothing exists in [from_set] we still need to know whether there exist rpcs with
-     the given [rpc_name] *)
-  let max_version = Set.max_elt from_set in
+(* This function is a bit ugly. We want to (a) avoid allocating, (b) be fast in the case
+   where max of the set is the same as or near to max of the versions in the menu. *)
+let%template[@zero_alloc] highest_available_version t ~rpc_name ~from_sorted_array
+  = exclave_
+  (* If nothing exists in [from_sorted_array] we still need to know whether there exist
+     rpcs with the given [rpc_name] *)
+  let local_ max_version =
+    if Array.is_empty from_sorted_array
+    then None
+    else Some ((Array.last_exn [@zero_alloc assume]) from_sorted_array)
+  in
   match versions_range t ~rpc_name ~max_version with
   | Error `No_rpcs -> Error `No_rpcs_with_this_name
   | Error `No_versions -> Error `Some_versions_but_none_match
   | Ok (lb_in_descriptions, ub_in_descriptions) ->
     (* We search for versions before this test so that we can produce the
        no_rpcs/some_versions error *)
-    if Set.is_empty from_set
+    if Array.is_empty from_sorted_array
     then Error `Some_versions_but_none_match
     else (
       let descriptions = t.descriptions in
-      let rec search description_index set_index set_value =
-        match compare descriptions.(description_index).version set_value with
-        | 0 -> Ok set_value
+      let[@zero_alloc] rec local_ search description_index arr_index arr_value = exclave_
+        match compare descriptions.(description_index).version arr_value with
+        | 0 -> Ok arr_value
         | c when c < 0 ->
-          let set_index = set_index - 1 in
-          if set_index < 0
+          let arr_index = arr_index - 1 in
+          if arr_index < 0
           then Error `Some_versions_but_none_match
-          else
-            search
-              description_index
-              set_index
-              (Set.nth from_set set_index |> Option.value_exn)
+          else search description_index arr_index (Array.get from_sorted_array arr_index)
         | _ (* > 0 *) ->
           let description_index = description_index - 1 in
           if description_index < lb_in_descriptions
           then Error `Some_versions_but_none_match
-          else search description_index set_index set_value
+          else search description_index arr_index arr_value
       in
-      let set_index = Set.length from_set in
+      let arr_index = Array.length from_sorted_array in
       (* We know there exists at least one element in the set since [from_set] is not
-         empty in this branch *)
-      search ub_in_descriptions set_index (Option.value_exn max_version))
+           empty in this branch *)
+      search
+        ub_in_descriptions
+        arr_index
+        ((Option.value_exn [@mode local]) max_version) [@nontail])
 ;;
 
 let has_some_versions t ~rpc_name =
-  match highest_available_version t ~rpc_name ~from_set:Int.Set.empty with
+  match highest_available_version t ~rpc_name ~from_sorted_array:[||] with
   | Ok _ | Error `Some_versions_but_none_match -> true
   | Error `No_rpcs_with_this_name -> false
 ;;
@@ -334,8 +374,9 @@ end
 
 (* This depends on the sexp printer, hence it lives down here *)
 let highest_shared_version ~rpc_name ~callee_menu ~caller_versions =
-  match highest_available_version callee_menu ~rpc_name ~from_set:caller_versions with
-  | Ok _ as ok -> ok
+  let from_sorted_array = Set.to_array caller_versions in
+  match highest_available_version callee_menu ~rpc_name ~from_sorted_array with
+  | Ok version -> Ok version
   | Error `Some_versions_but_none_match ->
     error_s
       [%message

@@ -42,7 +42,7 @@ module Stable = struct
   module Just_digests = struct
     module Digest = struct
       module V1 = struct
-        type t = Bin_shape.Digest.t [@@deriving sexp, compare]
+        type t = Bin_shape.Digest.t [@@deriving compare, globalize, sexp]
 
         let equal t1 t2 = [%compare.equal: t] t1 t2
         let hash_fold_t s t = Core.Md5.hash_fold_t s (Bin_shape.Digest.to_md5 t)
@@ -60,6 +60,17 @@ module Stable = struct
                 Bin_prot.Shape.Uuid.of_string "d8669bfc-1cdf-11ee-9283-aa42dc4c5cc4"
               ;;
             end)
+
+        let bin_size_t__local t =
+          bin_size_md5__local (Bin_shape.Digest.to_md5_local t) [@nontail]
+        ;;
+
+        let bin_write_t__local buf ~pos t =
+          Bin_prot.Write.bin_write_md5__local
+            buf
+            ~pos
+            (Bin_shape.Digest.to_md5_local t) [@nontail]
+        ;;
       end
     end
 
@@ -77,7 +88,36 @@ module Stable = struct
             ; error : Digest.V1.t
             }
         | Unknown
-      [@@deriving bin_io, equal, compare, hash, sexp]
+      [@@deriving bin_io ~localize, equal, compare, globalize, hash, sexp]
+
+      let bin_read_t__local buf ~pos_ref = exclave_
+        let open Bin_prot.Read in
+        match bin_read_int_8bit buf ~pos_ref with
+        | 0 ->
+          let query = bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local in
+          let response =
+            bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local
+          in
+          Rpc { query; response }
+        | 1 ->
+          let msg = bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local in
+          One_way { msg }
+        | 2 ->
+          let query = bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local in
+          let initial_response =
+            bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local
+          in
+          let update_response =
+            bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local
+          in
+          let error = bin_read_md5__local buf ~pos_ref |> Bin_shape.Digest.of_md5_local in
+          Streaming_rpc { query; initial_response; update_response; error }
+        | 3 -> Unknown
+        | _ ->
+          Bin_prot.Common.raise_read_error
+            (Bin_prot.Common.ReadError.Sum_tag "Rpc_shapes.Just_digests local read")
+            !pos_ref
+      ;;
     end
   end
 end
@@ -121,7 +161,7 @@ module Just_digests = struct
         ; error : Bin_shape.Digest.t
         }
     | Unknown
-  [@@deriving sexp_of, compare, variants]
+  [@@deriving globalize, sexp_of, compare, variants]
 
   module Strict_comparison = struct
     type nonrec t = t [@@deriving compare]

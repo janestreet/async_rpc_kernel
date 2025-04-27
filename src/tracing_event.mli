@@ -6,35 +6,31 @@ open Core
     When subscribing to events, the expected flow for received queries -> sent responses
     should look like one of the following cases.
 
-    {ol
-    {- Received query and sent response with matching rpc description and id. The response
-    depends on the kind of RPC and result. {ol
-    {- For one-way queries, the result is synthetic in that nothing is sent over the
-    network}
-    {- For an ordinary RPC, the responses may be [Single_succeeded],
-    [Single_or_streaming_rpc_error_or_exn], [Single_or_streaming_user_defined_error], or
-    in rare cases, [Expert_single_succeeded_or_failed]}
-    {- If a streaming RPC (e.g. a pipe or state RPC) fails (e.g. an exn or authorization
-    failure), there is a single [Single_or_streaming_rpc_error_or_exn] response. If it
-    returns an initial error, there is a single [Single_or_streaming_user_defined_error]
-    response}}}
-
-    {- Received query and many streaming responses sent, all with the same description and
-    id. {ol
-    {- The first response would be marked as [Streaming_initial]}
-    {- Followed by zero or more responses marked [Streaming_update]}
-    {- And finished by a response marked [Streaming_closed]}
-    {- An [Abort_streaming_rpc_query] with the same id is a request from the client to
-    stop streaming early and may arrive at any time after the [Streaming_initial]
-    message}}}
-
-    {- In exceptional circumstances, e.g. if the response would be too large, there will
-    be a [Failed_to_send] error and this may, for example, also lead to no
-    [Streaming_closed] message ever being sent.}
-
-    {- In exceptional cases, there will be no response. For example, if there is some kind
-    of critical error that closes the connection, or if an expert unknown rpc handler
-    fires.} }
+    + Received query and sent response with matching rpc description and id. The response
+      depends on the kind of RPC and result.
+      + For one-way queries, the result is synthetic in that nothing is sent over the
+        network
+      + For an ordinary RPC, the responses may be [Single_succeeded],
+        [Single_or_streaming_rpc_error_or_exn], [Single_or_streaming_user_defined_error],
+        or in rare cases, [Expert_single_succeeded_or_failed]
+      + If a streaming RPC (e.g. a pipe or state RPC) fails (e.g. an exn or authorization
+        failure), there is a single [Single_or_streaming_rpc_error_or_exn] response. If it
+        returns an initial error, there is a single
+        [Single_or_streaming_user_defined_error] response
+    + Received query and many streaming responses sent, all with the same description and
+      id.
+      + The first response would be marked as [Streaming_initial]
+      + Followed by zero or more responses marked [Streaming_update]
+      + And finished by a response marked [Streaming_closed]
+      + An [Abort_streaming_rpc_query] with the same id is a request from the client to
+        stop streaming early and may arrive at any time after the [Streaming_initial]
+        message
+    + In exceptional circumstances, e.g. if the response would be too large, there will be
+      a [Failed_to_send] error and this may, for example, also lead to no
+      [Streaming_closed] message ever being sent.
+    + In exceptional cases, there will be no response. For example, if there is some kind
+      of critical error that closes the connection, or if an expert unknown rpc handler
+      fires.
 
     The difference between a [Single_or_streaming_rpc_error_or_exn] and
     [Single_or_streaming_user_defined_error] is that the former comes from errors like an
@@ -44,15 +40,13 @@ open Core
 
     The flow for sent queries -> received responses should look like one of the following:
 
-    {ol
-    {- Sent query immediately followed by a received [One_way_so_no_response] which is
-    synthetic in that no response is received over the wire.}
-    {- Sent query followed by zero or more [Partial_response] events followed by one
-    finished event, either [Response_finished_ok], [Response_finished_rpc_error_or_exn],
-    [Response_finished_user_defined_error], or [Response_finished_expert_uninterpreted].}
-    {- In exceptional circumstances, there will be no corresponding [Response] to a
-    [Query], for example if the connection is lost or if the server never responds.}}
-*)
+    + Sent query immediately followed by a received [One_way_so_no_response] which is
+      synthetic in that no response is received over the wire.
+    + Sent query followed by zero or more [Partial_response] events followed by one
+      finished event, either [Response_finished_ok], [Response_finished_rpc_error_or_exn],
+      [Response_finished_user_defined_error], or [Response_finished_expert_uninterpreted].
+    + In exceptional circumstances, there will be no corresponding [Response] to a
+      [Query], for example if the connection is lost or if the server never responds. *)
 
 module Sent_response_kind : sig
   type t =
@@ -75,7 +69,7 @@ module Received_response_kind : sig
   type t =
     | One_way_so_no_response
     | Partial_response
-    | Response_finished_ok (** The response was interpreted as successful  *)
+    | Response_finished_ok (** The response was interpreted as successful *)
     | Response_finished_rpc_error_or_exn of global_ Rpc_error.t
     (** The response was an rpc-level error, e.g. the implementation raised or its
         response was too large to send. *)
@@ -115,8 +109,8 @@ type t =
   { event : Event.t
   ; rpc : Description.t (** Associated information for the RPC. *)
   ; global_ id : Int63.t
-  (** A unique identifier per in-flight RPC, this can be used to tie together request
-      and response events. The client and server see the same id. *)
+  (** A unique identifier per in-flight RPC, this can be used to tie together request and
+      response events. The client and server see the same id. *)
   ; payload_bytes : int
   (** The number of bytes for the message, except for the 8-byte length header before
       async-rpc messages. This includes the bytes specifying the rpc name/version or query

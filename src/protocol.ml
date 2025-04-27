@@ -5,15 +5,44 @@
 open Bin_prot.Std
 open Sexplib.Std
 module Core_for_testing = Core
-module Rpc_tag : Core.Identifiable = Core.String
-module Query_id = Core.Unique_id.Int63 ()
+
+include struct
+  open Core
+
+  let compare_int = compare_int
+  let globalize_int = globalize_int
+  let globalize_option = globalize_option
+  let globalize_string = globalize_string
+end
+
+module Rpc_tag : sig
+  include Core.Identifiable
+  include Bin_prot.Binable.S__local with type t := t
+
+  val globalize : local_ t -> t
+  val of_string_local : local_ string -> local_ t
+  val to_string_local : local_ t -> local_ string
+end = struct
+  include Core.String
+
+  let of_string_local str = str
+  let to_string_local str = str
+end
+
+module Query_id = struct
+  include Core.Unique_id.Int63 ()
+
+  let globalize (local_ t) = t
+  let bin_size_t__local (local_ t) = bin_size_t (globalize t)
+  let bin_write_t__local buf ~pos (local_ t) = bin_write_t buf ~pos (globalize t)
+end
 
 module Unused_query_id : sig
-  type t [@@deriving bin_io, sexp_of]
+  type t [@@deriving bin_io ~localize, sexp_of]
 
   val singleton : t
 end = struct
-  type t = Query_id.t [@@deriving bin_io, sexp_of]
+  type t = Query_id.t [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: t];
@@ -37,7 +66,7 @@ module Rpc_error : sig
     | Message_too_big of Transport.Send_result.message_too_big
     | Unknown of Sexp.t
     | Lift_error of Sexp.t
-  [@@deriving bin_io, compare, sexp, variants]
+  [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
 
   include Comparable.S with type t := t
 end = struct
@@ -47,13 +76,13 @@ end = struct
       | Connection_closed
       | Write_error of Core.Sexp.t
       | Uncaught_exn of Core.Sexp.t
-      | Unimplemented_rpc of Rpc_tag.t * [ `Version of Core.Int.Stable.V1.t ]
+      | Unimplemented_rpc of Rpc_tag.t * [ `Version of int ]
       | Unknown_query_id of Query_id.t
       | Authorization_failure of Core.Sexp.t
       | Message_too_big of Transport.Send_result.message_too_big
       | Unknown of Core.Sexp.t
       | Lift_error of Core.Sexp.t
-    [@@deriving bin_io, sexp, compare, variants]
+    [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
 
     let%expect_test "Stable unless we purposefully add a new variant" =
       print_endline [%bin_digest: t];
@@ -118,7 +147,8 @@ end = struct
 end
 
 module Rpc_result = struct
-  type 'a t = ('a, Rpc_error.t) Core.Result.t [@@deriving bin_io, sexp_of]
+  type 'a t = ('a, Rpc_error.t) Core.Result.t
+  [@@deriving bin_io ~localize, globalize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit t];
@@ -127,20 +157,26 @@ module Rpc_result = struct
 end
 
 module Connection_metadata = struct
+  module Stable_bigstring_v1_with_globalize = struct
+    include Core.Bigstring.Stable.V1
+
+    let globalize = Core.Bigstring.globalize
+  end
+
   module V1 = struct
     type t =
-      { identification : Core.Bigstring.Stable.V1.t option
+      { identification : Stable_bigstring_v1_with_globalize.t option
       ; menu : Menu.Stable.V2.response option
       }
-    [@@deriving bin_io, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of]
   end
 
   module V2 = struct
     type t =
-      { identification : Core.Bigstring.Stable.V1.t option
+      { identification : Stable_bigstring_v1_with_globalize.t option
       ; menu : Menu.Stable.V3.response option
       }
-    [@@deriving bin_io, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of]
 
     let of_v1 { V1.identification; menu } =
       { identification; menu = Base.Option.map menu ~f:Menu.of_v2_response }
@@ -163,7 +199,7 @@ module Query_v1 = struct
     ; id : Query_id.t
     ; data : 'a
     }
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, globalize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -181,7 +217,7 @@ module Query = struct
     ; metadata : string option
     ; data : 'a
     }
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, globalize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -199,19 +235,39 @@ module Query = struct
   ;;
 end
 
+module Impl_menu_index = Nat0.Option
+
 module Response = struct
-  type 'a needs_length =
-    { id : Query_id.t
-    ; data : 'a Rpc_result.t
-    }
-  [@@deriving bin_io, sexp_of]
+  module V1 = struct
+    type 'a needs_length =
+      { id : Query_id.t
+      ; data : 'a Rpc_result.t
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
 
-  let%expect_test _ =
-    print_endline [%bin_digest: unit needs_length];
-    [%expect {| e08147cd47ea743ad47cbb4abcd9448d |}]
-  ;;
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| e08147cd47ea743ad47cbb4abcd9448d |}]
+    ;;
 
-  type 'a t = 'a needs_length [@@deriving bin_read]
+    type 'a t = 'a needs_length [@@deriving bin_read]
+  end
+
+  module V2 = struct
+    type 'a needs_length =
+      { id : Query_id.t
+      ; impl_menu_index : Impl_menu_index.t
+      ; data : 'a Rpc_result.t
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| b7047e562833e76722265f8bad6f3746 |}]
+    ;;
+
+    type 'a t = 'a needs_length [@@deriving bin_read]
+  end
 end
 
 module Stream_query = struct
@@ -258,6 +314,16 @@ module Stream_response_data = struct
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end
 
+module Info_with_local_bin_io = struct
+  include Core.Info
+
+  let bin_size_t__local (local_ t) = bin_size_t ([%globalize: Core.Info.t] t)
+
+  let bin_write_t__local buf ~pos (local_ t) =
+    bin_write_t buf ~pos ([%globalize: Core.Info.t] t)
+  ;;
+end
+
 module Message = struct
   (* [Close_reason_duplicated] exists because we accidentally rolled [Metadata_v2] without
      preserving backwards compatibility (it was placed in the variants list before
@@ -267,21 +333,26 @@ module Message = struct
   type 'a maybe_needs_length =
     | Heartbeat
     | Query_v1 of 'a Query_v1.needs_length
-    | Response of 'a Response.needs_length
+    | Response_v1 of 'a Response.V1.needs_length
     | Query of 'a Query.needs_length
     | Metadata of Connection_metadata.V1.t
-    | Close_reason of Core.Info.t
-    | Close_reason_duplicated of Core.Info.t
+    | Close_reason of Info_with_local_bin_io.t
+    | Close_reason_duplicated of Info_with_local_bin_io.t
     | Metadata_v2 of Connection_metadata.V2.t
-  [@@deriving bin_io, sexp_of, variants]
+    | Response_v2 of 'a Response.V2.needs_length
+  [@@deriving bin_io ~localize, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 34c79522021d12841db0ad5fbf2ecca7 |}]
+    [%expect {| 6258b35f555b1ef6af290732085c0b7d |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
   type nat0_t = Nat0.t maybe_needs_length [@@deriving bin_read, bin_write]
+
+  let globalize_nat0_t =
+    globalize_maybe_needs_length (fun (local_ (nat0 : Nat0.t)) -> nat0)
+  ;;
 
   let%expect_test "Existing serialization of [Message] is stable" =
     (* We add new messages unstably to this protocol so it's important that serialization
@@ -311,21 +382,29 @@ module Message = struct
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
       ~query_v1:(print (fun c -> c (Query.to_v1 query)))
-      ~response:
+      ~response_v1:
         (print (fun c ->
-           c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.needs_length)))
+           c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.V1.needs_length)))
       ~query:(print (fun c -> c query))
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
-      ~metadata_v2:(print (fun c -> c metadata));
+      ~metadata_v2:(print (fun c -> c metadata))
+      ~response_v2:
+        (print (fun c ->
+           c
+             ({ id = Query_id.of_int_exn 0
+              ; impl_menu_index = Nat0.Option.some (Nat0.of_int_exn 5)
+              ; data = Ok ()
+              }
+              : _ Response.V2.needs_length)));
     [%expect
       {|
       Heartbeat: 0
       00000000  00                                                |.|
       Query_v1: 1
       00000000  01 03 74 61 67 00 01 00                           |..tag...|
-      Response: 2
+      Response_v1: 2
       00000000  02 00 00 00                                       |....|
       Query: 3
       00000000  03 03 74 61 67 00 01 00  00                       |..tag....|
@@ -337,6 +416,8 @@ module Message = struct
       00000000  06 03 00 0c 43 6c 6f 73  65 20 72 65 61 73 6f 6e  |....Close reason|
       Metadata_v2: 7
       00000000  07 00 00                                          |...|
+      Response_v2: 8
+      00000000  08 00 01 05 00 00                                 |......|
       |}]
   ;;
 end

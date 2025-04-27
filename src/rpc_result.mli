@@ -1,7 +1,7 @@
 open! Core
 open! Async_kernel
 
-type 'a t = 'a Protocol.Rpc_result.t
+type 'a t = 'a Protocol.Rpc_result.t [@@deriving globalize, sexp_of]
 
 val uncaught_exn : location:string -> exn -> 'a t
 val bin_io_exn : location:string -> exn -> 'a t
@@ -11,10 +11,8 @@ val lift_error : location:string -> exn -> 'a t
 val try_with
   :  here:Source_code_position.t
   -> local_ (unit -> 'a t Deferred.t)
-  -> Description.t
   -> location:string
-  -> on_background_exception:On_exception.t
-  -> close_connection_monitor:Monitor.t
+  -> on_background_exception:On_exception.Background_monitor_rest.t option
   -> 'a t Deferred.t
 
 val or_error

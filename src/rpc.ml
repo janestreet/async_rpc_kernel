@@ -168,15 +168,11 @@ module Rpc = struct
   ;;
 
   let dispatch' t conn query =
-    let response_handler
-      ivar
-      (response : _ P.Response.t)
-      ~read_buffer
-      ~read_buffer_pos_ref
+    let response_handler ivar ~data ~read_buffer ~read_buffer_pos_ref
       : Connection.Response_handler_action.t
       =
       let response =
-        response.data
+        data
         >>=~ fun len ->
         bin_read_from_bigstring
           t.bin_response.reader
@@ -226,8 +222,8 @@ module Rpc = struct
       ~handle_error
       =
       let response_handler : Connection.Response_handler.t =
-        fun response ~read_buffer ~read_buffer_pos_ref -> exclave_
-        match response.data with
+        fun ~data ~read_buffer ~read_buffer_pos_ref -> exclave_
+        match data with
         | Error e ->
           handle_error
             (Error.create_s
@@ -588,7 +584,13 @@ module Streaming_rpc = struct
 
   let shapes_and_digest t = shapes t |> and_digest
 
-  let implement_gen ~(here : [%call_pos]) ?on_exception t impl =
+  let implement_gen
+    ~(here : [%call_pos])
+    ?(leave_open_on_exception = false)
+    ?on_exception
+    t
+    impl
+    =
     let bin_init_writer =
       Initial_message.bin_writer_t
         t.bin_initial_response.writer
@@ -603,6 +605,7 @@ module Streaming_rpc = struct
           ; bin_update_writer = t.bin_update_response.writer
           ; impl
           ; error_mode = Streaming_initial_message
+          ; leave_open_on_exception
           ; here
           }
     ; shapes = lazy (shapes_and_digest t)
@@ -610,17 +613,18 @@ module Streaming_rpc = struct
     }
   ;;
 
-  let implement ~(here : [%call_pos]) ?on_exception t f =
+  let implement ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f =
     let f c query =
       match%map f c query with
       | Error err ->
         Ok (Or_not_authorized.Authorized (Error (initial_message (Error err))))
       | Ok (initial, pipe) -> Ok (Authorized (Ok (initial_message (Ok initial), pipe)))
     in
-    implement_gen ~here t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception ?leave_open_on_exception (Pipe f)
   ;;
 
-  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f
+    =
     let f c query =
       let%map response_or_not_authorized = f c query in
       Result.map response_or_not_authorized ~f:(fun response ->
@@ -628,19 +632,25 @@ module Streaming_rpc = struct
           | Error err -> Error (initial_message (Error err))
           | Ok (initial, pipe) -> Ok (initial_message (Ok initial), pipe)))
     in
-    implement_gen ~here t ?on_exception (Pipe f)
+    implement_gen ~here t ?on_exception ?leave_open_on_exception (Pipe f)
   ;;
 
-  let implement_direct ~(here : [%call_pos]) ?on_exception t f =
+  let implement_direct ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f =
     let f c query writer =
       match%map f c query writer with
       | Error _ as x -> Ok (Or_not_authorized.Authorized (Error (initial_message x)))
       | Ok _ as x -> Ok (Authorized (Ok (initial_message x)))
     in
-    implement_gen ~here ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception ?leave_open_on_exception t (Direct f)
   ;;
 
-  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
+  let implement_direct_with_auth
+    ~(here : [%call_pos])
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f c query writer =
       let%map response_or_not_authorized = f c query writer in
       Result.map response_or_not_authorized ~f:(fun response ->
@@ -648,7 +658,7 @@ module Streaming_rpc = struct
           | Error _ as x -> Error (initial_message x)
           | Ok _ as x -> Ok (initial_message x)))
     in
-    implement_gen ~here ?on_exception t (Direct f)
+    implement_gen ~here ?on_exception ?leave_open_on_exception t (Direct f)
   ;;
 
   let abort t conn id =
@@ -785,7 +795,7 @@ module Streaming_rpc = struct
        always send [abort] unless we've already received that message.
     *)
     let response_handler t : Connection.Response_handler.t =
-      fun response ~read_buffer ~read_buffer_pos_ref -> exclave_
+      fun ~data ~read_buffer ~read_buffer_pos_ref -> exclave_
       let bin_read_from_bigstring ?add_len reader ~len ~location =
         bin_read_from_bigstring
           ?add_len
@@ -829,7 +839,7 @@ module Streaming_rpc = struct
           Update_handler.handle_closed handler (`Error core_error);
           on_error (Error error) ~we_know_the_server_pipe_is_open
         in
-        (match response.data with
+        (match data with
          | Error error ->
            (* We know that the server will have closed it's pipe after these errors so
               let's not bother with waiting for an ack on [abort]. *)
@@ -886,7 +896,7 @@ module Streaming_rpc = struct
            side. When transitioning to this state there might be other messages already on
            the pipe so we wait for a [Pipe_eof] triggered from our abort message but might
            run into another message which is fine. *)
-        (match response.data with
+        (match data with
          | Error error ->
            if we_know_that_the_server_remains_open_on_error error
            then Keep
@@ -906,7 +916,7 @@ module Streaming_rpc = struct
         in
         (* Error cases in [Waiting_for_initial_response] match [Waiting_for_updates]
            except we need to fill the [response_ivar] so that our dispatch determines. *)
-        (match response.data with
+        (match data with
          | Error error ->
            on_error
              (Error error)
@@ -1075,22 +1085,32 @@ module Pipe_rpc = struct
   let shapes t = Streaming_rpc.shapes t
   let client_pushes_back t = t.Streaming_rpc.client_pushes_back
 
-  let implement ~(here : [%call_pos]) ?on_exception t f =
-    Streaming_rpc.implement ~here ?on_exception t (fun a query ->
+  let implement ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f =
+    Streaming_rpc.implement ~here ?on_exception ?leave_open_on_exception t (fun a query ->
       let%map x = f a query in
       x >>|~ fun x -> (), x)
   ;;
 
-  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
-    Streaming_rpc.implement_with_auth ~here ?on_exception t (fun a query ->
-      match%map f a query with
-      | Or_not_authorized.Not_authorized _ as r -> Ok r
-      | Authorized (Error _) as err -> Ok err
-      | Authorized (Ok pipe) -> Ok (Authorized (Ok ((), pipe))))
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f
+    =
+    Streaming_rpc.implement_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      (fun a query ->
+         match%map f a query with
+         | Or_not_authorized.Not_authorized _ as r -> Ok r
+         | Authorized (Error _) as err -> Ok err
+         | Authorized (Ok pipe) -> Ok (Authorized (Ok ((), pipe))))
   ;;
 
   module Direct_stream_writer = struct
     include Implementations.Direct_stream_writer
+
+    (* Hiding the [result] optional parameter for now. See the someday in the interface
+       for more information *)
+    let close t = close t
 
     module Group = struct
       module Buffer = struct
@@ -1100,7 +1120,6 @@ module Pipe_rpc = struct
           if initial_size < 0
           then
             failwiths
-              ~here:[%here]
               "Rpc.Pipe_rpc.Direct_stream_writer.Group.Buffer.create got negative buffer \
                size"
               initial_size
@@ -1287,15 +1306,26 @@ module Pipe_rpc = struct
     end
   end
 
-  let implement_direct ~(here : [%call_pos]) ?on_exception t f =
-    Streaming_rpc.implement_direct ~here ?on_exception t f
+  let implement_direct ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f =
+    Streaming_rpc.implement_direct ~here ?on_exception ?leave_open_on_exception t f
   ;;
 
-  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
+  let implement_direct_with_auth
+    ~(here : [%call_pos])
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f_ok state query writer =
       f state query writer |> Eager_deferred.map ~f:Or_error.return
     in
-    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_direct_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      f_ok
   ;;
 
   let dispatch' t conn query =
@@ -1318,18 +1348,19 @@ module Pipe_rpc = struct
 
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
 
+  let pipe_with_writer_error_of_pipe_and_metadata (pipe, metadata) =
+    let writer_error =
+      close_reason metadata
+      |> Deferred.map ~f:(function
+        | Closed_remotely | Closed_locally -> Ok ()
+        | Error error -> Error error)
+    in
+    Pipe_with_writer_error.of_reader ~writer_error pipe
+  ;;
+
   let dispatch_with_close_reason' t connection query =
-    match%map dispatch' t connection query with
-    | Ok (Ok (pipe, metadata)) ->
-      let writer_error =
-        close_reason metadata
-        |> Deferred.map ~f:(function
-          | Closed_remotely | Closed_locally -> Ok ()
-          | Error error -> Error error)
-      in
-      Ok (Ok (Pipe_with_writer_error.of_reader ~writer_error pipe))
-    | Ok (Error error) -> Ok (Error error)
-    | Error error -> Error error
+    dispatch' t connection query
+    |> Deferred.Result.map ~f:(Result.map ~f:pipe_with_writer_error_of_pipe_and_metadata)
   ;;
 
   let dispatch_with_close_reason t connection query =
@@ -1408,16 +1439,28 @@ module State_rpc = struct
   let implement = Streaming_rpc.implement
   let implement_direct = Streaming_rpc.implement_direct
 
-  let implement_with_auth ~(here : [%call_pos]) ?on_exception t f =
+  let implement_with_auth ~(here : [%call_pos]) ?on_exception ?leave_open_on_exception t f
+    =
     let f_ok state query = f state query |> Eager_deferred.map ~f:Or_error.return in
-    Streaming_rpc.implement_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_with_auth ~here ?on_exception ?leave_open_on_exception t f_ok
   ;;
 
-  let implement_direct_with_auth ~(here : [%call_pos]) ?on_exception t f =
+  let implement_direct_with_auth
+    ~(here : [%call_pos])
+    ?on_exception
+    ?leave_open_on_exception
+    t
+    f
+    =
     let f_ok state query writer =
       f state query writer |> Eager_deferred.map ~f:Or_error.return
     in
-    Streaming_rpc.implement_direct_with_auth ~here ?on_exception t f_ok
+    Streaming_rpc.implement_direct_with_auth
+      ~here
+      ?on_exception
+      ?leave_open_on_exception
+      t
+      f_ok
   ;;
 
   let unwrap_dispatch_result rpc_result =
@@ -1433,6 +1476,20 @@ module State_rpc = struct
 
   let dispatch' t conn query =
     Streaming_rpc.dispatch' t conn query >>| unwrap_dispatch_result
+  ;;
+
+  let dispatch_with_close_reason' t conn query =
+    Deferred.Result.map (dispatch' t conn query) ~f:(fun result ->
+      Result.map result ~f:(fun (state, update_r, metadata) ->
+        let pipe_with_writer_error =
+          Pipe_rpc.pipe_with_writer_error_of_pipe_and_metadata (update_r, metadata)
+        in
+        state, pipe_with_writer_error))
+  ;;
+
+  let dispatch_with_close_reason t conn query =
+    dispatch_with_close_reason' t conn query
+    >>| rpc_result_to_or_error (Streaming_rpc.description t) conn
   ;;
 
   module Pipe_message = Pipe_message

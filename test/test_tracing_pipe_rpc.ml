@@ -139,8 +139,8 @@ let%expect_test "Single pipe-rpc implementation returning error" =
   [%expect
     {|
     (Send
-     (Response
-      ((id 55)
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
        (data (Ok ((unused_query_id 0) (initial (Error "example error"))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
@@ -160,15 +160,15 @@ let%expect_test "Single pipe-rpc implementation raising" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     |}];
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   Ivar.fill_exn rpc_response (Error (Failure "injected error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Send
-     (Response
-      ((id 55)
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
        (data
         (Error
          (Uncaught_exn
@@ -200,7 +200,9 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
   [%expect
     {|
     (Send
-     (Response ((id 55) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -210,7 +212,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
-    (Send (Response ((id 55) (data (Ok (Ok foo))))))
+    (Send (Response_v2 ((id 55) (impl_menu_index (0)) (data (Ok (Ok foo))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -225,7 +227,7 @@ let%expect_test "Single pipe-rpc implementation succeeds" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
-    (Send (Response ((id 55) (data (Ok Eof)))))
+    (Send (Response_v2 ((id 55) (impl_menu_index (0)) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -254,8 +256,8 @@ let%expect_test "Malformed query for pipe-rpc" =
      ((event (Received Query)) (rpc ((name pipe-rpc) (version 1))) (id 99)
       (payload_bytes 24)))
     (Send
-     (Response
-      ((id 99)
+     (Response_v2
+      ((id 99) (impl_menu_index (0))
        (data
         (Error
          (Bin_io_exn
@@ -275,10 +277,10 @@ let%expect_test "Malformed query for pipe-rpc" =
 let%expect_test "direct stream writer impl raises synchronously" =
   let%bind t, writer, response = direct_rpc_test () in
   Ivar.fill_exn response (Error (Failure "injected error"));
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   write_query t;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Tracing_event
@@ -286,8 +288,8 @@ let%expect_test "direct stream writer impl raises synchronously" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     (Send
-     (Response
-      ((id 55)
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
        (data
         (Error
          (Uncaught_exn
@@ -325,16 +327,16 @@ let%expect_test "direct stream writer impl raises asynchronously" =
   let write1 =
     Async_rpc_kernel.Rpc.Pipe_rpc.Direct_stream_writer.write writer "example1"
   in
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   Ivar.fill_exn response (Error (Failure "injected error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Wait_for_flushed 0)
     (Send
-     (Response
-      ((id 55)
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
        (data
         (Error
          (Uncaught_exn
@@ -363,10 +365,10 @@ let%expect_test "direct stream writer impl raises asynchronously" =
 let%expect_test "direct stream writer returns error" =
   let%bind t, writer, response = direct_rpc_test () in
   Ivar.fill_exn response (Ok (Error "error"));
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   write_query t;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Tracing_event
@@ -374,8 +376,9 @@ let%expect_test "direct stream writer returns error" =
       (payload_bytes 43)))
     (Implementation_called "example query (id = 55)")
     (Send
-     (Response
-      ((id 55) (data (Ok ((unused_query_id 0) (initial (Error error))))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Error error))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -448,20 +451,25 @@ let%expect_test "direct stream writer" =
   [%expect
     {|
     (Send
-     (Response ((id 55) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
-    (Send (Response ((id 55) (data (Ok (Ok write))))))
+    (Send (Response_v2 ((id 55) (impl_menu_index (0)) (data (Ok (Ok write))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
-    (Send (Response ((id 55) (data (Ok (Ok write_without_pushback))))))
+    (Send
+     (Response_v2
+      ((id 55) (impl_menu_index (0)) (data (Ok (Ok write_without_pushback))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Send_with_bigstring_non_copying
-     (Response ((id 55) (data (Ok (Ok schedule_write))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0)) (data (Ok (Ok schedule_write))))))
     Wait_for_writer_ready
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
@@ -475,19 +483,21 @@ let%expect_test "direct stream writer" =
   do_three_writes "batch_after_response";
   [%expect
     {|
-    (Send (Response ((id 55) (data (Ok (Ok write))))))
+    (Send (Response_v2 ((id 55) (impl_menu_index (0)) (data (Ok (Ok write))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     (Wait_for_flushed 1)
     (Send_with_bigstring
-     (Response ((id 55) (data (Ok (Ok write_without_pushback))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0)) (data (Ok (Ok write_without_pushback))))))
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
     write_without_pushback -> ok
     (Send_with_bigstring_non_copying
-     (Response ((id 55) (data (Ok (Ok schedule_write))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0)) (data (Ok (Ok schedule_write))))))
     Wait_for_writer_ready
     (Tracing_event
      ((event (Sent (Response Streaming_update)))
@@ -507,7 +517,7 @@ let%expect_test "direct stream writer" =
     (Tracing_event
      ((event (Received Abort_streaming_rpc_query))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 18)))
-    (Send (Response ((id 55) (data (Ok Eof)))))
+    (Send (Response_v2 ((id 55) (impl_menu_index (0)) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -558,8 +568,9 @@ let%expect_test "direct stream writer errors after a scheduled write" =
   [%expect
     {|
     (Send
-     (Response
-      ((id 55) (data (Ok ((unused_query_id 0) (initial (Error error))))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Error error))))))))
     (Tracing_event
      ((event (Sent (Response Single_or_streaming_user_defined_error)))
       (rpc ((name pipe-rpc) (version 1))) (id 55) (payload_bytes 1)))
@@ -606,8 +617,9 @@ let%expect_test "direct stream writer connection closed after a scheduled write,
   [%expect
     {|
     (Send
-     (Response
-      ((id 55) (data (Ok ((unused_query_id 0) (initial (Error error))))))))
+     (Response_v2
+      ((id 55) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Error error))))))))
     (Tracing_event
      ((event
        (Failed_to_send (Response Single_or_streaming_user_defined_error) Closed))
@@ -634,8 +646,9 @@ let%expect_test "error dispatching a pipe rpc" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data = Error (Uncaught_exn (Atom "injected error"))
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -646,7 +659,7 @@ let%expect_test "error dispatching a pipe rpc" =
        (Received
         (Response
          (Response_finished_rpc_error_or_exn (Uncaught_exn "injected error")))))
-      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 20)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 21)))
     |}];
   let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
@@ -670,8 +683,9 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data =
            Ok
              { unused_query_id = Protocol.Unused_query_id.singleton
@@ -683,7 +697,7 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
     {|
     (Tracing_event
      ((event (Received (Response Response_finished_user_defined_error)))
-      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 16)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 17)))
     |}];
   let%bind result in
   print_s ([%sexp_of: ((_, string) Result.t, Protocol.Rpc_error.t) Result.t] result);
@@ -713,8 +727,9 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data = Error (Bin_io_exn (Atom "binio error reading query"))
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -726,7 +741,7 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
         (Response
          (Response_finished_rpc_error_or_exn
           (Bin_io_exn "binio error reading query")))))
-      (rpc ((name rpc) (version 1))) (id 1) (payload_bytes 31)))
+      (rpc ((name rpc) (version 1))) (id 1) (payload_bytes 32)))
     |}];
   let%bind result in
   print_s ([%sexp_of: unit Protocol.Rpc_result.t] result);
@@ -759,8 +774,9 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data = Error (Bin_io_exn (Atom "binio error reading query"))
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -796,8 +812,9 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data =
            Ok { unused_query_id = Protocol.Unused_query_id.singleton; initial = Ok () }
        });
@@ -806,7 +823,7 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
     {|
     (Tracing_event
      ((event (Received (Response Partial_response)))
-      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 7)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 8)))
     |}];
   let%bind pipe, _metadata = result in
   expect_stream_query t;
@@ -825,8 +842,9 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   Mock_peer.write_message
     t
     [%bin_writer: (unit, string) Protocol.Stream_initial_message.t]
-    (Response
+    (Response_v2
        { id = Protocol.Query_id.of_int_exn 1
+       ; impl_menu_index = Protocol.Impl_menu_index.none
        ; data = Error (Bin_io_exn (Atom "binio error reading query"))
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
@@ -838,7 +856,7 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
         (Response
          (Response_finished_rpc_error_or_exn
           (Bin_io_exn "binio error reading query")))))
-      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 31)))
+      (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 32)))
     |}];
   return ()
 ;;
@@ -859,7 +877,9 @@ let%expect_test "Client sends abort after server closes pipe" =
   [%expect
     {|
     (Send
-     (Response ((id 1234) (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
+     (Response_v2
+      ((id 1234) (impl_menu_index (0))
+       (data (Ok ((unused_query_id 0) (initial (Ok ()))))))))
     (Tracing_event
      ((event (Sent (Response Streaming_initial)))
       (rpc ((name pipe-rpc) (version 1))) (id 1234) (payload_bytes 1)))
@@ -870,7 +890,7 @@ let%expect_test "Client sends abort after server closes pipe" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
-    (Send (Response ((id 1234) (data (Ok Eof)))))
+    (Send (Response_v2 ((id 1234) (impl_menu_index (0)) (data (Ok Eof)))))
     (Tracing_event
      ((event (Sent (Response Streaming_closed)))
       (rpc ((name pipe-rpc) (version 1))) (id 1234) (payload_bytes 1)))

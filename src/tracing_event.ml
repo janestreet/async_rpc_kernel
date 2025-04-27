@@ -21,7 +21,9 @@ module Received_response_kind = struct
     | Response_finished_rpc_error_or_exn of global_ Rpc_error.t
     | Response_finished_user_defined_error
     | Response_finished_expert_uninterpreted
-  [@@deriving globalize, sexp]
+  [@@deriving sexp, globalize]
+
+  let globalize x = globalize x
 end
 
 module Kind = struct

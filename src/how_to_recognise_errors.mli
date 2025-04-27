@@ -21,8 +21,7 @@ type _ t =
   (** If the response is [Error _] or [Ok (Error (_ : Error.t))], it is treated as an
       error *)
   | Result_result : ((_, _) Result.t, _) Result.t t
-  (** If the response is [Error _] or [Ok (Error _)], it is treated as an
-      error *)
+  (** If the response is [Error _] or [Ok (Error _)], it is treated as an error *)
   | On_none : _ Option.t t
   (** If the response is [None], it is treated as an error. For many APIs, it is
       reasonable to return no results, but you may still want to count these separately

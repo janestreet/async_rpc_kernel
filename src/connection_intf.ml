@@ -14,8 +14,13 @@ module type S = sig
         a heartbeat or not, it drops the connection. It only checks whether [timeout] has
         elapsed when it sends heartbeats, so effectively [timeout] is rounded up to the
         nearest multiple of [send_every]. *)
-    val create : ?timeout:Time_ns.Span.t -> ?send_every:Time_ns.Span.t -> unit -> t
+    val create
+      :  ?timeout:Time_ns.Span.t (** Default: 30s *)
+      -> ?send_every:Time_ns.Span.t (** Default: 10s *)
+      -> unit
+      -> t
 
+    val never_heartbeat : t
     val timeout : t -> Time_ns.Span.t
     val send_every : t -> Time_ns.Span.t
   end
@@ -33,7 +38,7 @@ module type S = sig
     val null : unit -> t
   end
 
-  (** Initiate an Rpc connection on the given transport.  [implementations] should be the
+  (** Initiate an Rpc connection on the given transport. [implementations] should be the
       bag of implementations that the calling side implements; it defaults to
       [Implementations.null] (i.e., "I implement no RPCs").
 
@@ -42,7 +47,7 @@ module type S = sig
       so, what they contained, or there may be a protocol error.
 
       [connection_state] will be called once, before [create]'s result is determined, on
-      the same connection that [create] returns.  Its output will be provided to the
+      the same connection that [create] returns. Its output will be provided to the
       [implementations] when queries arrive.
 
       WARNING: If specifying a custom [heartbeat_config], make sure that both ends of the
@@ -51,9 +56,9 @@ module type S = sig
 
       [max_metadata_size] will limit how many bytes of metadata this peer can send along
       with each query. It defaults to 1k. User-provided metadata exceeding that size will
-      be truncated.
-      WARNING: setting this value too high allows this connection to send large amounts of
-      data to the callee, unnoticed, which can severely degrade performance.
+      be truncated. WARNING: setting this value too high allows this connection to send
+      large amounts of data to the callee, unnoticed, which can severely degrade
+      performance.
 
       [description] can be used to give some extra information about the connection, which
       will then show up in error messages and the connection's sexp. If you have lots of
@@ -92,7 +97,7 @@ module type S = sig
     -> (t, Exn.t) Result.t Deferred.t
 
   (** As of Feb 2017, the RPC protocol started to contain a magic number so that one can
-      identify RPC communication.  The bool returned by [contains_magic_prefix] says
+      identify RPC communication. The bool returned by [contains_magic_prefix] says
       whether this magic number was observed. *)
   val contains_magic_prefix : bool Bin_prot.Type_class.reader
 
@@ -111,16 +116,15 @@ module type S = sig
   val last_seen_alive : t -> Time_ns.t
 
   (** [close] starts closing the connection's transport, and returns a deferred that
-      becomes determined when its close completes.  It is ok to call [close] multiple
-      times on the same [t]; calls subsequent to the initial call will have no effect, but
-      will return the same deferred as the original call.
+      becomes determined when its close completes. It is ok to call [close] multiple times
+      on the same [t]; calls subsequent to the initial call will have no effect, but will
+      return the same deferred as the original call.
 
       Before closing the underlying transport's writer, [close] waits for all streaming
       responses to be [Pipe.upstream_flushed] with a timeout of
       [streaming_responses_flush_timeout].
 
-      The [reason] for closing the connection will be passed to callers of [close_reason].
-  *)
+      The [reason] for closing the connection will be passed to callers of [close_reason]. *)
   val close
     :  ?streaming_responses_flush_timeout:Time_ns.Span.t (* default: 5 seconds *)
     -> ?reason:Info.t
@@ -128,16 +132,15 @@ module type S = sig
     -> unit Deferred.t
 
   (** [close_finished] becomes determined after the close of the connection's transport
-      completes, i.e. the same deferred that [close] returns.  [close_finished] differs
+      completes, i.e. the same deferred that [close] returns. [close_finished] differs
       from [close] in that it does not have the side effect of initiating a close. *)
   val close_finished : t -> unit Deferred.t
 
-  (** [close_reason ~on_close t] becomes determined when close starts or finishes
-      based on [on_close], but additionally returns the reason that the connection was
-      closed. *)
+  (** [close_reason ~on_close t] becomes determined when close starts or finishes based on
+      [on_close], but additionally returns the reason that the connection was closed. *)
   val close_reason : t -> on_close:[ `started | `finished ] -> Info.t Deferred.t
 
-  (** [is_closed t] returns [true] iff [close t] has been called.  [close] may be called
+  (** [is_closed t] returns [true] iff [close t] has been called. [close] may be called
       internally upon errors or timeouts. *)
   val is_closed : t -> bool
 
@@ -161,24 +164,22 @@ module type S = sig
       closed before the menu is received, an error is returned.
 
       It is expected that one will call {!Versioned_rpc.Connection_with_menu.create}
-      instead of this function and that will request the menu via rpc if it gets [None].
-  *)
+      instead of this function and that will request the menu via rpc if it gets [None]. *)
   val peer_menu : t -> Menu.t option Or_error.t Deferred.t
 
-  (** Like {!peer_menu} but returns an rpc result  *)
+  (** Like {!peer_menu} but returns an rpc result *)
   val peer_menu' : t -> Menu.t option Rpc_result.t Deferred.t
 
   val my_menu : t -> Menu.t option
 
   (** Peer identification will become determined before any other messages are received.
       If the peer is using an older version, the peer id is immediately determined to be
-      [None]. If the connection is closed before the menu is received, [None] is returned.
-  *)
+      [None]. If the connection is closed before the menu is received, [None] is returned. *)
   val peer_identification : t -> Bigstring.t option Deferred.t
 
-  (** [with_close] tries to create a [t] using the given transport.  If a handshake error
+  (** [with_close] tries to create a [t] using the given transport. If a handshake error
       is the result, it calls [on_handshake_error], for which the default behavior is to
-      raise an exception.  If no error results, [dispatch_queries] is called on [t].
+      raise an exception. If no error results, [dispatch_queries] is called on [t].
 
       After [dispatch_queries] returns, if [server] is None, the [t] will be closed and
       the deferred returned by [dispatch_queries] will be determined immediately.
@@ -190,8 +191,8 @@ module type S = sig
 
       NOTE: Because this connection is closed when the [Deferred.t] returned by
       [dispatch_queries] is determined, you should be careful when using this with
-      [Pipe_rpc].  For example, simply returning the pipe when you get it will close the
-      pipe immediately.  You should instead either use the pipe inside [dispatch_queries]
+      [Pipe_rpc]. For example, simply returning the pipe when you get it will close the
+      pipe immediately. You should instead either use the pipe inside [dispatch_queries]
       and not determine its result until you are done with the pipe, or use a different
       function like [create]. *)
   val with_close
@@ -211,7 +212,7 @@ module type S = sig
 
   (** Runs [with_close] but dispatches no queries. The implementations are required
       because this function doesn't let you dispatch any queries (i.e., act as a client),
-      it would be pointless to call it if you didn't want to act as a server.*)
+      it would be pointless to call it if you didn't want to act as a server. *)
   val server_with_close
     :  ?handshake_timeout:Time_ns.Span.t
     -> ?heartbeat_config:Heartbeat_config.t
@@ -252,7 +253,7 @@ module type S_private = sig
 
   module Response_handler : sig
     type t =
-      Nat0.t Response.t
+      data:Nat0.t Rpc_result.t
       -> read_buffer:Bigstring.t
       -> read_buffer_pos_ref:int ref
       -> local_ Response_handler_action.t
@@ -345,14 +346,17 @@ module type S_private = sig
 
   module For_testing : sig
     module Header : sig
-      type t [@@deriving bin_io, sexp_of]
+      type t [@@deriving bin_io ~localize, globalize, sexp_of]
 
+      val bin_read_t__local : t Bin_prot.Read.reader__local
       val v1 : t
       val v2 : t
       val v3 : t
       val v4 : t
       val v5 : t
       val v6 : t
+      val v7 : t
+      val latest : t
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a

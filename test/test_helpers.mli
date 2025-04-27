@@ -5,6 +5,7 @@ open! Async
 module Header = Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header
 
 val rpc : (Bigstring.t, Bigstring.t) Rpc.Rpc.t
+val rpc_v2 : (Bigstring.t, Bigstring.t) Rpc.Rpc.t
 val one_way_rpc : Bigstring.t Rpc.One_way.t
 val pipe_rpc : (Bigstring.t, Bigstring.t, Error.t) Rpc.Pipe_rpc.t
 val state_rpc : (Bigstring.t, Bigstring.t, Bigstring.t, Error.t) Rpc.State_rpc.t
@@ -21,9 +22,14 @@ module Tap : sig
   val print_header : t -> unit
   val print_headers : s_to_c:t -> c_to_s:t -> unit
 
-  (* Print raw protocol bytes and an interpretation as the given bin shape *)
-  val print_messages : t -> Bin_shape.t -> unit
-  val print_messages_bidirectional : Bin_shape.t -> s_to_c:t -> c_to_s:t -> unit
+  (* Print raw protocol bytes and an interpretation as one of the given bin shapes *)
+  val print_messages : t -> Bin_shape.t Nonempty_list.t -> unit
+
+  val print_messages_bidirectional
+    :  Bin_shape.t Nonempty_list.t
+    -> s_to_c:t
+    -> c_to_s:t
+    -> unit
 end
 
 val with_circular_connection

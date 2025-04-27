@@ -360,25 +360,31 @@ module Callee_converts = struct
         let implement ~log_version impl =
           match impl with
           | Pipe f ->
-            Pipe_rpc.implement rpc (fun s q ->
-              log_version version;
-              match%bind f s ~version (wrapped_model_of_query q) with
-              | Ok pipe ->
-                Monitor.handle_errors
-                  (fun () -> return (Ok (convert_pipe pipe)))
-                  (fun exn ->
-                    Error.raise
-                      (failed_conversion (`Response, `Rpc name, `Version version, exn)))
-              | Error error -> return (wrapped_error_of_model error))
+            Pipe_rpc.implement
+              rpc
+              (fun s q ->
+                log_version version;
+                match%bind f s ~version (wrapped_model_of_query q) with
+                | Ok pipe ->
+                  Monitor.handle_errors
+                    (fun () -> return (Ok (convert_pipe pipe)))
+                    (fun exn ->
+                      Error.raise
+                        (failed_conversion (`Response, `Rpc name, `Version version, exn)))
+                | Error error -> return (wrapped_error_of_model error))
+              ~leave_open_on_exception:true
           | Direct f ->
             let convert_elt = Or_error.ok_exn convert_elt in
-            Pipe_rpc.implement_direct rpc (fun s q dsw ->
-              let writer =
-                Versioned_direct_stream_writer.create ~convert:convert_elt ~writer:dsw
-              in
-              match%map f s ~version (wrapped_model_of_query q) writer with
-              | Ok () -> Ok ()
-              | Error error -> wrapped_error_of_model error)
+            Pipe_rpc.implement_direct
+              rpc
+              (fun s q dsw ->
+                let writer =
+                  Versioned_direct_stream_writer.create ~convert:convert_elt ~writer:dsw
+                in
+                match%map f s ~version (wrapped_model_of_query q) writer with
+                | Ok () -> Ok ()
+                | Error error -> wrapped_error_of_model error)
+              ~leave_open_on_exception:true
         ;;
 
         let () =
@@ -510,35 +516,38 @@ module Callee_converts = struct
 
         let () =
           let implement ~log_version f =
-            State_rpc.implement rpc (fun s q ->
-              log_version version;
-              match Version_i.model_of_query q with
-              | exception exn ->
-                Error.raise
-                  (failed_conversion (`Response, `Rpc name, `Version version, exn))
-              | q ->
-                (match%bind f s ~version q with
-                 | Ok (model_state, pipe) ->
-                   let state =
-                     match Version_i.state_of_model model_state with
-                     | state -> state
-                     | exception exn ->
-                       Error.raise
-                         (failed_conversion (`State, `Rpc name, `Version version, exn))
-                   in
-                   Monitor.handle_errors
-                     (fun () ->
-                       return (Ok (state, Version_i.update_of_model model_state pipe)))
-                     (fun exn ->
-                       Error.raise
-                         (failed_conversion (`Update, `Rpc name, `Version version, exn)))
-                 | Error error ->
-                   return
-                     (match Version_i.error_of_model error with
-                      | error -> Error error
-                      | exception exn ->
-                        Error.raise
-                          (failed_conversion (`Error, `Rpc name, `Version version, exn)))))
+            State_rpc.implement
+              rpc
+              (fun s q ->
+                log_version version;
+                match Version_i.model_of_query q with
+                | exception exn ->
+                  Error.raise
+                    (failed_conversion (`Response, `Rpc name, `Version version, exn))
+                | q ->
+                  (match%bind f s ~version q with
+                   | Ok (model_state, pipe) ->
+                     let state =
+                       match Version_i.state_of_model model_state with
+                       | state -> state
+                       | exception exn ->
+                         Error.raise
+                           (failed_conversion (`State, `Rpc name, `Version version, exn))
+                     in
+                     Monitor.handle_errors
+                       (fun () ->
+                         return (Ok (state, Version_i.update_of_model model_state pipe)))
+                       (fun exn ->
+                         Error.raise
+                           (failed_conversion (`Update, `Rpc name, `Version version, exn)))
+                   | Error error ->
+                     return
+                       (match Version_i.error_of_model error with
+                        | error -> Error error
+                        | exception exn ->
+                          Error.raise
+                            (failed_conversion (`Error, `Rpc name, `Version version, exn)))))
+              ~leave_open_on_exception:true
           in
           match Hashtbl.find registry version with
           | None -> Hashtbl.set registry ~key:version ~data:({ implement }, Any.State rpc)

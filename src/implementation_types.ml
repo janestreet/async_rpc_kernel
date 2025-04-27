@@ -2,9 +2,9 @@ open Core
 open Async_kernel
 open Protocol
 
-(** The types of the [Implementation] and [Implementations] modules, which have
-    a dependency cyle: [Implementation] -> [Direct_stream_writer] ->
-    [Implementations] -> [Implementation]. *)
+(** The types of the [Implementation] and [Implementations] modules, which have a
+    dependency cyle: [Implementation] -> [Direct_stream_writer] -> [Implementations] ->
+    [Implementation]. *)
 
 module Direct_stream_writer_id = Unique_id.Int63 ()
 
@@ -39,7 +39,7 @@ module rec Direct_stream_writer : sig
     ; stream_writer : 'a Cached_streaming_response_writer.t
     ; groups : 'a group_entry Bag.t
     ; mutable instance_stopped : bool
-    ; cleanup_and_write_streaming_eof : unit -> unit
+    ; cleanup_and_write_streaming_eof : [ `Eof ] Rpc_result.t -> unit
     }
 
   and 'a group_entry =

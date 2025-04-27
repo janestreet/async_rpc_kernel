@@ -1,7 +1,7 @@
 open Core
 open Async_kernel
 
-type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
+type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io, globalize, sexp_of]
 
 let%expect_test _ =
   print_endline [%bin_digest: unit t];
@@ -32,31 +32,20 @@ let lift_error ~location exn =
   Error (Rpc_error.Lift_error ([%sexp_of: Located_error.t] { location; exn }))
 ;;
 
-let try_with
-  ~here
-  (local_ f)
-  description
-  ~location
-  ~on_background_exception
-  ~close_connection_monitor
-  =
-  let x =
+let try_with ~here (local_ f) ~location ~on_background_exception =
+  let result =
     Monitor.try_with_local
       ~here
-      ?rest:
-        (On_exception.to_background_monitor_rest
-           on_background_exception
-           description
-           ~close_connection_monitor)
+      ?rest:(on_background_exception :> [ `Call of exn -> unit | `Log | `Raise ] option)
       f
   in
   let join = function
-    | Ok x -> x
+    | Ok result -> result
     | Error exn -> uncaught_exn ~location exn
   in
-  match Eager_deferred.peek x with
-  | None -> Eager_deferred.map x ~f:join
-  | Some x -> Eager_deferred.return (join x)
+  match Eager_deferred.peek result with
+  | None -> Eager_deferred.map result ~f:join
+  | Some result -> Eager_deferred.return (join result)
 ;;
 
 let or_error ~rpc_description ~connection_description ~connection_close_started =

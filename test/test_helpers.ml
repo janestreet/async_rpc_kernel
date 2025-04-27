@@ -124,9 +124,10 @@ module Tap = struct
   let print_header t =
     t (fun buf ~pos ~len:_ ->
       Binio_printer_helper.parse_and_print
-        [%bin_shape:
-          Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header.t
-            Binio_printer_helper.With_length64.t]
+        [ [%bin_shape:
+            Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header.t
+              Binio_printer_helper.With_length64.t]
+        ]
         buf
         ~pos)
   ;;
@@ -145,8 +146,8 @@ module Tap = struct
         Binio_printer_helper.With_length64.t]
   ;;
 
-  let print_messages t payload_shape =
-    let message_shape = message_shape payload_shape in
+  let print_messages t payload_shapes =
+    let message_shapes = Nonempty_list.map payload_shapes ~f:message_shape in
     t (fun buf ~pos ~len ->
       let stop = pos + len in
       let rec loop pos =
@@ -154,7 +155,10 @@ module Tap = struct
         then ()
         else (
           let message_len = 8 + Bigstring.get_int64_le_exn buf ~pos in
-          Binio_printer_helper.parse_and_print message_shape buf ~pos;
+          Binio_printer_helper.parse_and_print
+            message_shapes
+            (Bigstring.sub_shared ~pos ~len:message_len buf)
+            ~pos:0;
           let next = pos + message_len in
           if next <> stop then print_endline "";
           loop next)
@@ -162,11 +166,11 @@ module Tap = struct
       loop pos)
   ;;
 
-  let print_messages_bidirectional payload_shape ~s_to_c ~c_to_s =
+  let print_messages_bidirectional payload_shapes ~s_to_c ~c_to_s =
     print_endline "---   client -> server:   ---";
-    print_messages c_to_s payload_shape;
+    print_messages c_to_s payload_shapes;
     print_endline "---   server -> client:   ---";
-    print_messages s_to_c payload_shape
+    print_messages s_to_c payload_shapes
   ;;
 end
 

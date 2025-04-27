@@ -5,7 +5,7 @@ open Core
 (** A [Menu.t] represents the RPCs implemented by a peer. In v3 of the async-rpc protocol,
     menus are sent between peers as part of the handshake, and these menus also include
     {!Rpc_shapes.Just_digests.t} of the rpcs. *)
-type t [@@deriving sexp_of]
+type t [@@deriving globalize, sexp_of]
 
 (** Construct a menu from a list of rpcs. But note this menu won’t know about anything
     about the digests/types of the rpcs. *)
@@ -14,7 +14,7 @@ val of_supported_rpcs : Description.t list -> rpc_shapes:[ `Unknown ] -> t
 (** Construct a menu from a list of rpcs and shape digests. *)
 val of_supported_rpcs_and_shapes : (Description.t * Rpc_shapes.Just_digests.t) list -> t
 
-(** The name of the rpc to request the menu  *)
+(** The name of the rpc to request the menu *)
 val version_menu_rpc_name : string
 
 module With_digests_in_sexp : sig
@@ -30,6 +30,9 @@ val supported_rpcs : t -> Description.t list
     call *)
 val supported_versions : t -> rpc_name:string -> Int.Set.t
 
+val get : t -> int -> local_ Description.t Modes.Global.t option
+val index : t -> local_ Description.t -> local_ int option
+
 (** Checks if a given rpc appears in the menu *)
 val mem : t -> local_ Description.t -> bool
 
@@ -42,13 +45,15 @@ val shape_digests : t -> local_ Description.t -> Rpc_shapes.Just_digests.t optio
 
 (** Similar to [supported_versions] but specific for the usecase of finding an RPC to
     execute. Unlike the roughly equivalent code,
-    [Set.inter from_set (supported_versions menu ~rpc_name) |> Set.max_elt], this does
-    not construct a new [Set.t] on every call. *)
+    [Set.inter from_set (supported_versions menu ~rpc_name) |> Set.max_elt], this does not
+    construct a new [Set.t] on every call. *)
+
 val highest_available_version
   :  t
   -> rpc_name:string
-  -> from_set:Int.Set.t
-  -> (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
+  -> from_sorted_array:int array
+  -> local_ (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
+[@@zero_alloc]
 
 (** Helper function for both-convert rpcs. Gives nice error messages. *)
 val highest_shared_version
@@ -73,18 +78,21 @@ module Stable : sig
   module V2 : sig
     val version : int
 
-    type query = unit [@@deriving bin_io]
+    type query = unit [@@deriving bin_io ~localize]
 
     type response = (Description.t * Rpc_shapes.Just_digests.t) list
-    [@@deriving bin_io, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    val bin_read_response__local : response Bin_prot.Read.reader__local
   end
 
   module V3 : sig
     val version : int
 
-    type query = unit [@@deriving bin_io]
-    type response = t [@@deriving bin_io, sexp_of]
+    type query = unit [@@deriving bin_io ~localize]
+    type response = t [@@deriving bin_io ~localize, globalize, sexp_of]
 
+    val bin_read_response__local : response Bin_prot.Read.reader__local
     val to_v2_response : response -> V2.response option
   end
 end

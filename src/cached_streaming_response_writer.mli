@@ -6,6 +6,7 @@ type 'a t
 val create
   :  Protocol_writer.t
   -> Protocol.Query_id.t
+  -> Protocol.Impl_menu_index.t
   -> Description.t
   -> bin_writer:'a Bin_prot.Type_class.writer
   -> 'a t

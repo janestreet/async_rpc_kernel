@@ -4,8 +4,8 @@ open Async_kernel
 type 'a message_handler = Bigstring.t -> pos:int -> len:int -> 'a
 
 module Handler_result = struct
-  (** Result of an [on_message] callback.  We split the [Continue] and [Wait _] cases to
-      make it clear that [Continue] is the expected case.  The implementation should be
+  (** Result of an [on_message] callback. We split the [Continue] and [Wait _] cases to
+      make it clear that [Continue] is the expected case. The implementation should be
       optimized for this case. *)
   type 'a t =
     | Stop of 'a
@@ -37,7 +37,13 @@ module Send_result = struct
     { size : int
     ; max_message_size : int
     }
-  [@@deriving bin_io, compare, globalize, sexp]
+  [@@deriving bin_io ~localize, compare, globalize, sexp]
+
+  let bin_read_message_too_big__local buf ~pos_ref =
+    let size = bin_read_int buf ~pos_ref in
+    let max_message_size = bin_read_int buf ~pos_ref in
+    exclave_ { size; max_message_size }
+  ;;
 
   type 'a t =
     | Sent of
@@ -76,9 +82,9 @@ module type Writer = sig
       It must be OK to call [flushed t] after [t] has been closed. *)
   val flushed : t -> unit Deferred.t
 
-  (** [ready_to_write t] becomes determined when it is a good time to send messages
-      again. Async RPC calls this function after sending a batch of messages, to avoid
-      flooding the transport.
+  (** [ready_to_write t] becomes determined when it is a good time to send messages again.
+      Async RPC calls this function after sending a batch of messages, to avoid flooding
+      the transport.
 
       Using [let ready_to_write = flushed] is an acceptable implementation. *)
   val ready_to_write : t -> unit Deferred.t
@@ -101,7 +107,7 @@ module type Writer = sig
     -> local_ unit Send_result.t
 
   (** Same as [send_bin_prot_and_bigstring] but the bigstring can't be modified until the
-      returned deferred becomes determined.  This can be used to avoid copying the
+      returned deferred becomes determined. This can be used to avoid copying the
       bigstring. *)
   val send_bin_prot_and_bigstring_non_copying
     :  t

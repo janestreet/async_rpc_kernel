@@ -6,12 +6,15 @@ module Expert = struct
   module Responder = struct
     type t =
       { query_id : Query_id.t
+      ; impl_menu_index : Protocol.Impl_menu_index.t
       ; writer : Protocol_writer.t
       ; mutable responded : bool
       }
     [@@deriving sexp_of]
 
-    let create query_id writer = { query_id; writer; responded = false }
+    let create query_id impl_menu_index writer =
+      { query_id; impl_menu_index; writer; responded = false }
+    ;;
   end
 
   type implementation_result =
@@ -39,6 +42,7 @@ module F = struct
         (* 'init can be an error or an initial state *)
     ; impl : ('connection_state, 'query, 'init, 'update) streaming_impl
     ; error_mode : 'init Implementation_mode.Error_mode.t
+    ; leave_open_on_exception : bool
     ; here : Source_code_position.t
     }
 
@@ -131,8 +135,14 @@ module F = struct
       in
       Rpc_expert (impl, Deferred)
     | Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
-      ->
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -147,7 +157,14 @@ module F = struct
                 impl authorized_state q w))
       in
       Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        }
   ;;
 
   let lift_deferred
@@ -198,8 +215,14 @@ module F = struct
             lift_and_bind state ~f:(fun state -> return (impl state resp buf ~pos ~len)))
         , Deferred )
     | Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
-      ->
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        } ->
       let impl =
         match impl with
         | Pipe impl ->
@@ -208,7 +231,14 @@ module F = struct
           Direct (fun state q w -> lift_and_bind state ~f:(fun state -> impl state q w))
       in
       Streaming_rpc
-        { bin_query_reader; bin_init_writer; bin_update_writer; impl; error_mode; here }
+        { bin_query_reader
+        ; bin_init_writer
+        ; bin_update_writer
+        ; impl
+        ; error_mode
+        ; here
+        ; leave_open_on_exception
+        }
   ;;
 end
 

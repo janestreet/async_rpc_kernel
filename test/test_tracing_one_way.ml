@@ -103,12 +103,12 @@ let%expect_test "One-way immediately raises with on_exception:Close_connection" 
   Ivar.fill_exn response2 (Ok ());
   (* The point of the plain query is to show that nothing responds to it when the
      connection is closed. *)
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   write_plain_query t;
   write_query t ~id:100 ~don't_read_yet:();
   write_query t ~id:200;
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Tracing_event
@@ -152,14 +152,14 @@ let%expect_test "One-way immediately raises with on_exception:Close_connection" 
 
 let%expect_test "One-way asynchronously raises with on_exception:Close_connection" =
   let%bind t, response1, response2 = two_rpc_test ~on_exception:Close_connection in
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   write_plain_query t;
   write_query t ~id:100 ~don't_read_yet:();
   write_query t ~id:200;
   Ivar.fill_exn response2 (Ok ());
   Ivar.fill_exn response1 (Error (Failure "injected error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Tracing_event
@@ -238,14 +238,14 @@ let%expect_test "One-way immediately raises, with on_exception:Log_on_background
 let%expect_test "One-way asynchronously raises, with on_exception:Log_on_background_exn" =
   (* We expect a log since it's an asynchronous exception. *)
   let%bind t, response1, response2 = two_rpc_test ~on_exception:Log_on_background_exn in
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   write_plain_query t;
   write_query t ~don't_read_yet:() ~id:100;
   write_query t ~id:200;
   Ivar.fill_exn response2 (Ok ());
   Ivar.fill_exn response1 (Error (Failure "injected error"));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
-  Backtrace.elide := false;
+  Dynamic.set_root Backtrace.elide false;
   [%expect
     {|
     (Tracing_event
