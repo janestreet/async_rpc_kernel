@@ -1,4 +1,4 @@
-(** Internal to [Async_rpc_kernel].  See [Rpc.Implementation]. *)
+(** Internal to [Async_rpc_kernel]. See [Rpc.Implementation]. *)
 
 open! Core
 open! Async_kernel
@@ -8,12 +8,13 @@ module Expert : sig
   module Responder : sig
     type t =
       { query_id : Query_id.t
+      ; impl_menu_index : Protocol.Impl_menu_index.t
       ; writer : Protocol_writer.t
       ; mutable responded : bool
       }
     [@@deriving sexp_of]
 
-    val create : Query_id.t -> Protocol_writer.t -> t
+    val create : Query_id.t -> Protocol.Impl_menu_index.t -> Protocol_writer.t -> t
   end
 
   type implementation_result =

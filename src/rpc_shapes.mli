@@ -32,7 +32,7 @@ module Just_digests : sig
         ; error : Bin_shape.Digest.t
         }
     | Unknown
-  [@@deriving sexp_of, variants]
+  [@@deriving globalize, sexp_of, variants]
 
   (** True if the variants are the same, e.g. both are [Rpc _] *)
   val same_kind : t -> t -> bool
@@ -54,7 +54,10 @@ module Stable : sig
 
   module Just_digests : sig
     module V1 : sig
-      type t = Just_digests.t [@@deriving bin_io, compare, equal, hash, sexp]
+      type t = Just_digests.t
+      [@@deriving bin_io ~localize, compare, equal, globalize, hash, sexp]
+
+      val bin_read_t__local : t Bin_prot.Read.reader__local
     end
   end
 end

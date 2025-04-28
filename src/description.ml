@@ -1,12 +1,28 @@
 open Core
 
 module Stable = struct
+  open Core.Core_stable
+
   module V1 = struct
     type t =
-      { name : string
+      { name : string [@globalized]
       ; version : int
       }
-    [@@deriving bin_io, equal, compare ~localize, hash, sexp, globalize]
+    [@@deriving
+      bin_io ~localize
+      , equal
+      , globalize
+      , compare ~localize
+      , hash
+      , sexp
+      , globalize
+      , stable_witness]
+
+    let bin_read_t__local buf ~pos_ref =
+      let name = bin_read_string buf ~pos_ref in
+      let version = bin_read_int buf ~pos_ref in
+      { name; version }
+    ;;
 
     let%expect_test _ =
       print_endline [%bin_digest: t];

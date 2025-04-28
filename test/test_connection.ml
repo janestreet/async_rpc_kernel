@@ -1,5 +1,7 @@
 open! Core
 open! Async
+open! Import
+module Rpc = Async_rpc.Rpc
 
 module Payload = struct
   type t = int array [@@deriving bin_io]
@@ -14,10 +16,28 @@ end
 
 let print_header = Test_helpers.Tap.print_header
 let print_headers = Test_helpers.Tap.print_headers
-let print_messages tap = Test_helpers.Tap.print_messages tap [%bin_shape: Payload.t]
 
-let print_messages_bidirectional =
-  Test_helpers.Tap.print_messages_bidirectional [%bin_shape: Payload.t]
+let print_payload_messages tap =
+  Test_helpers.Tap.print_messages tap [ [%bin_shape: Payload.t] ]
+;;
+
+let print_stream_messages tap =
+  Test_helpers.Tap.print_messages
+    tap
+    [ [%bin_shape:
+        Bigstring.Stable.V1.t Binio_printer_helper.With_length.t
+          Protocol.Stream_query.needs_length]
+    ; [%bin_shape: (unit, Error.Stable.V2.t) Protocol.Stream_initial_message.t]
+    ; [%bin_shape:
+        (Bigstring.Stable.V1.t, Error.Stable.V2.t) Protocol.Stream_initial_message.t]
+    ; [%bin_shape:
+        Bigstring.Stable.V1.t Binio_printer_helper.With_length.t
+          Protocol.Stream_response_data.needs_length]
+    ]
+;;
+
+let print_payload_messages_bidirectional =
+  Test_helpers.Tap.print_messages_bidirectional [ [%bin_shape: Payload.t] ]
 ;;
 
 let dispatch ~client =
@@ -43,8 +63,7 @@ let dispatch_expert ~client ~payload =
       ~pos:0
       ~len:(Bigstring.length buf)
       ~handle_response
-      ~handle_error:(fun err ->
-        failwiths ~here:[%here] "expert rpc error" err [%sexp_of: Error.t])
+      ~handle_error:(fun err -> failwiths "expert rpc error" err [%sexp_of: Error.t])
   with
   | `Connection_closed -> failwith "connection closed"
   | `Ok -> Ivar.read wait_for_response
@@ -54,7 +73,7 @@ let connection_test_id ~client ~server ~s_to_c ~c_to_s =
   print_headers ~s_to_c ~c_to_s;
   let%bind server_id_from_client = Rpc.Connection.peer_identification client in
   let%map client_id_from_server = Rpc.Connection.peer_identification server in
-  print_messages_bidirectional ~s_to_c ~c_to_s;
+  print_payload_messages_bidirectional ~s_to_c ~c_to_s;
   print_s
     [%message
       (server_id_from_client : Bigstring.t option)
@@ -86,6 +105,355 @@ let connection_test ?provide_rpc_shapes () ~server_header ~client_header ~f
     ~server_header
     ~client_header
     ~f:(fun ~client ~server ~s_to_c ~c_to_s -> f ~client ~server ~s_to_c ~c_to_s)
+;;
+
+let%expect_test "latest version simple RPC dispatches" =
+  Test_helpers.with_circular_connection
+    ~header:Test_helpers.Header.latest
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        08                       body= List: 8 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        |}];
+      let%bind _response =
+        Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn (Payload.create ())
+      in
+      print_payload_messages tap;
+      [%expect
+        {|
+        5000 0000 0000 0000    length= 80 (64-bit LE)
+        07                       body= Metadata_v2
+        00                             identification= None
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+
+        1500 0000 0000 0000    length= 21 (64-bit LE)
+        03                       body= Query
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        01                                   id= 1 (int)
+        00                             metadata= None
+        0b                                 data= length= 11 (int)
+        04                                         body= Array: 4 items
+        fe80 01                                          0: 384 (int)
+        fee5 03                                          1: 997 (int)
+        fea6 00                                          2: 166 (int)
+        23                                               3: 35 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        1100 0000 0000 0000    length= 17 (64-bit LE)
+        08                       body= Response_v2
+        01                                          id= 1 (int)
+        01                             impl_menu_index= Some
+        00                                               0 (nat0)
+        00                                        data= Ok
+        0b                                              length= 11 (int)
+        04                                                body= Array: 4 items
+        23                                                      0: 35 (int)
+        fea6 00                                                 1: 166 (int)
+        fe80 01                                                 2: 384 (int)
+        fee5 03                                                 3: 997 (int)
+        |}];
+      let%bind _response =
+        Rpc.Rpc.dispatch_exn Test_helpers.rpc conn (Bigstring.of_string "foo")
+      in
+      Test_helpers.Tap.print_messages tap [ [%bin_shape: Bigstring.Stable.V1.t] ];
+      [%expect
+        {|
+        1200 0000 0000 0000    length= 18 (64-bit LE)
+        03                       body= Query
+        0874 6573 742d 7270    ...
+        63                                  tag= test-rpc (8 bytes)
+        01                              version= 1 (int)
+        02                                   id= 2 (int)
+        00                             metadata= None
+        04                                 data= length= 4 (int)
+        0366 6f6f                                  body= foo (3 bytes)
+
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        08                       body= Response_v2
+        02                                          id= 2 (int)
+        01                             impl_menu_index= Some
+        03                                               3 (nat0)
+        00                                        data= Ok
+        04                                              length= 4 (int)
+        0366 6f6f                                         body= foo (3 bytes)
+        |}];
+      let%bind _response =
+        Rpc.Rpc.dispatch_exn Test_helpers.rpc_v2 conn (Bigstring.of_string "foo")
+      in
+      Test_helpers.Tap.print_messages tap [ [%bin_shape: Bigstring.Stable.V1.t] ];
+      [%expect
+        {|
+        1200 0000 0000 0000    length= 18 (64-bit LE)
+        03                       body= Query
+        0874 6573 742d 7270    ...
+        63                                  tag= test-rpc (8 bytes)
+        02                              version= 2 (int)
+        03                                   id= 3 (int)
+        00                             metadata= None
+        04                                 data= length= 4 (int)
+        0366 6f6f                                  body= foo (3 bytes)
+
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        08                       body= Response_v2
+        03                                          id= 3 (int)
+        01                             impl_menu_index= Some
+        04                                               4 (nat0)
+        00                                        data= Ok
+        04                                              length= 4 (int)
+        0366 6f6f                                         body= foo (3 bytes)
+        |}];
+      return ())
+    ()
+;;
+
+let%expect_test "latest version pipe RPC dispatches" =
+  Test_helpers.with_circular_connection
+    ~header:Test_helpers.Header.latest
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        08                       body= List: 8 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        |}];
+      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
+        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
+      in
+      let%bind _messages = Pipe.to_list pipe in
+      print_stream_messages tap;
+      [%expect
+        {|
+        5000 0000 0000 0000    length= 80 (64-bit LE)
+        07                       body= Metadata_v2
+        00                             identification= None
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+
+        1c00 0000 0000 0000    length= 28 (64-bit LE)
+        03                       body= Query
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                      tag= test-pi... (13 bytes)
+        01                              version= 1 (int)
+        04                                   id= 4 (int)
+        00                             metadata= None
+        09                                 data= length= 9 (int)
+        d1f5 2fe2                                  body= `Query
+        04                                         body= length= 4 (int)
+        0366 6f6f                                          body= foo (3 bytes)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0900 0000 0000 0000    length= 9 (64-bit LE)
+        08                       body= Response_v2
+        04                                          id= 4 (int)
+        01                             impl_menu_index= Some
+        02                                               2 (nat0)
+        00                                        data= Ok
+        03                                              length= 3 (int)
+        00                                                body= unused_query_id= 0 (int)
+        00                                                              initial= Ok
+        00                                                                       ()
+
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        08                       body= Response_v2
+        04                                          id= 4 (int)
+        01                             impl_menu_index= Some
+        02                                               2 (nat0)
+        00                                        data= Ok
+        0e                                              length= 14 (int)
+        798a 0000                                         body= `Ok
+        09                                                body= length= 9 (int)
+        0872 6573 706f 6e73    ...
+        65                                                        body= response (8 bytes)
+
+        1400 0000 0000 0000    length= 20 (64-bit LE)
+        08                       body= Response_v2
+        04                                          id= 4 (int)
+        01                             impl_menu_index= Some
+        02                                               2 (nat0)
+        00                                        data= Ok
+        0e                                              length= 14 (int)
+        798a 0000                                         body= `Ok
+        09                                                body= length= 9 (int)
+        0872 6573 706f 6e73    ...
+        65                                                        body= response (8 bytes)
+
+        0a00 0000 0000 0000    length= 10 (64-bit LE)
+        08                       body= Response_v2
+        04                                          id= 4 (int)
+        01                             impl_menu_index= Some
+        02                                               2 (nat0)
+        00                                        data= Ok
+        04                                              length= 4 (int)
+        3979 6900                                         body= `Eof
+        |}];
+      return ())
+    ()
+;;
+
+let%expect_test "pipe RPC Response_v1" =
+  Test_helpers.with_circular_connection
+    ~header:Test_helpers.Header.v6
+    ~f:(fun conn tap ->
+      print_header tap;
+      [%expect
+        {|
+        0c00 0000 0000 0000    length= 12 (64-bit LE)
+        07                       body= List: 7 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        |}];
+      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
+        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
+      in
+      let%bind _messages = Pipe.to_list pipe in
+      print_stream_messages tap;
+      [%expect
+        {|
+        5000 0000 0000 0000    length= 80 (64-bit LE)
+        07                       body= Metadata_v2
+        00                             identification= None
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+
+        1c00 0000 0000 0000    length= 28 (64-bit LE)
+        03                       body= Query
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                      tag= test-pi... (13 bytes)
+        01                              version= 1 (int)
+        05                                   id= 5 (int)
+        00                             metadata= None
+        09                                 data= length= 9 (int)
+        d1f5 2fe2                                  body= `Query
+        04                                         body= length= 4 (int)
+        0366 6f6f                                          body= foo (3 bytes)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0700 0000 0000 0000    length= 7 (64-bit LE)
+        02                       body= Response_v1
+        05                               id= 5 (int)
+        00                             data= Ok
+        03                                   length= 3 (int)
+        00                                     body= unused_query_id= 0 (int)
+        00                                                   initial= Ok
+        00                                                            ()
+
+        1200 0000 0000 0000    length= 18 (64-bit LE)
+        02                       body= Response_v1
+        05                               id= 5 (int)
+        00                             data= Ok
+        0e                                   length= 14 (int)
+        798a 0000                              body= `Ok
+        09                                     body= length= 9 (int)
+        0872 6573 706f 6e73    ...
+        65                                             body= response (8 bytes)
+
+        1200 0000 0000 0000    length= 18 (64-bit LE)
+        02                       body= Response_v1
+        05                               id= 5 (int)
+        00                             data= Ok
+        0e                                   length= 14 (int)
+        798a 0000                              body= `Ok
+        09                                     body= length= 9 (int)
+        0872 6573 706f 6e73    ...
+        65                                             body= response (8 bytes)
+
+        0800 0000 0000 0000    length= 8 (64-bit LE)
+        02                       body= Response_v1
+        05                               id= 5 (int)
+        00                             data= Ok
+        04                                   length= 4 (int)
+        3979 6900                              body= `Eof
+        |}];
+      return ())
+    ()
 ;;
 
 let%expect_test "V3 send versioned menu automatically" =
@@ -549,14 +917,14 @@ let%expect_test "V2 local rpc" =
       let payload = Payload.create () in
       let rpc = Test_helpers.sort_rpc in
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        01                                   id= 1 (int)
+        06                                   id= 6 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -569,8 +937,8 @@ let%expect_test "V2 local rpc" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        01                               id= 1 (int)
+        02                       body= Response_v1
+        06                               id= 6 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -580,14 +948,14 @@ let%expect_test "V2 local rpc" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        02                                   id= 2 (int)
+        07                                   id= 7 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -597,8 +965,8 @@ let%expect_test "V2 local rpc" =
         23                                               3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        02                               id= 2 (int)
+        02                       body= Response_v1
+        07                               id= 7 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -608,14 +976,14 @@ let%expect_test "V2 local rpc" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = Rpc.Rpc.dispatch_exn rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        03                                   id= 3 (int)
+        08                                   id= 8 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -625,8 +993,8 @@ let%expect_test "V2 local rpc" =
         23                                               3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        03                               id= 3 (int)
+        02                       body= Response_v1
+        08                               id= 8 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -653,14 +1021,14 @@ let%expect_test "V1 local rpc" =
         |}];
       let payload = Payload.create () in
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        04                                  id= 4 (int)
+        09                                  id= 9 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -672,8 +1040,8 @@ let%expect_test "V1 local rpc" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        04                               id= 4 (int)
+        02                       body= Response_v1
+        09                               id= 9 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -683,14 +1051,14 @@ let%expect_test "V1 local rpc" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        05                                  id= 5 (int)
+        0a                                  id= 10 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -699,8 +1067,8 @@ let%expect_test "V1 local rpc" =
         23                                              3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        05                               id= 5 (int)
+        02                       body= Response_v1
+        0a                               id= 10 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -710,14 +1078,14 @@ let%expect_test "V1 local rpc" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        06                                  id= 6 (int)
+        0b                                  id= 11 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -726,8 +1094,8 @@ let%expect_test "V1 local rpc" =
         23                                              3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        06                               id= 6 (int)
+        02                       body= Response_v1
+        0b                               id= 11 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -761,7 +1129,7 @@ let%expect_test "[V1 -> V1] RPC connection" =
         01                             1: 1 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -769,7 +1137,7 @@ let%expect_test "[V1 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        07                                  id= 7 (int)
+        0c                                  id= 12 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -784,8 +1152,8 @@ let%expect_test "[V1 -> V1] RPC connection" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        07                               id= 7 (int)
+        02                       body= Response_v1
+        0c                               id= 12 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -795,7 +1163,7 @@ let%expect_test "[V1 -> V1] RPC connection" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -803,19 +1171,19 @@ let%expect_test "[V1 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        08                                  id= 8 (int)
+        0d                                  id= 13 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        08                               id= 8 (int)
+        02                       body= Response_v1
+        0d                               id= 13 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -823,13 +1191,13 @@ let%expect_test "[V1 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        09                                  id= 9 (int)
+        0e                                  id= 14 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        09                               id= 9 (int)
+        02                       body= Response_v1
+        0e                               id= 14 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
@@ -860,7 +1228,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         02                             2: 2 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -868,7 +1236,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        0a                                   id= 10 (int)
+        0f                                   id= 15 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -884,8 +1252,8 @@ let%expect_test "[V2 -> V2] RPC connection" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        0a                               id= 10 (int)
+        02                       body= Response_v1
+        0f                               id= 15 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -895,7 +1263,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -903,20 +1271,20 @@ let%expect_test "[V2 -> V2] RPC connection" =
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        0b                                   id= 11 (int)
+        10                                   id= 16 (int)
         00                             metadata= None
         01                                 data= length= 1 (int)
         00                                         body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        0b                               id= 11 (int)
+        02                       body= Response_v1
+        10                               id= 16 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -924,14 +1292,14 @@ let%expect_test "[V2 -> V2] RPC connection" =
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        0c                                   id= 12 (int)
+        11                                   id= 17 (int)
         00                             metadata= None
         01                                 data= length= 1 (int)
         00                                         body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        0c                               id= 12 (int)
+        02                       body= Response_v1
+        11                               id= 17 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
@@ -963,7 +1331,7 @@ let%expect_test "[V1 -> V2] RPC connection" =
         02                             2: 2 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -971,7 +1339,7 @@ let%expect_test "[V1 -> V2] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        0d                                  id= 13 (int)
+        12                                  id= 18 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -986,8 +1354,8 @@ let%expect_test "[V1 -> V2] RPC connection" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        0d                               id= 13 (int)
+        02                       body= Response_v1
+        12                               id= 18 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -997,7 +1365,7 @@ let%expect_test "[V1 -> V2] RPC connection" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -1005,19 +1373,19 @@ let%expect_test "[V1 -> V2] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        0e                                  id= 14 (int)
+        13                                  id= 19 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        0e                               id= 14 (int)
+        02                       body= Response_v1
+        13                               id= 19 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
         |}];
       let%bind _ = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -1025,13 +1393,13 @@ let%expect_test "[V1 -> V2] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        0f                                  id= 15 (int)
+        14                                  id= 20 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        0f                               id= 15 (int)
+        02                       body= Response_v1
+        14                               id= 20 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
@@ -1061,7 +1429,7 @@ let%expect_test "[V2 -> V1] RPC connection" =
         01                             1: 1 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -1069,7 +1437,7 @@ let%expect_test "[V2 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        10                                  id= 16 (int)
+        15                                  id= 21 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -1084,8 +1452,8 @@ let%expect_test "[V2 -> V1] RPC connection" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        10                               id= 16 (int)
+        02                       body= Response_v1
+        15                               id= 21 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1095,7 +1463,7 @@ let%expect_test "[V2 -> V1] RPC connection" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -1103,19 +1471,19 @@ let%expect_test "[V2 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        11                                  id= 17 (int)
+        16                                  id= 22 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        11                               id= 17 (int)
+        02                       body= Response_v1
+        16                               id= 22 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
         |}];
       let%bind () = dispatch ~client in
-      print_messages_bidirectional ~s_to_c ~c_to_s;
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
       [%expect
         {|
         ---   client -> server:   ---
@@ -1123,13 +1491,13 @@ let%expect_test "[V2 -> V1] RPC connection" =
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        12                                  id= 18 (int)
+        17                                  id= 23 (int)
         01                                data= length= 1 (int)
         00                                        body= Array: 0 items
         ---   server -> client:   ---
         0500 0000 0000 0000    length= 5 (64-bit LE)
-        02                       body= Response
-        12                               id= 18 (int)
+        02                       body= Response_v1
+        17                               id= 23 (int)
         00                             data= Ok
         01                                   length= 1 (int)
         00                                     body= Array: 0 items
@@ -1152,14 +1520,14 @@ let%expect_test "expert v2 dispatch" =
         |}];
       let payload = Payload.create () in
       let%bind _response = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        13                                   id= 19 (int)
+        18                                   id= 24 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -1172,8 +1540,8 @@ let%expect_test "expert v2 dispatch" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        13                               id= 19 (int)
+        02                       body= Response_v1
+        18                               id= 24 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1183,14 +1551,14 @@ let%expect_test "expert v2 dispatch" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        14                                   id= 20 (int)
+        19                                   id= 25 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -1200,8 +1568,8 @@ let%expect_test "expert v2 dispatch" =
         23                                               3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        14                               id= 20 (int)
+        02                       body= Response_v1
+        19                               id= 25 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1211,14 +1579,14 @@ let%expect_test "expert v2 dispatch" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind _response = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
         03                       body= Query
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
-        15                                   id= 21 (int)
+        1a                                   id= 26 (int)
         00                             metadata= None
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
@@ -1228,8 +1596,8 @@ let%expect_test "expert v2 dispatch" =
         23                                               3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        15                               id= 21 (int)
+        02                       body= Response_v1
+        1a                               id= 26 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1256,14 +1624,14 @@ let%expect_test "expert v1 dispatch" =
         |}];
       let payload = Payload.create () in
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        16                                  id= 22 (int)
+        1b                                  id= 27 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -1275,8 +1643,8 @@ let%expect_test "expert v1 dispatch" =
         00                       body= Heartbeat
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        16                               id= 22 (int)
+        02                       body= Response_v1
+        1b                               id= 27 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1286,14 +1654,14 @@ let%expect_test "expert v1 dispatch" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        17                                  id= 23 (int)
+        1c                                  id= 28 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -1302,8 +1670,8 @@ let%expect_test "expert v1 dispatch" =
         23                                              3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        17                               id= 23 (int)
+        02                       body= Response_v1
+        1c                               id= 28 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items
@@ -1313,14 +1681,14 @@ let%expect_test "expert v1 dispatch" =
         fee5 03                                      3: 997 (int)
         |}];
       let%bind (_ : unit) = dispatch_expert ~client:conn ~payload in
-      print_messages tap;
+      print_payload_messages tap;
       [%expect
         {|
         1400 0000 0000 0000    length= 20 (64-bit LE)
         01                       body= Query_v1
         0473 6f72 74                       tag= sort (4 bytes)
         01                             version= 1 (int)
-        18                                  id= 24 (int)
+        1d                                  id= 29 (int)
         0b                                data= length= 11 (int)
         04                                        body= Array: 4 items
         fe80 01                                         0: 384 (int)
@@ -1329,8 +1697,8 @@ let%expect_test "expert v1 dispatch" =
         23                                              3: 35 (int)
 
         0f00 0000 0000 0000    length= 15 (64-bit LE)
-        02                       body= Response
-        18                               id= 24 (int)
+        02                       body= Response_v1
+        1d                               id= 29 (int)
         00                             data= Ok
         0b                                   length= 11 (int)
         04                                     body= Array: 4 items

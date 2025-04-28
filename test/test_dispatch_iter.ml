@@ -73,7 +73,6 @@ let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
                   [%message
                     "Got buffer"
                       ~buf:(Bigstring.sub message ~pos ~len : Bigstring.t)
-                      (pos : int)
                       (len : int)];
                 let pos_ref = ref pos in
                 let parsed = String.bin_read_t message ~pos_ref in
@@ -97,9 +96,9 @@ let%expect_test "test Pipe_rpc.Expert.dispatch_iter" =
   [%expect
     {|
     dispatch resolved
-    ("Got buffer" (buf "\bresponse") (pos 58) (len 9))
+    ("Got buffer" (buf "\bresponse") (len 9))
     response
-    ("Got buffer" (buf "\bresponse") (pos 32) (len 9))
+    ("Got buffer" (buf "\bresponse") (len 9))
     response
     |}]
 ;;

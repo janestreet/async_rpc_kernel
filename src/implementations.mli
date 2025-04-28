@@ -1,4 +1,4 @@
-(** Internal to [Async_rpc_kernel].  See [Rpc.Implementations]. *)
+(** Internal to [Async_rpc_kernel]. See [Rpc.Implementations]. *)
 
 open! Core
 open! Async_kernel
@@ -95,6 +95,7 @@ end
 
 val instantiate
   :  'a t
+  -> menu:Menu.t option
   -> connection_description:Info.t
   -> connection_close_started:Info.t Deferred.t
   -> connection_state:'a
@@ -144,6 +145,11 @@ val descriptions_and_shapes
   -> _ t
   -> (Description.t * Rpc_shapes.Just_digests.t) list
 
+val map_implementations
+  :  'a t
+  -> f:('a Implementation.t list -> 'a Implementation.t list)
+  -> ('a t, [ `Duplicate_implementations of Description.t list ]) Result.t
+
 module Expert : sig
   module Responder = Implementation.Expert.Responder
 
@@ -186,4 +192,30 @@ module Expert : sig
          ]
     -> on_exception:On_exception.t
     -> 'connection_state t
+end
+
+module Private : sig
+  val to_implementation_list
+    :  'connection_state t
+    -> 'connection_state Implementation.t list
+       * [ `Raise
+         | `Continue
+         | `Close_connection
+         | `Call of
+           'connection_state
+           -> rpc_tag:string
+           -> version:int
+           -> [ `Close_connection | `Continue ]
+         | `Expert of
+           'connection_state
+           -> rpc_tag:string
+           -> version:int
+           -> metadata:string option
+           -> Expert.Responder.t
+           -> Bigstring.t
+           -> pos:int
+           -> len:int
+           -> unit Deferred.t
+         ]
+       * On_exception.t
 end

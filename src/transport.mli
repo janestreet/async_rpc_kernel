@@ -1,17 +1,15 @@
 (** RPC transport layer
 
-    A transport is a way to send and receive messages.  It is split between a [Reader] and
+    A transport is a way to send and receive messages. It is split between a [Reader] and
     a [Writer] part.
 
-    [Async_rpc_kernel] only provides an async [Pipe.t] transport.
-    [Async_rpc] provides a unix transport based on [Async_unix]'s
-    [Reader] and [Writer] modules.
-*)
+    [Async_rpc_kernel] only provides an async [Pipe.t] transport. [Async_rpc] provides a
+    unix transport based on [Async_unix]'s [Reader] and [Writer] modules. *)
 
 open! Core
 open! Async_kernel
 
-(** Binary headers containing message lengths.  All transports should use this to ensure
+(** Binary headers containing message lengths. All transports should use this to ensure
     binary compatibility. *)
 module Header : sig
   val length : int
@@ -30,8 +28,7 @@ module Reader : sig
 
   (** Convenience function to wait for the first message and un-bin_prot it.
 
-      Async RPC uses this to handle the handshake at the beginning of the message
-      stream. *)
+      Async RPC uses this to handle the handshake at the beginning of the message stream. *)
   val read_one_message_bin_prot
     :  t
     -> 'a Bin_prot.Type_class.reader

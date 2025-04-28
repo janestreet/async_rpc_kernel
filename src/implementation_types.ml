@@ -2,9 +2,9 @@ open Core
 open Async_kernel
 open Protocol
 
-(** The types of the [Implementation] and [Implementations] modules, which have
-    a dependency cyle: [Implementation] -> [Direct_stream_writer] ->
-    [Implementations] -> [Implementation]. *)
+(** The types of the [Implementation] and [Implementations] modules, which have a
+    dependency cyle: [Implementation] -> [Direct_stream_writer] -> [Implementations] ->
+    [Implementation]. *)
 
 module Direct_stream_writer_id = Unique_id.Int63 ()
 

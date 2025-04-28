@@ -15,6 +15,7 @@ type 'a t =
   ; bin_writer : 'a Bin_prot.Type_class.writer
   ; protocol_writer : Protocol_writer.t
   ; id : Protocol.Query_id.t
+  ; impl_menu_index : Nat0.Option.t
   ; description : Description.t
   }
 
@@ -36,16 +37,23 @@ let cache_bin_protted (bin_writer : _ Bin_prot.Type_class.writer) x =
   Bigstring.To_string.sub buffer ~pos:0 ~len
 ;;
 
-let create (type a) protocol_writer id description ~bin_writer : a t =
+let create (type a) protocol_writer id impl_menu_index description ~bin_writer : a t =
   let header_prefix =
-    cache_bin_protted bin_writer_void_message (Response { id; data = Ok Void })
+    cache_bin_protted
+      bin_writer_void_message
+      (Protocol_writer.Unsafe_for_cached_streaming_response_writer.response_message
+         protocol_writer
+         id
+         impl_menu_index
+         ~data:(Ok Void))
   in
-  { protocol_writer
-  ; id
-  ; description
-  ; header_prefix
-  ; bin_writer
+  { header_prefix
   ; data_len = Nat0.of_int_exn 0
+  ; bin_writer
+  ; protocol_writer
+  ; id
+  ; impl_menu_index
+  ; description
   }
 ;;
 
@@ -164,6 +172,7 @@ let write t data =
   |> Protocol_writer.Response.handle_send_result
        t.protocol_writer
        t.id
+       t.impl_menu_index
        t.description
        Streaming_update;
   ()
@@ -178,6 +187,7 @@ let write_string t str =
   |> Protocol_writer.Response.handle_send_result
        t.protocol_writer
        t.id
+       t.impl_menu_index
        t.description
        Streaming_update;
   ()
@@ -195,6 +205,7 @@ let write_expert t ~buf ~pos ~len =
   |> Protocol_writer.Response.handle_send_result
        t.protocol_writer
        t.id
+       t.impl_menu_index
        t.description
        Streaming_update;
   ()
@@ -215,6 +226,7 @@ let schedule_write_expert ?(here = Stdlib.Lexing.dummy_pos) t ~buf ~pos ~len =
   Protocol_writer.Response.handle_send_result
     t.protocol_writer
     t.id
+    t.impl_menu_index
     t.description
     Streaming_update
     result;

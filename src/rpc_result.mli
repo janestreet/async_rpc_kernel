@@ -1,7 +1,7 @@
 open! Core
 open! Async_kernel
 
-type 'a t = 'a Protocol.Rpc_result.t
+type 'a t = 'a Protocol.Rpc_result.t [@@deriving globalize, sexp_of]
 
 val uncaught_exn : location:string -> exn -> 'a t
 val bin_io_exn : location:string -> exn -> 'a t

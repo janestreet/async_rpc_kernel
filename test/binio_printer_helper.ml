@@ -128,7 +128,25 @@ let rec parse (shape : Bin_shape.Expert.Canonical.t) rows buf ~pos ~level ~prefi
       let prefix' = level, " " in
       let prefix = if i = 0 then prefix' :: prefix else [ prefix' ] in
       parse shape rows buf ~pos ~level:(level + 1) ~prefix)
-  | Poly_variant _ -> raise_s [%message "Poly_variant not implemented"]
+  | Poly_variant table ->
+    let start = !pos in
+    let code = Bin_prot.Read.bin_read_variant_int buf ~pos_ref:pos in
+    let constructors = Bin_shape.Expert.Sorted_table.expose table in
+    (match
+       List.find constructors ~f:(fun (name, _) ->
+         Ocaml_common.Btype.hash_variant name = code)
+     with
+     | None ->
+       raise_s
+         [%message
+           "Unrecognized variant code"
+             (code : int)
+             ~constructors:(List.map constructors ~f:fst : string list)]
+     | Some (name, shape) ->
+       row rows buf ~start ~pos ~level ~prefix ("`" ^ name);
+       (match shape with
+        | None -> ()
+        | Some shape -> parse shape rows buf ~pos ~level ~prefix))
   | Rec_app (_, _) | Var _ -> raise_s [%message "Recursive types are not implemented"]
 
 and parse_tuple contents rows buf ~pos ~level ~prefix =
@@ -179,10 +197,18 @@ let handlecopy ~from name =
 
 let add_base_handlers () =
   (* Note that the ‘uuid’ for int and suchlike is just "int". *)
+  handle0 "unit" (fun rows buf ~pos ~level ~prefix ->
+    let start = !pos in
+    Unit.bin_read_t buf ~pos_ref:pos;
+    row rows buf ~start ~pos ~level ~prefix "()");
   handle0 "int" (fun rows buf ~pos ~level ~prefix ->
     let start = !pos in
     let n = Int.bin_read_t buf ~pos_ref:pos in
     row rows buf ~start ~pos ~level ~prefix (sprintf "%d (int)" n));
+  handle0 "899e2f4a-490a-11e6-b68f-bbd62472516c" (fun rows buf ~pos ~level ~prefix ->
+    let start = !pos in
+    let n = Bin_prot.Read.bin_read_nat0 buf ~pos_ref:pos in
+    row rows buf ~start ~pos ~level ~prefix (sprintf "%d (nat0)" (n :> int)));
   handlecopy "int63" ~from:"int";
   handle0 "int64_long" (fun rows buf ~pos ~level ~prefix ->
     let start = !pos in
@@ -349,20 +375,32 @@ module Aligned_row = struct
   ;;
 end
 
-let parse_and_print (shape : Bin_shape.t) buf ~pos =
+let try_parse_and_print (shape : Bin_shape.t) buf ~pos =
   let rows = Vec.create () in
   let posref = ref pos in
   (try parse (Bin_shape.eval shape) rows buf ~pos:posref ~level:0 ~prefix:[] with
    | exn ->
-     print_s
+     let backtrace = Backtrace.Exn.most_recent () in
+     raise_s
        [%message
          "Failure in binio_printer_helper.ml"
            ~start:(pos : int)
            (posref : int ref)
            (exn : Exn.t)
+           (backtrace : Backtrace.t)
            ~before_error:
              (Bigstring.sub buf ~pos ~len:(!posref - pos) : Bigstring.Hexdump.t)
-           ~after_error:(Bigstring.subo buf ~pos:!posref : Bigstring.Hexdump.t)];
-     Exn.reraise exn "Binio_printer_helper failed");
+           ~after_error:(Bigstring.subo buf ~pos:!posref : Bigstring.Hexdump.t)]);
   rows |> Aligned_row.align |> Aligned_row.print
+;;
+
+let parse_and_print shapes buf ~pos =
+  let rec loop shapes exns =
+    match shapes with
+    | [] -> raise_s [%message "No parsing found" (exns : exn list)]
+    | shape :: rest ->
+      (try try_parse_and_print shape buf ~pos with
+       | exn -> loop rest (exn :: exns))
+  in
+  loop (Nonempty_list.to_list shapes) []
 ;;

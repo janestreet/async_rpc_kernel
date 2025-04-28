@@ -164,7 +164,7 @@ let%expect_test "Receiving an overly large message via pipe rpc closes the pipe 
   let%bind reason = Rpc.Pipe_rpc.close_reason metadata in
   print_s ([%sexp_of: Rpc.Pipe_close_reason.t] reason);
   [%expect
-    {| (Error (Write_error (Message_too_big ((size 2016) (max_message_size 1000))))) |}];
+    {| (Error (Write_error (Message_too_big ((size 2018) (max_message_size 1000))))) |}];
   (* Send a [plain_rpc] to show that the connection isn't closed. *)
   Rpc.Rpc.dispatch_exn plain_rpc client_conn ()
 ;;
@@ -192,7 +192,7 @@ let%expect_test "Receiving an overly large message via state rpc initial update 
     {|
     (Error
      ((rpc_error
-       (Write_error (Message_too_big ((size 2011) (max_message_size 1000)))))
+       (Write_error (Message_too_big ((size 2013) (max_message_size 1000)))))
       (connection_description ("Client connected via TCP" 0.0.0.0:PORT))
       (rpc_name state-rpc) (rpc_version 1)))
     |}];
@@ -290,12 +290,12 @@ module%test [@name "[dispatch_with_close_reason]"] _ = struct
               raise_s [%message "Immediate raise"])
           ]
     in
-    Backtrace.elide := true;
+    Dynamic.set_root Backtrace.elide true;
     let%map () =
       let%map result = Rpc.Pipe_rpc.dispatch_with_close_reason pipe_rpc client_conn () in
       print_s [%message "" ~_:(Result.error result : Error.t option)]
     in
-    Backtrace.elide := false;
+    Dynamic.set_root Backtrace.elide false;
     [%expect
       {|
       (((rpc_error
@@ -374,10 +374,10 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
     let%bind reader = dispatch_with_close_reason_exn pipe_rpc client_conn () in
     let%bind writer = Ivar.read pipe_writer in
     let%bind () = pipe_with_writer_error_read_and_print reader in
-    Backtrace.elide := true;
+    Dynamic.set_root Backtrace.elide true;
     Ivar.fill_exn raise_ivar ();
     let%bind () = Scheduler.yield_until_no_jobs_remain () in
-    Backtrace.elide := false;
+    Dynamic.set_root Backtrace.elide false;
     (* We always expect the [Rpc.Connection.t] to remain intact. *)
     [%test_result: bool] (Rpc.Connection.is_closed client_conn) ~expect:false;
     Pipe.write_without_pushback_if_open
@@ -436,13 +436,13 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
           ]
     in
     let messages_received = ref 0 in
-    Backtrace.elide := true;
+    Dynamic.set_root Backtrace.elide true;
     let%bind reader = dispatch_with_close_reason_exn pipe_rpc client_conn () in
     let%bind result =
       Pipe_with_writer_error.iter_without_pushback reader ~f:(fun (_ : string) ->
         incr messages_received)
     in
-    Backtrace.elide := false;
+    Dynamic.set_root Backtrace.elide false;
     [%test_result: int] !messages_received ~expect:total_messages;
     print_s [%sexp (result : unit Or_error.t)];
     [%expect
@@ -491,7 +491,7 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
             ; Rpc.Rpc.implement plain_rpc (fun (_ : Rpc.Connection.t) () -> return ())
             ]
       in
-      Backtrace.elide := true;
+      Dynamic.set_root Backtrace.elide true;
       let%bind () =
         match%map
           Rpc.Pipe_rpc.dispatch_with_close_reason
@@ -509,7 +509,7 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
       in
       (* Ensure the connection is still open *)
       let%bind () = Rpc.Rpc.dispatch_exn plain_rpc client_conn () in
-      Backtrace.elide := false;
+      Dynamic.set_root Backtrace.elide false;
       let%map pipe = Ivar.read pipe_ivar in
       [%test_result: bool] (Pipe.is_closed pipe) ~expect:true
     in

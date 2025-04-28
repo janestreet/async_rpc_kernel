@@ -73,6 +73,7 @@ module Instance = struct
 
   type 'a unpacked =
     { implementations : ('a implementations[@sexp.opaque])
+    ; menu : Menu.t option
     ; writer : Protocol_writer.t
     ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
     ; open_streaming_responses : (Protocol.Query_id.t, Streaming_response.t) Hashtbl.t
@@ -81,7 +82,8 @@ module Instance = struct
     ; connection_description : Info.t
     ; connection_close_started : Info.t Deferred.t
     ; mutable last_dispatched_implementation :
-        (Description.t * ('a Implementation.t[@sexp.opaque])) option
+        (Description.t * ('a Implementation.t[@sexp.opaque]) * Protocol.Impl_menu_index.t)
+          option
     ; mutable on_receive :
         Description.t
         -> query_id:P.Query_id.t
@@ -104,6 +106,7 @@ module Instance = struct
     (type a)
     t
     id
+    impl_menu_index
     bin_writer_data
     (data : a Rpc_result.t)
     ~rpc
@@ -141,17 +144,28 @@ module Instance = struct
       in
       (Protocol_writer.Response.send
          t.writer
-         { id; data }
+         id
+         impl_menu_index
+         ~data
          ~bin_writer_response:bin_writer_data
-       |> Protocol_writer.Response.handle_send_result t.writer id rpc kind) [@nontail])
+       |> Protocol_writer.Response.handle_send_result t.writer id impl_menu_index rpc kind
+      )
+      [@nontail])
   ;;
 
-  let cleanup_and_write_streaming_eof t id (data : [< `Eof ] Rpc_result.t) ~rpc =
+  let cleanup_and_write_streaming_eof
+    t
+    id
+    impl_menu_index
+    (data : [< `Eof ] Rpc_result.t)
+    ~rpc
+    =
     if Hashtbl.mem t.open_streaming_responses id
     then (
       write_response'
         t
         id
+        impl_menu_index
         P.Stream_response_data.bin_writer_nat0_t
         (data :> P.Stream_response_data.nat0_t Rpc_result.t)
         ~rpc
@@ -160,8 +174,16 @@ module Instance = struct
       Hashtbl.remove t.open_streaming_responses id)
   ;;
 
-  let write_single_response t id bin_writer_data data ~rpc ~error_mode =
-    write_response' t id bin_writer_data data ~rpc ~error_mode ~ok_kind:Single_succeeded
+  let write_single_response t id impl_menu_index bin_writer_data data ~rpc ~error_mode =
+    write_response'
+      t
+      id
+      impl_menu_index
+      bin_writer_data
+      data
+      ~rpc
+      ~error_mode
+      ~ok_kind:Single_succeeded
   ;;
 
   module Direct_stream_writer = struct
@@ -361,6 +383,7 @@ module Instance = struct
     ~read_buffer
     ~read_buffer_pos_ref
     ~id
+    ~impl_menu_index
     ~rpc
     ~(on_exception : On_exception.t)
     ~close_connection_monitor
@@ -377,6 +400,7 @@ module Instance = struct
       Cached_streaming_response_writer.create
         t.writer
         id
+        impl_menu_index
         rpc
         ~bin_writer:bin_update_writer
     in
@@ -391,7 +415,15 @@ module Instance = struct
           | `Final -> Single_or_streaming_rpc_error_or_exn
           | `Will_stream -> Streaming_initial
         in
-        write_response' t id bin_init_writer result ~rpc ~error_mode ~ok_kind)
+        write_response'
+          t
+          id
+          impl_menu_index
+          bin_init_writer
+          result
+          ~rpc
+          ~error_mode
+          ~ok_kind)
     in
     let partial_impl, after_initial_response =
       match impl with
@@ -405,7 +437,7 @@ module Instance = struct
              | Some (Pipe _) ->
                (* Can't set the [pipe_placeholder] through [t.open_streaming_responses]
                   since the type parameters will escape the scope of this closure. *)
-               Set_once.set_exn pipe_placeholder [%here] pipe_reader
+               Set_once.set_exn pipe_placeholder pipe_reader
              | None | Some (Direct _) -> Pipe.close_read pipe_reader);
             initial_message)
         in
@@ -425,7 +457,8 @@ module Instance = struct
             >>> fun () ->
             Pipe.upstream_flushed pipe_reader
             >>> function
-            | `Ok | `Reader_closed -> cleanup_and_write_streaming_eof t id (Ok `Eof) ~rpc)
+            | `Ok | `Reader_closed ->
+              cleanup_and_write_streaming_eof t id impl_menu_index (Ok `Eof) ~rpc)
         in
         impl, after_initial_response
       | Direct f ->
@@ -440,7 +473,8 @@ module Instance = struct
           ; stream_writer
           ; instance_stopped = t.stopped
           ; cleanup_and_write_streaming_eof =
-              (fun result -> cleanup_and_write_streaming_eof t id result ~rpc)
+              (fun result ->
+                cleanup_and_write_streaming_eof t id impl_menu_index result ~rpc)
           }
         in
         Hashtbl.set t.open_streaming_responses ~key:id ~data:(Direct writer);
@@ -483,7 +517,7 @@ module Instance = struct
         ()
       | Some (Pipe pipe_placeholder) ->
         (match Set_once.get pipe_placeholder with
-         | None -> cleanup_and_write_streaming_eof t id rpc_error ~rpc
+         | None -> cleanup_and_write_streaming_eof t id impl_menu_index rpc_error ~rpc
          | Some pipe_reader ->
            let clean_up_and_close_read_on_pipe =
              match%map Pipe.downstream_flushed pipe_reader with
@@ -494,7 +528,7 @@ module Instance = struct
                   closed and write [Ok `Eof]. *)
                ()
              | `Ok ->
-               cleanup_and_write_streaming_eof t id rpc_error ~rpc;
+               cleanup_and_write_streaming_eof t id impl_menu_index rpc_error ~rpc;
                Pipe.close_read pipe_reader
            in
            don't_wait_for clean_up_and_close_read_on_pipe)
@@ -541,6 +575,7 @@ module Instance = struct
   let apply_implementation
     t
     implementation
+    ~impl_menu_index
     ~(query : Nat0.t P.Query.t)
     ~read_buffer
     ~read_buffer_pos_ref
@@ -680,7 +715,14 @@ module Instance = struct
               f t.connection_state query |> lift_result_to_rpc_result)
           with
           | response ->
-            write_single_response t id bin_response_writer response ~rpc ~error_mode
+            write_single_response
+              t
+              id
+              impl_menu_index
+              bin_response_writer
+              response
+              ~rpc
+              ~error_mode
           | exception exn ->
             (* In the [Deferred] branch we use [Monitor.try_with], which includes
                backtraces when it catches an exception. For consistency, we also get
@@ -696,6 +738,7 @@ module Instance = struct
             write_single_response
               t
               id
+              impl_menu_index
               bin_response_writer
               (Error (Rpc_error.Uncaught_exn sexp))
               ~rpc
@@ -740,6 +783,7 @@ module Instance = struct
              write_single_response
                t
                id
+               impl_menu_index
                bin_response_writer
                response
                ~rpc
@@ -784,7 +828,13 @@ module Instance = struct
               are expecting (but we need to be able to self-dispatch the menu to get the
               V3 response for connection metadata). *)
            force menu |> Menu.supported_rpcs |> Menu.Stable.V1.response_of_model)
-         |> write_single_response t id Menu.Stable.V1.bin_writer_response ~rpc ~error_mode
+         |> write_single_response
+              t
+              id
+              impl_menu_index
+              Menu.Stable.V1.bin_writer_response
+              ~rpc
+              ~error_mode
        with
        | exn ->
          (* In the [Deferred] branch for [Rpc], we use [Monitor.try_with], which includes
@@ -801,6 +851,7 @@ module Instance = struct
          write_single_response
            t
            id
+           impl_menu_index
            Menu.Stable.V1.bin_writer_response
            (Error (Rpc_error.Uncaught_exn sexp))
            ~rpc
@@ -816,7 +867,9 @@ module Instance = struct
       Continue
     | Implementation.F.Rpc_expert (f, result_mode) ->
       emit_regular_query_tracing_event ();
-      let responder = Implementation.Expert.Responder.create query.id t.writer in
+      let responder =
+        Implementation.Expert.Responder.create query.id impl_menu_index t.writer
+      in
       let d =
         (* We need the [Monitor.try_with] even for the blocking mode as the implementation
            might return [Delayed_reponse], so we don't bother optimizing the blocking
@@ -847,6 +900,7 @@ module Instance = struct
             write_single_response
               t
               id
+              impl_menu_index
               bin_writer_unit
               result
               ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
@@ -949,6 +1003,7 @@ module Instance = struct
          write_response'
            t
            id
+           impl_menu_index
            [%bin_writer: Nothing.t]
            error
            ~ok_kind:Single_or_streaming_rpc_error_or_exn
@@ -980,6 +1035,7 @@ module Instance = struct
            ~read_buffer
            ~read_buffer_pos_ref
            ~id
+           ~impl_menu_index
            ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
            ~on_exception
            ~close_connection_monitor);
@@ -1053,10 +1109,12 @@ module Instance = struct
       { name = P.Rpc_tag.to_string query.tag; version = query.version }
     in
     match t.last_dispatched_implementation with
-    | Some (last_desc, implementation) when Description.equal last_desc description ->
+    | Some (last_desc, implementation, impl_menu_index)
+      when Description.equal last_desc description ->
       apply_implementation
         t
         implementation.f
+        ~impl_menu_index
         ~query
         ~read_buffer
         ~read_buffer_pos_ref
@@ -1064,12 +1122,22 @@ module Instance = struct
         ~on_exception:(Option.value implementation.on_exception ~default:on_exception)
         ~message_bytes_for_tracing
     | None | Some _ ->
+      let impl_menu_index =
+        match t.menu with
+        | None -> Protocol.Impl_menu_index.none
+        | Some menu ->
+          (match Menu.index menu description with
+           | None -> Protocol.Impl_menu_index.none
+           | Some index -> Protocol.Impl_menu_index.some (Nat0.of_int_exn index))
+      in
       (match Hashtbl.find implementations description with
        | Some implementation ->
-         t.last_dispatched_implementation <- Some (description, implementation);
+         t.last_dispatched_implementation
+         <- Some (description, implementation, impl_menu_index);
          apply_implementation
            t
            implementation.f
+           ~impl_menu_index
            ~on_exception:(Option.value implementation.on_exception ~default:on_exception)
            ~query
            ~read_buffer
@@ -1089,7 +1157,7 @@ module Instance = struct
             let { P.Query.tag; version; id; metadata; data = len } = query in
             let rpc_tag = P.Rpc_tag.to_string tag in
             let d =
-              let responder = Responder.create id t.writer in
+              let responder = Responder.create id impl_menu_index t.writer in
               impl
                 t.connection_state
                 ~rpc_tag
@@ -1118,9 +1186,10 @@ module Instance = struct
             write_single_response
               t
               query.id
+              impl_menu_index
               P.Message.bin_writer_nat0_t
               (Error error)
-              ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+              ~rpc:description
               ~error_mode:Always_ok;
             handle_unknown_rpc on_unknown_rpc error t query))
   ;;
@@ -1185,6 +1254,7 @@ let create ~implementations:i's ~on_unknown_rpc ~on_exception =
 
 let instantiate
   t
+  ~menu
   ~connection_description
   ~connection_close_started
   ~connection_state
@@ -1194,6 +1264,7 @@ let instantiate
   =
   T
     { implementations = t
+    ; menu
     ; writer
     ; tracing_events
     ; open_streaming_responses = Hashtbl.Poly.create ()
@@ -1255,6 +1326,10 @@ let lift { implementations; on_unknown_rpc; on_exception } ~f =
   { implementations; on_unknown_rpc; on_exception }
 ;;
 
+let map_implementations { implementations; on_unknown_rpc; on_exception } ~f =
+  create ~implementations:(f (Hashtbl.data implementations)) ~on_unknown_rpc ~on_exception
+;;
+
 module Expert = struct
   module Responder = Responder
 
@@ -1276,6 +1351,7 @@ module Expert = struct
         Protocol_writer.Response.send_expert
           t.writer
           t.query_id
+          t.impl_menu_index
           ~buf
           ~pos
           ~len
@@ -1299,6 +1375,7 @@ module Expert = struct
       Protocol_writer.Response.send_expert
         t.writer
         t.query_id
+        t.impl_menu_index
         ~buf
         ~pos
         ~len
@@ -1316,7 +1393,9 @@ module Expert = struct
       in
       Protocol_writer.Response.send
         t.writer
-        { id = t.query_id; data }
+        t.query_id
+        t.impl_menu_index
+        ~data
         ~bin_writer_response:Nothing.bin_writer_t
       |> handle_send_result;
       ()
@@ -1326,7 +1405,9 @@ module Expert = struct
       mark_responded t;
       Protocol_writer.Response.send
         t.writer
-        { id = t.query_id; data = Ok a }
+        t.query_id
+        t.impl_menu_index
+        ~data:(Ok a)
         ~bin_writer_response:bin_writer_a
       |> handle_send_result;
       ()
@@ -1334,4 +1415,10 @@ module Expert = struct
   end
 
   let create_exn = create_exn
+end
+
+module Private = struct
+  let to_implementation_list (t : _ t) =
+    Hashtbl.data t.implementations, t.on_unknown_rpc, t.on_exception
+  ;;
 end

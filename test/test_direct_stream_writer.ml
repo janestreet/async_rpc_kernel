@@ -110,7 +110,7 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
 let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped before \
                  the implementation completes"
   =
-  Backtrace.elide := true;
+  Dynamic.set_root Backtrace.elide true;
   let%map () =
     with_server_and_client'
       ~rpc:rpc_with_pushback
@@ -145,7 +145,7 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped 
           |}];
         return ())
   in
-  Backtrace.elide := false
+  Dynamic.set_root Backtrace.elide false
 ;;
 
 let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] sends values \

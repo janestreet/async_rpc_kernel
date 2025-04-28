@@ -12,14 +12,16 @@ build: [
 depends: [
   "ocaml" {>= "5.1.0"}
   "async_kernel"
+  "base"
   "bin_prot"
   "core"
+  "core_extended"
   "core_kernel"
   "pipe_with_writer_error"
   "ppx_jane"
   "protocol_version_header"
   "sexplib"
-  "dune"                    {>= "3.11.0"}
+  "dune"                    {>= "3.17.0"}
 ]
 available: arch != "arm32" & arch != "x86_32"
 synopsis: "Platform-independent core of Async RPC library"

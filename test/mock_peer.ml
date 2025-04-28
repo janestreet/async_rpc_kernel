@@ -368,11 +368,15 @@ let write ?don't_read_yet t writer x =
   write_bigstring ?don't_read_yet t bigstring
 ;;
 
-let write_handshake ?don't_read_yet t (handshake : [ `v3 | `v4 ]) =
+let write_handshake ?don't_read_yet t handshake =
   let header =
     match handshake with
     | `v3 -> Test_helpers.Header.v3
     | `v4 -> Test_helpers.Header.v4
+    | `v5 -> Test_helpers.Header.v5
+    | `v6 -> Test_helpers.Header.v6
+    | `v7 -> Test_helpers.Header.v7
+    | `latest -> Test_helpers.Header.latest
   in
   write ?don't_read_yet t [%bin_writer: Test_helpers.Header.t] header;
   write
@@ -394,8 +398,11 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
     | (Heartbeat | Metadata _ | Metadata_v2 _ | Close_reason _ | Close_reason_duplicated _)
       as x -> x
     | Query_v1 x -> Query_v1 { x with data = length x.data }
-    | Response { data = Error _; _ } as x -> x
-    | Response ({ data = Ok data; _ } as x) -> Response { x with data = Ok (length data) }
+    | (Response_v1 { data = Error _; _ } | Response_v2 { data = Error _; _ }) as x -> x
+    | Response_v1 ({ data = Ok data; _ } as x) ->
+      Response_v1 { x with data = Ok (length data) }
+    | Response_v2 ({ data = Ok data; _ } as x) ->
+      Response_v2 { x with data = Ok (length data) }
     | Query x -> Query { x with data = length x.data }
   in
   let first_part =
@@ -433,7 +440,7 @@ let expect_message ?later t reader sexp_of =
     (Protocol.Message.sexp_of_t sexp_of)
 ;;
 
-let connect ?implementations ?(send_handshake = Some `v4) t =
+let connect ?implementations ?(send_handshake = Some `latest) t =
   let transport = transport t in
   let r =
     Rpc.Connection.create
@@ -441,7 +448,7 @@ let connect ?implementations ?(send_handshake = Some `v4) t =
       transport
       ~connection_state:(fun conn ->
         let bus = Connection.tracing_events conn in
-        Bus.iter_exn bus [%here] ~f:(fun event ->
+        Bus.subscribe_permanently_exn bus ~f:(fun event ->
           let event = [%globalize: Tracing_event.t] event in
           emit t (Tracing_event event));
         t)
@@ -452,10 +459,10 @@ let connect ?implementations ?(send_handshake = Some `v4) t =
     | Ok conn ->
       upon (Rpc.Connection.close_reason ~on_close:`started conn) (fun reason ->
         let reason =
-          let old_elide = !Backtrace.elide in
-          Backtrace.elide := true;
+          let old_elide = Dynamic.get Backtrace.elide in
+          Dynamic.set_root Backtrace.elide true;
           let r = [%sexp_of: Info.t] reason in
-          Backtrace.elide := old_elide;
+          Dynamic.set_root Backtrace.elide old_elide;
           r
         in
         emit t (Close_started reason));

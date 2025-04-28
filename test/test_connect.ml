@@ -18,8 +18,10 @@ let%expect_test "connect and close" =
   let%bind conn = Mock_peer.connect t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3 4 5 6))
-    (Send (Metadata ((identification ()) (menu (())))))
+    (Send (4411474 1 2 3 4 5 6 7))
+    (Send
+     (Metadata_v2
+      ((identification ()) (menu (((descriptions ()) (digests ())))))))
     |}];
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect {| (Send Heartbeat) |}];
@@ -50,7 +52,7 @@ let%expect_test "close immediately after handshake (with close message sent)" =
     {|
     (Send
      (message
-      ("00000000  07 fd 52 50 43 00 01 02  03 04 05 06              |..RPC.......|")))
+      ("00000000  08 fd 52 50 43 00 01 02  03 04 05 06 07           |..RPC........|")))
     (Send
      (message
       ("00000000  04 00 01 00                                       |....|")))

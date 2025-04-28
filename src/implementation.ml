@@ -6,12 +6,15 @@ module Expert = struct
   module Responder = struct
     type t =
       { query_id : Query_id.t
+      ; impl_menu_index : Protocol.Impl_menu_index.t
       ; writer : Protocol_writer.t
       ; mutable responded : bool
       }
     [@@deriving sexp_of]
 
-    let create query_id writer = { query_id; writer; responded = false }
+    let create query_id impl_menu_index writer =
+      { query_id; impl_menu_index; writer; responded = false }
+    ;;
   end
 
   type implementation_result =

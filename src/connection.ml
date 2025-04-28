@@ -33,6 +33,12 @@ module Heartbeat_config = struct
     { timeout; send_every }
   ;;
 
+  let never_heartbeat =
+    { timeout = Time_ns.Span.max_value_representable
+    ; send_every = Time_ns.Span.min_value_representable
+    }
+  ;;
+
   module Runtime = struct
     type t =
       { mutable timeout : Time_ns.Span.t
@@ -53,19 +59,20 @@ module Response_handler_action = struct
     | Pipe_eof
     | Expert_indeterminate
     | Determinable :
-        'a Rpc_result.t * 'a Implementation_mode.Error_mode.t
+        ('a Rpc_result.t[@globalized])
+        * ('a Implementation_mode.Error_mode.t[@globalized])
         -> response_with_determinable_status
 
   type t =
     | Keep
-    | Wait of unit Deferred.t
+    | Wait of (unit Deferred.t[@globalized])
     | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
-    | Expert_remove_and_wait of unit Deferred.t
+    | Expert_remove_and_wait of (unit Deferred.t[@globalized])
 end
 
 module Response_handler = struct
   type t =
-    Nat0.t P.Response.t
+    data:Nat0.t Rpc_result.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
     -> Response_handler_action.t
@@ -193,7 +200,6 @@ let set_metadata_hooks t ~when_sending ~on_receive =
      | None ->
        Set_once.set_exn
          t.metadata_on_receive_to_add_to_implementations_instance
-         [%here]
          on_receive);
     `Ok)
 ;;
@@ -302,7 +308,7 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) 
       query
       ~response_handler
       ~kind
-      ~send_query:(fun query -> Protocol_writer.Query.send writer query ~bin_writer_query) 
+      ~send_query:(fun query -> Protocol_writer.Query.send writer query ~bin_writer_query)
     [@nontail]
 ;;
 
@@ -336,7 +342,8 @@ let make_dispatch_bigstring
           ~buf
           ~pos
           ~len
-          ~send_bin_prot_and_bigstring:do_send) [@nontail]
+          ~send_bin_prot_and_bigstring:do_send)
+    [@nontail]
 ;;
 
 let dispatch_bigstring =
@@ -361,19 +368,20 @@ let schedule_dispatch_bigstring_with_metadata =
 
 let handle_response
   t
-  (response : Nat0.t P.Response.t)
+  id
+  ~(data : Nat0.t Rpc_result.t)
   ~read_buffer
   ~read_buffer_pos_ref
   ~protocol_message_len
   : _ Transport.Handler_result.t
   =
-  match Hashtbl.find t.open_queries response.id with
-  | None -> Stop (Error (Rpc_error.Unknown_query_id response.id))
+  match Hashtbl.find t.open_queries id with
+  | None -> Stop (Error (Rpc_error.Unknown_query_id id))
   | Some (rpc, response_handler) ->
     let payload_bytes =
       protocol_message_len
       +
-      match response.data with
+      match data with
       | Ok x -> (x :> int)
       | Error _ -> 0
     in
@@ -382,12 +390,12 @@ let handle_response
         t
         { Tracing_event.event = Received (Response kind)
         ; rpc
-        ; id = (response.id :> Int63.t)
+        ; id :> Int63.t
         ; payload_bytes
         };
       ()
     in
-    (match response_handler response ~read_buffer ~read_buffer_pos_ref with
+    (match response_handler ~data ~read_buffer ~read_buffer_pos_ref with
      | Keep ->
        response_event Partial_response ~payload_bytes;
        Continue
@@ -396,14 +404,14 @@ let handle_response
        Wait wait
      | Expert_remove_and_wait wait ->
        response_event
-         (match response.data with
+         (match data with
           | Ok _ -> Response_finished_expert_uninterpreted
           | Error err -> Response_finished_rpc_error_or_exn err)
          ~payload_bytes;
-       Hashtbl.remove t.open_queries response.id;
+       Hashtbl.remove t.open_queries id;
        Wait wait
      | Remove removal_circumstances ->
-       Hashtbl.remove t.open_queries response.id;
+       Hashtbl.remove t.open_queries id;
        (match removal_circumstances with
         | Ok (Determinable (result, error_mode)) ->
           if Bus.num_subscribers t.tracing_events > 0
@@ -436,14 +444,14 @@ let handle_response
           Continue
         | Ok Pipe_eof ->
           response_event
-            (if Result.is_error response.data
+            (if Result.is_error data
              then Response_finished_rpc_error_or_exn Connection_closed
              else Response_finished_ok)
             ~payload_bytes;
           Continue
         | Ok Expert_indeterminate ->
           response_event
-            (match response.data with
+            (match data with
              | Ok _ -> Response_finished_expert_uninterpreted
              | Error err -> Response_finished_rpc_error_or_exn err)
             ~payload_bytes;
@@ -493,10 +501,24 @@ let handle_msg
   | Heartbeat ->
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
     Continue
-  | Response response ->
-    handle_response t response ~read_buffer ~read_buffer_pos_ref ~protocol_message_len
+  | Response_v1 response ->
+    handle_response
+      t
+      response.id
+      ~data:response.data
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~protocol_message_len
+  | Response_v2 response ->
+    handle_response
+      t
+      response.id
+      ~data:response.data
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~protocol_message_len
   | Query query ->
-    let instance = Set_once.get_exn t.implementations_instance [%here] in
+    let instance = Set_once.get_exn t.implementations_instance in
     Implementations.Instance.handle_query
       instance
       ~query
@@ -505,7 +527,7 @@ let handle_msg
       ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
       ~close_connection_monitor
   | Query_v1 query ->
-    let instance = Set_once.get_exn t.implementations_instance [%here] in
+    let instance = Set_once.get_exn t.implementations_instance in
     let query = P.Query.of_v1 query in
     Implementations.Instance.handle_query
       instance
@@ -516,7 +538,7 @@ let handle_msg
       ~close_connection_monitor
   | Close_reason info | Close_reason_duplicated info ->
     let info = Info.tag info ~tag:"Connection closed by peer:" in
-    Set_once.set_exn t.received_close_reason [%here] info;
+    Set_once.set_exn t.received_close_reason info;
     Stop (Ok ())
 ;;
 
@@ -701,33 +723,40 @@ let cleanup t ~reason ~send_reason_to_peer exn =
     let dummy_ref = ref 0 in
     Hashtbl.iteri
       t.open_queries
-      ~f:(fun ~key:query_id ~data:((_ : Description.t), response_handler) ->
+      ~f:
+        (fun
+          ~key:(_ : Protocol.Query_id.t) ~data:((_ : Description.t), response_handler) ->
         ignore
           (response_handler
              ~read_buffer:dummy_buffer
              ~read_buffer_pos_ref:dummy_ref
-             { id = query_id; data = Error error }));
+             ~data:(Error error)));
     Hashtbl.clear t.open_queries;
     Bigstring.unsafe_destroy dummy_buffer)
 ;;
 
 let schedule_heartbeats t =
   t.last_seen_alive <- Synchronous_time_source.now t.time_source;
-  let heartbeat_from_now_on =
+  let event =
+    Synchronous_time_source.Event.create t.time_source (fun () -> heartbeat_now t)
+  in
+  if Time_ns.Span.( >= ) t.heartbeat_config.send_every Time_ns.Span.zero
+  then
     (* [at_intervals] will schedule the first heartbeat the first time the time_source is
        advanced *)
-    Synchronous_time_source.Event.at_intervals
+    Synchronous_time_source.Event.schedule_at_intervals
       t.time_source
+      event
       t.heartbeat_config.send_every
-      (fun () -> heartbeat_now t)
-  in
-  Set_once.set_exn t.heartbeat_event [%here] heartbeat_from_now_on
+    |> ok_exn;
+  Set_once.set_exn t.heartbeat_event event
 ;;
 
-let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
+let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_exns =
   let instance =
     Implementations.instantiate
       implementations
+      ~menu
       ~writer:t.writer
       ~tracing_events:t.tracing_events
       ~connection_description:t.description
@@ -737,12 +766,12 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
   (match Set_once.get t.metadata_on_receive_to_add_to_implementations_instance with
    | None -> ()
    | Some on_receive -> Implementations.Instance.set_on_receive instance on_receive);
-  Set_once.set_exn t.implementations_instance [%here] instance;
+  Set_once.set_exn t.implementations_instance instance;
   let has_drained_reader = Ivar.create () in
   (* Ensure that we set [has_drained_reader] as soon as we've completed the handshake so
      that if the connection dies after this, we make sure to wait and see if we got a
      close reason. *)
-  Set_once.set_if_none t.has_drained_reader [%here] has_drained_reader;
+  Set_once.set_if_none t.has_drained_reader has_drained_reader;
   let close_connection_monitor = Monitor.create ~name:"RPC close connection monitor" () in
   Monitor.detach_and_iter_errors close_connection_monitor ~f:(fun exn ->
     let reason =
@@ -789,11 +818,11 @@ let run_connection t ~implementations ~connection_state ~writer_monitor_exns =
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
-let run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns =
+let run_after_handshake t ~implementations ~menu ~connection_state ~writer_monitor_exns =
   let connection_state = connection_state t in
   if not (is_closed t)
   then (
-    run_connection t ~implementations ~connection_state ~writer_monitor_exns;
+    run_connection t ~implementations ~menu ~connection_state ~writer_monitor_exns;
     assert (Set_once.is_some t.heartbeat_event);
     assert (Set_once.is_some t.implementations_instance);
     if is_closed t then abort_heartbeating t)
@@ -807,13 +836,13 @@ let negotiate ?identification t ~header ~peer ~menu =
     let ivar = Ivar.create () in
     upon (Ivar.read t.close_started) (fun (_ : Info.t) ->
       Ivar.fill_if_empty ivar (Error `Connection_closed));
-    Set_once.set_exn t.peer_metadata [%here] (Expected ivar);
+    Set_once.set_exn t.peer_metadata (Expected ivar);
     Protocol_writer.For_handshake.send_connection_metadata_if_supported
       t.writer
       menu
       ~identification)
   else (
-    Set_once.set_exn t.peer_metadata [%here] Unsupported;
+    Set_once.set_exn t.peer_metadata Unsupported;
     Ok ())
 ;;
 
@@ -947,7 +976,6 @@ let create
   in
   let tracing_events =
     Bus.create_exn
-      [%here]
       Arity1_local
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
@@ -994,7 +1022,7 @@ let create
   in
   match%map handshake_result with
   | Ok () ->
-    run_after_handshake t ~implementations ~connection_state ~writer_monitor_exns;
+    run_after_handshake t ~implementations ~menu ~connection_state ~writer_monitor_exns;
     Ok t
   | Error error ->
     Error (Handshake_error.to_exn ~connection_description:description error)

@@ -45,7 +45,7 @@ let handle_exn_before_implementation_returns t exn description ~close_connection
     `Stop
   | Raise_to_monitor monitor ->
     Monitor.send_exn monitor exn;
-    `Stop
+    `Continue
 ;;
 
 let to_background_monitor_rest t description ~close_connection_monitor =

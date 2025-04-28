@@ -182,7 +182,6 @@ let add_tracing_subscriber connection =
   let _subscriber =
     Bus.subscribe_exn
       (Async_rpc_kernel.Async_rpc_kernel_private.Connection.tracing_events connection)
-      [%here]
       ~f:(fun event ->
         let (_ : _) = Base.Sys.opaque_identity event in
         ())
@@ -267,19 +266,15 @@ let read_messages (type a) (rpc : (unit, a, unit) Rpc.Pipe_rpc.t) connection ~nu
     ())
 ;;
 
-let%bench_fun ("end-to-end Pipe write (small)" [@indexed
-                                                 num_messages = [ 5; 500; 50_000 ]])
+let%bench_fun ("end-to-end Pipe write (small)"
+  [@indexed num_messages = [ 5; 500; 50_000 ]])
   =
   let client_conn = pipe_setup_conn rpc_pipe ~num_messages ~message_data:data in
   fun () -> read_messages rpc_pipe client_conn ~num_messages
 ;;
 
-let%bench_fun ("end-to-end Pipe write with tracing subscriber (small)" [@indexed
-                                                                         num_messages
-                                                                         = [ 5
-                                                                           ; 500
-                                                                           ; 50_000
-                                                                           ]])
+let%bench_fun ("end-to-end Pipe write with tracing subscriber (small)"
+  [@indexed num_messages = [ 5; 500; 50_000 ]])
   =
   let client_conn =
     pipe_setup_conn

@@ -168,15 +168,11 @@ module Rpc = struct
   ;;
 
   let dispatch' t conn query =
-    let response_handler
-      ivar
-      (response : _ P.Response.t)
-      ~read_buffer
-      ~read_buffer_pos_ref
+    let response_handler ivar ~data ~read_buffer ~read_buffer_pos_ref
       : Connection.Response_handler_action.t
       =
       let response =
-        response.data
+        data
         >>=~ fun len ->
         bin_read_from_bigstring
           t.bin_response.reader
@@ -226,8 +222,8 @@ module Rpc = struct
       ~handle_error
       =
       let response_handler : Connection.Response_handler.t =
-        fun response ~read_buffer ~read_buffer_pos_ref ->
-        match response.data with
+        fun ~data ~read_buffer ~read_buffer_pos_ref ->
+        match data with
         | Error e ->
           handle_error
             (Error.create_s
@@ -590,7 +586,7 @@ module Streaming_rpc = struct
 
   let implement_gen
     ?(here = Stdlib.Lexing.dummy_pos)
-    ?(leave_open_on_exception = true)
+    ?(leave_open_on_exception = false)
     ?on_exception
     t
     impl
@@ -816,7 +812,7 @@ module Streaming_rpc = struct
        always send [abort] unless we've already received that message.
     *)
     let response_handler t : Connection.Response_handler.t =
-      fun response ~read_buffer ~read_buffer_pos_ref ->
+      fun ~data ~read_buffer ~read_buffer_pos_ref ->
       let bin_read_from_bigstring ?add_len reader ~len ~location =
         bin_read_from_bigstring
           ?add_len
@@ -860,7 +856,7 @@ module Streaming_rpc = struct
           Update_handler.handle_closed handler (`Error core_error);
           on_error (Error error) ~we_know_the_server_pipe_is_open
         in
-        (match response.data with
+        (match data with
          | Error error ->
            (* We know that the server will have closed it's pipe after these errors so
               let's not bother with waiting for an ack on [abort]. *)
@@ -917,7 +913,7 @@ module Streaming_rpc = struct
            side. When transitioning to this state there might be other messages already on
            the pipe so we wait for a [Pipe_eof] triggered from our abort message but might
            run into another message which is fine. *)
-        (match response.data with
+        (match data with
          | Error error ->
            if we_know_that_the_server_remains_open_on_error error
            then Keep
@@ -937,7 +933,7 @@ module Streaming_rpc = struct
         in
         (* Error cases in [Waiting_for_initial_response] match [Waiting_for_updates]
            except we need to fill the [response_ivar] so that our dispatch determines. *)
-        (match response.data with
+        (match data with
          | Error error ->
            on_error
              (Error error)
@@ -1152,7 +1148,6 @@ module Pipe_rpc = struct
           if initial_size < 0
           then
             failwiths
-              ~here:[%here]
               "Rpc.Pipe_rpc.Direct_stream_writer.Group.Buffer.create got negative buffer \
                size"
               initial_size
@@ -1387,18 +1382,19 @@ module Pipe_rpc = struct
 
   let close_reason = Streaming_rpc.Pipe_metadata.close_reason
 
+  let pipe_with_writer_error_of_pipe_and_metadata (pipe, metadata) =
+    let writer_error =
+      close_reason metadata
+      |> Deferred.map ~f:(function
+        | Closed_remotely | Closed_locally -> Ok ()
+        | Error error -> Error error)
+    in
+    Pipe_with_writer_error.of_reader ~writer_error pipe
+  ;;
+
   let dispatch_with_close_reason' t connection query =
-    match%map dispatch' t connection query with
-    | Ok (Ok (pipe, metadata)) ->
-      let writer_error =
-        close_reason metadata
-        |> Deferred.map ~f:(function
-          | Closed_remotely | Closed_locally -> Ok ()
-          | Error error -> Error error)
-      in
-      Ok (Ok (Pipe_with_writer_error.of_reader ~writer_error pipe))
-    | Ok (Error error) -> Ok (Error error)
-    | Error error -> Error error
+    dispatch' t connection query
+    |> Deferred.Result.map ~f:(Result.map ~f:pipe_with_writer_error_of_pipe_and_metadata)
   ;;
 
   let dispatch_with_close_reason t connection query =
@@ -1519,6 +1515,20 @@ module State_rpc = struct
 
   let dispatch' t conn query =
     Streaming_rpc.dispatch' t conn query >>| unwrap_dispatch_result
+  ;;
+
+  let dispatch_with_close_reason' t conn query =
+    Deferred.Result.map (dispatch' t conn query) ~f:(fun result ->
+      Result.map result ~f:(fun (state, update_r, metadata) ->
+        let pipe_with_writer_error =
+          Pipe_rpc.pipe_with_writer_error_of_pipe_and_metadata (update_r, metadata)
+        in
+        state, pipe_with_writer_error))
+  ;;
+
+  let dispatch_with_close_reason t conn query =
+    dispatch_with_close_reason' t conn query
+    >>| rpc_result_to_or_error (Streaming_rpc.description t) conn
   ;;
 
   module Pipe_message = Pipe_message

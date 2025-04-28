@@ -1,7 +1,7 @@
 open Core
 open Async_kernel
 
-type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io]
+type 'a t = ('a, Rpc_error.t) Result.t [@@deriving bin_io, globalize, sexp_of]
 
 let%expect_test _ =
   print_endline [%bin_digest: unit t];
