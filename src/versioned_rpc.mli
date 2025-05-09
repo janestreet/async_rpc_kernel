@@ -65,8 +65,6 @@ open Rpc
 module Menu : sig
   include module type of Menu with type t = Menu.t (** @inline *)
 
-  val add : 's Implementation.t list -> 's Implementation.t list
-
   (** Specifies directly how to handle the version menu rpc. *)
   val implement : ('s -> unit -> Stable.V1.response Deferred.t) -> 's Implementation.t
   [@@deprecated

@@ -54,3 +54,10 @@ val with_rpc_server_connection
         -> c_to_s:Tap.t
         -> 'a Deferred.t)
   -> 'a Deferred.t
+
+val setup_server_and_client_connection
+  :  heartbeat_timeout:Time_ns.Span.t
+  -> heartbeat_every:Time_ns.Span.t
+  -> ([ `Server of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ]
+     * [ `Client of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ])
+       Deferred.t

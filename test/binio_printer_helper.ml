@@ -94,6 +94,22 @@ let row rows buf ~start ~pos ~level ~prefix text =
     }
 ;;
 
+(* Module representing the environment context of a Bin_shape for recursive types
+
+   This is copied directly from app/wildrpc/converters/src/env.ml *)
+module Env = struct
+  type 'a t = 'a list
+
+  let empty = []
+  let set t a = a :: t
+
+  let find_exn t x =
+    (* We insert things backwards into the list *)
+    let x = List.length t - 1 - x in
+    List.nth_exn t x
+  ;;
+end
+
 (* Custom printers for various types. Maps the ‘uuid’ type identifier (despite the name,
    this is actually often just a string like "int") to a function to turn it into rows.
 
@@ -102,32 +118,41 @@ let row rows buf ~start ~pos ~level ~prefix text =
 let base_handlers = String.Table.create ()
 
 (* Read [buf] according to [shape], appending to [rows] *)
-let rec parse (shape : Bin_shape.Expert.Canonical.t) rows buf ~pos ~level ~prefix =
+let rec parse
+  ~(env : Bin_shape.Expert.Canonical.t Env.t)
+  (shape : Bin_shape.Expert.Canonical.t)
+  rows
+  buf
+  ~pos
+  ~level
+  ~prefix
+  =
   let (Exp shape) = shape in
   match shape with
-  | Annotate (_, shape) -> parse shape rows buf ~pos ~level ~prefix
+  | Annotate (_, shape) -> parse ~env shape rows buf ~pos ~level ~prefix
   | Base (id, args) ->
     let uuid = Uuid.to_string id in
     (match Hashtbl.find base_handlers uuid with
-     | Some handler -> handler args rows buf ~pos ~level ~prefix
+     | Some handler -> handler ~env args rows buf ~pos ~level ~prefix
      | None -> raise_s [%message "unknown uuid" uuid])
-  | Tuple contents -> parse_tuple contents rows buf ~pos ~level ~prefix
+  | Tuple contents -> parse_tuple ~env contents rows buf ~pos ~level ~prefix
   | Record fields ->
     List.iteri fields ~f:(fun i (name, shape) ->
       let prefix' = level, sprintf "%s=" name in
       let prefix = if i = 0 then prefix' :: prefix else [ prefix' ] in
-      parse shape rows buf ~pos ~level:(level + 1) ~prefix)
+      parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix)
   | Variant variants ->
     let start = !pos in
     let n = Int.bin_read_t buf ~pos_ref:pos in
     let name, shapes = List.nth_exn variants n in
     row rows buf ~start ~pos ~level ~prefix name;
-    parse_tuple shapes rows buf ~pos ~level ~prefix:[]
+    parse_tuple ~env shapes rows buf ~pos ~level ~prefix:[]
   | Application (f, args) ->
+    let env = Env.set env f in
     List.iteri (f :: args) ~f:(fun i shape ->
       let prefix' = level, " " in
       let prefix = if i = 0 then prefix' :: prefix else [ prefix' ] in
-      parse shape rows buf ~pos ~level:(level + 1) ~prefix)
+      parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix)
   | Poly_variant table ->
     let start = !pos in
     let code = Bin_prot.Read.bin_read_variant_int buf ~pos_ref:pos in
@@ -146,19 +171,29 @@ let rec parse (shape : Bin_shape.Expert.Canonical.t) rows buf ~pos ~level ~prefi
        row rows buf ~start ~pos ~level ~prefix ("`" ^ name);
        (match shape with
         | None -> ()
-        | Some shape -> parse shape rows buf ~pos ~level ~prefix))
-  | Rec_app (_, _) | Var _ -> raise_s [%message "Recursive types are not implemented"]
+        | Some shape -> parse ~env shape rows buf ~pos ~level ~prefix))
+  | Rec_app (x, []) ->
+    let shape = Env.find_exn env x in
+    parse ~env shape rows buf ~pos ~level ~prefix
+  | Rec_app (x, args) ->
+    raise_s
+      [%message
+        "Recursive types with type arguments not implemented"
+          (x : int)
+          (args : Bin_shape.Expert.Canonical.t list)]
+  | Var x -> raise_s [%message "Var types are not implemented" (x : int)]
 
-and parse_tuple contents rows buf ~pos ~level ~prefix =
+and parse_tuple ~env contents rows buf ~pos ~level ~prefix =
   match contents with
   | [ shape ] ->
     (* We often end up here for a variant with one arg *)
-    parse shape rows buf ~pos ~level ~prefix
+    parse ~env shape rows buf ~pos ~level ~prefix
   | contents ->
     let first_prefix = (level, "1.") :: prefix in
     List.iteri contents ~f:(fun i shape ->
       let i = i + 1 in
       parse
+        ~env
         shape
         rows
         buf
@@ -168,7 +203,7 @@ and parse_tuple contents rows buf ~pos ~level ~prefix =
 ;;
 
 let handle0 name f =
-  Hashtbl.add_exn base_handlers ~key:name ~data:(function
+  Hashtbl.add_exn base_handlers ~key:name ~data:(fun ~env:_ -> function
     | [] -> f
     | args ->
       failwithf
@@ -180,8 +215,8 @@ let handle0 name f =
 ;;
 
 let handle1 name f =
-  Hashtbl.add_exn base_handlers ~key:name ~data:(function
-    | [ arg ] -> f arg
+  Hashtbl.add_exn base_handlers ~key:name ~data:(fun ~env -> function
+    | [ arg ] -> f ~env arg
     | args ->
       failwithf
         !"Wrong number of args for %s. Expected 1. Got %{sexp: Bin_shape.Canonical.t \
@@ -226,7 +261,10 @@ let add_base_handlers () =
       ~prefix
       (sprintf
          !"%{sexp: string} (%d bytes)"
-         (if String.length str > 10 then String.prefix str 7 ^ "..." else str)
+         (let len_limit = 10 in
+          if String.length str > len_limit
+          then String.prefix str (len_limit - 3) ^ "..."
+          else str)
          (String.length str)));
   handlecopy "bigstring" ~from:"string";
   (* MD5: *)
@@ -234,7 +272,7 @@ let add_base_handlers () =
     let start = !pos in
     let (_ : Md5.t) = Md5.bin_read_t buf ~pos_ref:pos in
     row rows buf ~start ~pos ~level ~prefix "(md5)");
-  let list_or_array name =
+  let list_or_array ~env name =
     let item_count n = sprintf "%s: %d items" name n in
     fun shape rows buf ~pos ~level ~prefix ->
       let start = !pos in
@@ -242,16 +280,16 @@ let add_base_handlers () =
       row rows buf ~start ~pos ~level ~prefix (item_count n);
       for i = 0 to n - 1 do
         let prefix = [ level, sprintf "%d:" i ] in
-        parse shape rows buf ~pos ~level:(level + 1) ~prefix
+        parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix
       done
   in
   handle1 "list" (list_or_array "List");
   handle1 "array" (list_or_array "Array");
-  handle1 "option" (fun shape rows buf ~pos ~level ~prefix ->
+  handle1 "option" (fun ~env shape rows buf ~pos ~level ~prefix ->
     let start = !pos in
     let some = Bool.bin_read_t buf ~pos_ref:pos in
     row rows buf ~start ~pos ~level ~prefix (if some then "Some" else "None");
-    if some then parse shape rows buf ~pos ~level:(level + 1) ~prefix:[])
+    if some then parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix:[])
 ;;
 
 let () = add_base_handlers ()
@@ -378,7 +416,9 @@ end
 let try_parse_and_print (shape : Bin_shape.t) buf ~pos =
   let rows = Vec.create () in
   let posref = ref pos in
-  (try parse (Bin_shape.eval shape) rows buf ~pos:posref ~level:0 ~prefix:[] with
+  (try
+     parse ~env:Env.empty (Bin_shape.eval shape) rows buf ~pos:posref ~level:0 ~prefix:[]
+   with
    | exn ->
      let backtrace = Backtrace.Exn.most_recent () in
      raise_s

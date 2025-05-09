@@ -788,7 +788,9 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
        "00000010  65 20 68 61 6e 64 6c 69  6e 67 20 6c 6f 6f 70 20  |e handling loop |"
        "00000020  73 74 6f 70 70 65 64 03  01 02 00 10 55 6e 6b 6e  |stopped.....Unkn|"
        "00000030  6f 77 6e 5f 71 75 65 72  79 5f 69 64 00 01 31     |own_query_id..1|")))
-    (Close_started ("Rpc message handling loop stopped" (Unknown_query_id 1)))
+    (Close_started
+     ("Rpc message handling loop stopped" (Unknown_query_id 1)
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished

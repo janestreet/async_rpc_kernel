@@ -10,3 +10,4 @@ val map : 'a t -> f:('a -> 'b) -> 'b t
 val bind_deferred : 'a t -> f:('a -> 'b t Deferred.t) -> 'b t Deferred.t
 val map_deferred : 'a t -> f:('a -> 'b Deferred.t) -> 'b t Deferred.t
 val lift_deferred : 'a Deferred.t t -> 'a t Deferred.t
+val of_or_error : 'a Or_error.t -> 'a t

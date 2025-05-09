@@ -258,7 +258,10 @@ module%test [@name "[dispatch_with_close_reason]"] _ = struct
       {|
       (Ok (Ok 0))
       (Ok (Ok 1))
-      (Error (Connection_closed (Rpc.Connection.close)))
+      (Error
+       (Connection_closed
+        ((("Connection closed by local side:" Rpc.Connection.close)
+          (connection_description ("Client connected via TCP" 0.0.0.0:PORT))))))
       |}]
   ;;
 

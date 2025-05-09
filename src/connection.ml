@@ -13,6 +13,16 @@ module Peer_metadata = struct
   [@@deriving sexp_of]
 end
 
+let heartbeat_timeout_override_env_var = "ASYNC_RPC_HEARTBEAT_TIMEOUT_OVERRIDE"
+
+let heartbeat_timeout_override_from_environment =
+  try
+    Sys.getenv heartbeat_timeout_override_env_var |> Option.map ~f:Time_ns.Span.of_string
+  with
+  | exn ->
+    Exn.reraise exn [%string "Failed to parse %{heartbeat_timeout_override_env_var}"]
+;;
+
 module Heartbeat_config = struct
   type t =
     { timeout : Time_ns.Span.t
@@ -77,6 +87,26 @@ module Response_handler = struct
     -> local_ Response_handler_action.t
 end
 
+module Close_reason = struct
+  type t =
+    | By_unknown of
+        { send_reason_to_peer : bool
+        ; reason : Info.t
+        }
+    | By_local of
+        { send_reason_to_peer : bool
+        ; reason : Info.t
+        }
+    | By_remote of Info.t
+
+  let info_of_t = function
+    | By_unknown { reason; send_reason_to_peer = _ } -> reason
+    | By_local { reason; send_reason_to_peer = _ } ->
+      Info.tag reason ~tag:"Connection closed by local side:"
+    | By_remote reason -> Info.tag reason ~tag:"Connection closed by remote side:"
+  ;;
+end
+
 type t =
   { description : Info.t
   ; heartbeat_config : Heartbeat_config.Runtime.t
@@ -117,6 +147,7 @@ type t =
   ; received_close_reason : Info.t Set_once.t
   ; has_drained_reader : unit Ivar.t Set_once.t
   ; reader_drain_timeout : Time_ns.Span.t
+  ; heartbeat_timeout_override : Time_ns.Span.t option
   }
 [@@deriving sexp_of]
 
@@ -544,7 +575,6 @@ let handle_msg
       ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
       ~close_connection_monitor
   | Close_reason info | Close_reason_duplicated info ->
-    let info = Info.tag info ~tag:"Connection closed by peer:" in
     Set_once.set_exn t.received_close_reason info;
     Stop (Ok ())
 ;;
@@ -582,38 +612,42 @@ let abort_heartbeating t =
 
 let close
   ?(streaming_responses_flush_timeout = Time_ns.Span.of_int_sec 5)
-  ~reason
-  ~send_reason_to_peer
+  ~(reason : Close_reason.t)
   t
   =
   if not (is_closed t)
   then (
     abort_heartbeating t;
-    let () =
-      let should_send_reason_to_peer =
-        send_reason_to_peer
-        (* If our [received_close_reason] is set, it means our peer initiated the
-           connection close, so we shouldn't bother sending our reason. *)
-        && Set_once.is_none t.received_close_reason
-      in
-      if should_send_reason_to_peer
-      then
+    (* If our [received_close_reason] is set, it means our peer initiated the connection
+         close, so we shouldn't bother sending our reason. *)
+    if Set_once.is_none t.received_close_reason
+    then (
+      match reason with
+      | By_local { send_reason_to_peer = true; reason }
+      | By_unknown { send_reason_to_peer = true; reason } ->
         Result.iter (writer t) ~f:(fun writer ->
           let send_result =
             Protocol_writer.send_close_reason_if_supported writer ~reason
           in
-          (* We should do nothing if we can't send the close reason. If the
-             connection is closed, that's fine, we were trying to close the
-             connection anyways. If the message is too big, the peer won't get
-             the close reason, but it's not worth raising over. *)
-          match send_result with
-          | None
-          | Some
-              ( Sent { result = (); bytes = (_ : int) }
-              | Closed
-              | Message_too_big (_ : Transport_intf.Send_result.message_too_big) ) -> ())
-    in
-    Ivar.fill_exn t.close_started reason;
+          (* We should do nothing if we can't send the close reason. If the connection is
+             closed, that's fine, we were trying to close the connection anyways. If the
+             message is too big, the peer won't get the close reason, but it's not worth
+             raising over. *)
+          Option.iter__local send_result ~f:(function
+            | Sent { result = (); bytes = (_ : int) }
+            | Closed
+            | Message_too_big (_ : Transport_intf.Send_result.message_too_big)
+            -> ())
+            [@nontail])
+      | By_remote (_ : Info.t)
+      | By_local { send_reason_to_peer = false; reason = (_ : Info.t) }
+      | By_unknown { send_reason_to_peer = false; reason = (_ : Info.t) } -> ());
+    Ivar.fill_exn
+      t.close_started
+      (Info.of_list
+         [ Close_reason.info_of_t reason
+         ; Info.tag t.description ~tag:"connection_description"
+         ]);
     (match Set_once.get t.implementations_instance with
      | None -> Deferred.unit
      | Some instance ->
@@ -655,28 +689,39 @@ let on_message t ~close_connection_monitor =
     | Continue -> Continue
     | Wait _ as res -> res
     | Stop result ->
-      let reason, send_reason_to_peer =
+      let reason =
         let reason_if_no_error =
           match Set_once.get t.received_close_reason with
-          | Some info -> info
-          | None -> Info.of_string "Rpc message handling loop stopped"
+          | Some info ->
+            (* Directly received close reason from peer. *)
+            Close_reason.By_remote info
+          | None ->
+            Close_reason.By_unknown
+              { reason = Info.of_string "Rpc message handling loop stopped"
+              ; send_reason_to_peer = false
+              }
         in
         match result with
-        | Ok () -> reason_if_no_error, false
+        | Ok () -> reason_if_no_error
         | Error e ->
-          ( Info.of_list
-              [ reason_if_no_error
-              ; Info.create_s
-                  (Rpc_error.sexp_of_t_with_reason
-                     e
-                     ~get_connection_close_reason:(fun () ->
-                       [%sexp
-                         "Connection.on_message resulted in Connection_closed error. \
-                          This is weird."]))
-              ]
-          , true )
+          Close_reason.By_unknown
+            { reason =
+                Info.of_list
+                  [ reason_if_no_error |> Close_reason.info_of_t
+                  ; Info.create_s
+                      (Rpc_error.sexp_of_t_with_reason
+                         e
+                         ~get_connection_close_reason:(fun () ->
+                           [%sexp
+                             "Connection.on_message resulted in Connection_closed error. \
+                              This is weird."]))
+                  ]
+            ; (* Similar to above, we recieved stop with an error which could come from the
+                 local handler or we could have received an error over the wire. *)
+              send_reason_to_peer = true
+            }
       in
-      don't_wait_for (close t ~reason ~send_reason_to_peer);
+      don't_wait_for (close t ~reason);
       Stop reason
   in
   Staged.stage f
@@ -687,18 +732,38 @@ let time_ns_to_microsecond_string time =
   |> Time_ns.to_string_abs_trimmed ~zone:(Lazy.force Timezone.local)
 ;;
 
+let effective_heartbeat_timeout t =
+  Option.value_map
+    t.heartbeat_timeout_override
+    ~default:t.heartbeat_config.timeout
+    ~f:(fun heartbeat_timeout_override ->
+      Time_ns.Span.max heartbeat_timeout_override t.heartbeat_config.timeout)
+;;
+
 let heartbeat_now t =
   let now = Synchronous_time_source.now t.time_source in
   let since_last_heartbeat = Time_ns.diff now t.last_seen_alive in
-  if Time_ns.Span.( > ) since_last_heartbeat t.heartbeat_config.timeout
+  let timeout = effective_heartbeat_timeout t in
+  if Time_ns.Span.( > ) since_last_heartbeat timeout
   then (
     let reason () =
       [%string
-        "No heartbeats received for %{t.heartbeat_config.timeout#Time_ns.Span}. Last \
-         seen at: %{time_ns_to_microsecond_string t.last_seen_alive}, now: \
+        "No heartbeats received for %{timeout#Time_ns.Span}. Last seen at: \
+         %{time_ns_to_microsecond_string t.last_seen_alive}, now: \
          %{time_ns_to_microsecond_string now}."]
     in
-    don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true))
+    (* Local didn't see heartbeats in time and decided to close.
+
+       However, worth noting that just because we decided to close, it doesn't mean that
+       it's definitely the local or remote that missed the heartbeat. This could've been
+       caused by the remote failing to heartbeat, or the local being too busy to process
+       any messages *)
+    don't_wait_for
+      (close
+         t
+         ~reason:
+           (Close_reason.By_local
+              { reason = Info.of_thunk reason; send_reason_to_peer = true })))
   else (
     match Protocol_writer.send_heartbeat t.writer with
     | Sent { result = (); bytes = (_ : int) } -> ()
@@ -714,8 +779,8 @@ let heartbeat_now t =
 let default_handshake_timeout = Time_ns.Span.of_int_sec 30
 let default_reader_drain_timeout = Time_ns.Span.of_int_sec 5
 
-let cleanup t ~reason ~send_reason_to_peer exn =
-  don't_wait_for (close ~reason ~send_reason_to_peer t);
+let cleanup t ~reason exn =
+  don't_wait_for (close ~reason t);
   if not (Hashtbl.is_empty t.open_queries)
   then (
     let error =
@@ -781,13 +846,26 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
   Set_once.set_if_none t.has_drained_reader has_drained_reader;
   let close_connection_monitor = Monitor.create ~name:"RPC close connection monitor" () in
   Monitor.detach_and_iter_errors close_connection_monitor ~f:(fun exn ->
+    (* An exception within the user provided implementation function shouldn't be affected
+       by the remote *)
     let reason =
-      Info.create_s [%message "Uncaught exception in implementation" (exn : Exn.t)]
+      Close_reason.By_local
+        { reason =
+            Info.create_s [%message "Uncaught exception in implementation" (exn : Exn.t)]
+        ; send_reason_to_peer = true
+        }
     in
-    don't_wait_for (close ~reason ~send_reason_to_peer:true t));
+    don't_wait_for (close ~reason t));
   let monitor = Monitor.create ~name:"RPC connection loop" () in
+  (* It's not obvious where an exception in the RPC connection comes from so let's tag
+     with [By_unknown] to be safe. It'd be a little surprising if we could raise based on
+     something the peer did but it's hard to guarantee in the types. *)
   let reason name exn =
-    exn, Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name)
+    ( exn
+    , Close_reason.By_unknown
+        { reason = Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name)
+        ; send_reason_to_peer = true
+        } )
   in
   Stream.iter
     (Stream.interleave
@@ -795,7 +873,7 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
           [ Stream.map ~f:(reason "loop") (Monitor.detach_and_get_error_stream monitor)
           ; Stream.map ~f:(reason "Writer.t") writer_monitor_exns
           ]))
-    ~f:(fun (exn, reason) -> cleanup t exn ~reason ~send_reason_to_peer:true);
+    ~f:(fun (exn, reason) -> cleanup t exn ~reason);
   within ~monitor (fun () ->
     schedule_heartbeats t;
     Reader.read_forever
@@ -810,18 +888,19 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
       (* [on_message] only returns a reason when it gets a [Stop], which always sets the
          reason to be "Rpc message handling loop stopped" - that's not a reason we care
          about sending. *)
-      cleanup
-        t
-        ~reason
-        ~send_reason_to_peer:false
-        (Rpc_error.Rpc (Connection_closed, t.description))
+      cleanup t ~reason (Rpc_error.Rpc (Connection_closed, t.description))
     (* The protocol is such that right now, the only outcome of the other side closing the
        connection normally is that we get an eof. *)
     | Error (`Eof | `Closed) ->
+      (* Seems like in most cases this is because the remote closed the connection without
+         sending a stop message, but it's hard to verify that there are no other cases *)
       cleanup
         t
-        ~reason:(Info.of_string "EOF or connection closed")
-        ~send_reason_to_peer:false
+        ~reason:
+          (Close_reason.By_unknown
+             { reason = Info.of_string "EOF or connection closed"
+             ; send_reason_to_peer = false
+             })
         (Rpc_error.Rpc (Connection_closed, t.description)))
 ;;
 
@@ -881,11 +960,27 @@ let do_handshake ?identification t ~handshake_timeout ~header ~menu =
        in
        (* There's a pending read, the reader is basically useless now, so we clean it
          up. *)
-       don't_wait_for (close t ~reason:(Info.of_thunk reason) ~send_reason_to_peer:true);
+       don't_wait_for
+         (close
+            t
+            ~reason:
+              ((* A handshake timeout could be a result of both the local and remote but
+                  we're detecting it on the local side. This is similar to a heartbeat
+                  timeout close reason. *)
+                 Close_reason.By_local
+                 { reason = Info.of_thunk reason; send_reason_to_peer = true }));
        return (Error Handshake_error.Timeout)
      | `Result (Error exn) ->
        let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
-       don't_wait_for (close t ~reason ~send_reason_to_peer:true);
+       don't_wait_for
+         (close
+            t
+            ~reason:
+              ((* Closed on local side since we failed to read the header. *)
+                 Close_reason.By_local
+                 { reason = Info.of_list [ reason; Info.of_exn exn ]
+                 ; send_reason_to_peer = true
+                 }));
        return (Error (Handshake_error.Reading_header_failed (Error.of_exn exn)))
      | `Result (Ok (Error `Eof)) -> return (Error Handshake_error.Eof)
      | `Result (Ok (Error `Closed)) -> return (Error Handshake_error.Transport_closed)
@@ -918,6 +1013,8 @@ let drain_reader_for_close_reason t ~default_close_reason =
         (Ivar.read has_drained_reader)
   in
   Set_once.get t.received_close_reason
+  (* We received a close reason by the remote *)
+  |> Option.map ~f:(fun reason -> Close_reason.By_remote reason)
   |> Option.value_or_thunk ~default:default_close_reason
 ;;
 
@@ -1009,16 +1106,27 @@ let create
     ; received_close_reason = Set_once.create ()
     ; has_drained_reader = Set_once.create ()
     ; reader_drain_timeout
+    ; heartbeat_timeout_override =
+        heartbeat_timeout_override_from_environment
+        (* The benefit of holding the override in [t] is that if the user programmatically
+     increases the heartbeat timeout via [reset_heartbeat_timeout] and this exceeds both
+     the previous heartbeat timeout and the environment override, then we'll use the new
+     value *)
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
   upon (Writer.stopped writer) (fun () ->
     don't_wait_for
-      (let%bind reason =
+      ((* Transport layer stopped, unclear if it was because of the local or remote side
+       *)
+       let%bind reason =
          drain_reader_for_close_reason t ~default_close_reason:(fun () ->
-           Info.of_string "RPC transport stopped")
+           Close_reason.By_unknown
+             { reason = Info.of_string "RPC transport stopped"
+             ; send_reason_to_peer = false
+             })
        in
-       close t ~reason ~send_reason_to_peer:false));
+       close t ~reason));
   upon (Ivar.read t.close_finished) (fun () -> Bus.close t.tracing_events);
   let header = get_handshake_header () in
   let handshake_result =
@@ -1078,8 +1186,13 @@ let with_close
       ~finally:(fun () ->
         close
           t
-          ~reason:(Info.of_string "Rpc.Connection.with_close finished")
-          ~send_reason_to_peer:false)
+          ~reason:
+            ((* This indicates that the lambda below exited (or raised), which is on the
+                local side *)
+               Close_reason.By_local
+               { reason = Info.of_string "Rpc.Connection.with_close finished"
+               ; send_reason_to_peer = false
+               }))
       (fun () ->
         let%bind result = dispatch_queries t in
         let%map () =
@@ -1123,12 +1236,15 @@ let server_with_close
 ;;
 
 let close ?streaming_responses_flush_timeout ?reason t =
-  let send_reason_to_peer, reason =
+  (* User directly called close on the connection so this is definitely [By_local]. *)
+  let reason =
     match reason with
-    | None -> false, Info.of_string "Rpc.Connection.close"
-    | Some reason -> true, reason
+    | None ->
+      Close_reason.By_local
+        { reason = Info.of_string "Rpc.Connection.close"; send_reason_to_peer = false }
+    | Some reason -> Close_reason.By_local { reason; send_reason_to_peer = true }
   in
-  close ?streaming_responses_flush_timeout ~reason ~send_reason_to_peer t
+  close ?streaming_responses_flush_timeout t ~reason
 ;;
 
 module Client_implementations = struct
@@ -1152,4 +1268,6 @@ module For_testing = struct
   let with_async_execution_context ~context ~f =
     Async_kernel_scheduler.with_local handshake_header_override_key (Some context) ~f
   ;;
+
+  let heartbeat_timeout_override_env_var = heartbeat_timeout_override_env_var
 end

@@ -28,7 +28,9 @@ let%expect_test "connect and close" =
   let%bind () = Async_rpc_kernel.Rpc.Connection.close conn in
   [%expect
     {|
-    (Close_started Rpc.Connection.close)
+    (Close_started
+     (("Connection closed by local side:" Rpc.Connection.close)
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
@@ -58,7 +60,9 @@ let%expect_test "close immediately after handshake (with close message sent)" =
       ("00000000  04 00 01 00                                       |....|")))
     Close_writer
     Close_reader
-    (Close_started ("Connection closed by peer:" "immediate close"))
+    (Close_started
+     (("Connection closed by remote side:" "immediate close")
+      (connection_description <created-directly>)))
     Close_finished
     |}];
   return ()

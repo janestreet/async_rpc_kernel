@@ -23,3 +23,8 @@ let map_deferred t ~f =
 ;;
 
 let lift_deferred = map_deferred ~f:Fn.id
+
+let of_or_error = function
+  | Ok a -> Authorized a
+  | Error e -> Not_authorized e
+;;

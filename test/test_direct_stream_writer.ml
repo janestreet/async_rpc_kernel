@@ -103,7 +103,13 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
       [%expect {| (Empty) |}];
       let%bind reason = Rpc.Pipe_rpc.close_reason metadata in
       print_s ([%sexp_of: Rpc.Pipe_close_reason.t] reason);
-      [%expect {| (Error (Connection_closed (Rpc.Connection.close))) |}];
+      [%expect
+        {|
+        (Error
+         (Connection_closed
+          ((("Connection closed by local side:" Rpc.Connection.close)
+            (connection_description ("Client connected via TCP" 0.0.0.0:PORT))))))
+        |}];
       return ())
 ;;
 
@@ -138,10 +144,11 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped 
         in
         [%expect
           {|
-          ("Connection closed by peer:"
-           ("exn raised in RPC connection loop"
-            (monitor.ml.Error ("Ivar.fill_exn called on full ivar" (t (Full _)))
-             ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
+          (("Connection closed by remote side:"
+            ("exn raised in RPC connection loop"
+             (monitor.ml.Error ("Ivar.fill_exn called on full ivar" (t (Full _)))
+              ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
+           (connection_description ("Client connected via TCP" 0.0.0.0:PORT)))
           |}];
         return ())
   in

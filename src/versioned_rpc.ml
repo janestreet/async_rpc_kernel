@@ -660,7 +660,6 @@ module Menu = struct
   ;;
 
   let supported_versions = Menu.supported_versions
-  let add = Fn.id
 
   let aux_request dispatch conn =
     let%map result = dispatch rpc conn () in

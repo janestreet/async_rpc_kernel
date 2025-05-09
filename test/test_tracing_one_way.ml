@@ -142,7 +142,8 @@ let%expect_test "One-way immediately raises with on_exception:Close_connection" 
        ((location "server-side one-way rpc computation")
         (exn
          (monitor.ml.Error (Failure "injected error")
-          ("<backtrace elided in test>")))))))
+          ("<backtrace elided in test>")))))
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
@@ -191,10 +192,12 @@ let%expect_test "One-way asynchronously raises with on_exception:Close_connectio
        "00000060  01 01 00 1a 3c 62 61 63  6b 74 72 61 63 65 20 65  |....<backtrace e|"
        "00000070  6c 69 64 65 64 20 69 6e  20 74 65 73 74 3e        |lided in test>|")))
     (Close_started
-     ("Uncaught exception in implementation"
-      (exn
-       (monitor.ml.Error (Failure "injected error")
-        ("<backtrace elided in test>")))))
+     (("Connection closed by local side:"
+       ("Uncaught exception in implementation"
+        (exn
+         (monitor.ml.Error (Failure "injected error")
+          ("<backtrace elided in test>")))))
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
