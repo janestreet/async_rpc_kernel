@@ -316,3 +316,77 @@ let with_rpc_server_connection ?provide_rpc_shapes () ~server_header ~client_hea
   let%bind () = Tcp.Server.close server_proxy in
   return result
 ;;
+
+let establish_connection
+  transport
+  time_source
+  description
+  ~heartbeat_timeout
+  ~heartbeat_every
+  =
+  let open Expect_test_helpers_core in
+  (* Slightly changes the format of print_s to be easier to read in tests *)
+  let module Time_ns = Core.Core_private.Time_ns_alternate_sexp in
+  (* Prints Time_ns in UTC *)
+  let conn =
+    Async_rpc_kernel.Rpc.Connection.create
+      ~connection_state:(fun _ -> ())
+      ~heartbeat_config:
+        (Async_rpc_kernel.Rpc.Connection.Heartbeat_config.create
+           ~timeout:heartbeat_timeout
+           ~send_every:heartbeat_every
+           ())
+      ~description
+      ~time_source
+      transport
+  in
+  Deferred.upon conn (fun conn ->
+    let conn = Result.ok_exn conn in
+    let () =
+      Deferred.upon
+        (Async_rpc_kernel.Rpc.Connection.close_reason conn ~on_close:`started)
+        (fun reason ->
+           print_s
+             [%message
+               "connection closed"
+                 ~now:(Synchronous_time_source.now time_source : Time_ns.t)
+                 (description : Info.t)
+                 (reason : Info.t)])
+    in
+    let () =
+      Async_rpc_kernel.Rpc.Connection.add_heartbeat_callback conn (fun () ->
+        print_s
+          [%message
+            "received heartbeat"
+              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
+              (description : Info.t)])
+    in
+    ());
+  conn >>| Result.ok_exn
+;;
+
+let setup_server_and_client_connection ~heartbeat_timeout ~heartbeat_every =
+  let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
+  let client_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
+  let client_transport, server_transport =
+    Async_rpc_kernel.Pipe_transport.(create_pair Kind.bigstring)
+  in
+  let server_conn =
+    establish_connection
+      server_transport
+      (Synchronous_time_source.read_only server_time_source)
+      (Info.of_string "server")
+      ~heartbeat_timeout
+      ~heartbeat_every
+  in
+  let client_conn =
+    establish_connection
+      client_transport
+      (Synchronous_time_source.read_only client_time_source)
+      (Info.of_string "client")
+      ~heartbeat_timeout
+      ~heartbeat_every
+  in
+  let%map server_conn, client_conn = Deferred.both server_conn client_conn in
+  `Server (server_time_source, server_conn), `Client (client_time_source, client_conn)
+;;

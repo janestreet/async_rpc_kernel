@@ -179,7 +179,8 @@ let%expect_test "client 0s, server 60s" =
      (Error
       ("Connection closed before we could get peer metadata"
        (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason ("EOF or connection closed")))))
+       (close_reason
+        (("EOF or connection closed" (connection_description <created-directly>)))))))
     |}];
   return ()
 ;;
@@ -219,7 +220,8 @@ let%expect_test "client 60s, server 0s" =
      (Error
       ("Connection closed before we could get peer metadata"
        (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason ("EOF or connection closed")))))
+       (close_reason
+        (("EOF or connection closed" (connection_description <created-directly>)))))))
     |}];
   return ()
 ;;

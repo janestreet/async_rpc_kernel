@@ -111,6 +111,11 @@ module type S = sig
       the current time. *)
   val reset_heartbeat_timeout : t -> Time_ns.Span.t -> unit
 
+  (** If no environment override is specified, this is the heartbeat config timeout.
+      Otherwise, this is the max between the environment override and the heartbeat config
+      timeout. *)
+  val effective_heartbeat_timeout : t -> Time_ns.Span.t
+
   (** The last time either any message has been received or [reset_heartbeat_timeout] was
       called. *)
   val last_seen_alive : t -> Time_ns.t
@@ -361,5 +366,6 @@ module type S_private = sig
     end
 
     val with_async_execution_context : context:Header.t -> f:(unit -> 'a) -> 'a
+    val heartbeat_timeout_override_env_var : string
   end
 end

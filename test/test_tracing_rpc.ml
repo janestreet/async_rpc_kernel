@@ -275,12 +275,13 @@ let%expect_test "Single rpc implementation fails to send twice" =
        "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
        "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
     (Close_started
-     ("exn raised in RPC connection loop"
-      (monitor.ml.Error
-       ("Failed to send write error to client"
-        ((error (Message_too_big ((size 100) (max_message_size 10))))
-         (reason (Message_too_big ((size 200) (max_message_size 10))))))
-       ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
+     (("exn raised in RPC connection loop"
+       (monitor.ml.Error
+        ("Failed to send write error to client"
+         ((error (Message_too_big ((size 100) (max_message_size 10))))
+          (reason (Message_too_big ((size 200) (max_message_size 10))))))
+        ("<backtrace elided in test>" "Caught by monitor RPC connection loop")))
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
@@ -330,7 +331,8 @@ let%expect_test "connection fully closes before single rpc response" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
-    (Close_started "EOF or connection closed")
+    (Close_started
+     ("EOF or connection closed" (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
@@ -436,12 +438,13 @@ let%expect_test "Single rpc implementation fails to send twice" =
        "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
        "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
     (Close_started
-     ("exn raised in RPC connection loop"
-      (monitor.ml.Error
-       ("Failed to send write error to client"
-        ((error (Message_too_big ((size 100) (max_message_size 10))))
-         (reason (Message_too_big ((size 200) (max_message_size 10))))))
-       ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
+     (("exn raised in RPC connection loop"
+       (monitor.ml.Error
+        ("Failed to send write error to client"
+         ((error (Message_too_big ((size 100) (max_message_size 10))))
+          (reason (Message_too_big ((size 200) (max_message_size 10))))))
+        ("<backtrace elided in test>" "Caught by monitor RPC connection loop")))
+      (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished
@@ -717,7 +720,8 @@ let%expect_test "connection closes before response received" =
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   [%expect
     {|
-    (Close_started "EOF or connection closed")
+    (Close_started
+     ("EOF or connection closed" (connection_description <created-directly>)))
     Close_writer
     Close_reader
     Close_finished

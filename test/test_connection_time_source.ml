@@ -17,59 +17,12 @@ let heartbeat_every = sec 2.
 let heartbeat_timeout = sec 10.
 let yield () = Async_kernel_scheduler.yield_until_no_jobs_remain ()
 
-let establish_connection transport time_source description =
-  let conn =
-    Connection.create
-      ~connection_state:(fun _ -> ())
-      ~heartbeat_config:
-        (Connection.Heartbeat_config.create
-           ~timeout:heartbeat_timeout
-           ~send_every:heartbeat_every
-           ())
-      ~description
-      ~time_source
-      transport
-  in
-  Deferred.upon conn (fun conn ->
-    let conn = Result.ok_exn conn in
-    let () =
-      Deferred.upon (Connection.close_reason conn ~on_close:`started) (fun reason ->
-        print_s
-          [%message
-            "connection closed"
-              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-              (description : Info.t)
-              (reason : Info.t)])
-    in
-    let () =
-      Connection.add_heartbeat_callback conn (fun () ->
-        print_s
-          [%message
-            "received heartbeat"
-              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-              (description : Info.t)])
-    in
-    ());
-  conn >>| Result.ok_exn
-;;
-
 let%expect_test "test connection with time_source <> wall_clock" =
-  let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
-  let client_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
-  let client_transport, server_transport = Pipe_transport.(create_pair Kind.bigstring) in
-  let server_conn =
-    establish_connection
-      server_transport
-      (Synchronous_time_source.read_only server_time_source)
-      (Info.of_string "server")
+  let%bind ( `Server (server_time_source, server_conn)
+           , `Client (client_time_source, client_conn) )
+    =
+    Test_helpers.setup_server_and_client_connection ~heartbeat_timeout ~heartbeat_every
   in
-  let client_conn =
-    establish_connection
-      client_transport
-      (Synchronous_time_source.read_only client_time_source)
-      (Info.of_string "client")
-  in
-  let%bind server_conn, client_conn = Deferred.both server_conn client_conn in
   [%expect {| |}];
   let print_liveness conn =
     print_s [%message "" ~last_seen_alive:(Connection.last_seen_alive conn : Time_ns.t)]
@@ -146,14 +99,17 @@ let%expect_test "test connection with time_source <> wall_clock" =
     ("connection closed"
       (now         "1970-01-01 00:00:14Z")
       (description server)
-      (reason
-       "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00."))
+      (reason (
+        ("Connection closed by local side:"
+         "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
+        (connection_description server))))
     ("connection closed"
       (now         "1970-01-01 00:00:02Z")
       (description client)
       (reason (
-        "Connection closed by peer:"
-        "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")))
+        ("Connection closed by remote side:"
+         "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
+        (connection_description client))))
     |}];
   print_liveness server_conn;
   print_liveness client_conn;

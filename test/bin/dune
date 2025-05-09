@@ -1,0 +1,7 @@
+(executables
+ (modes byte exe)
+ (names test_heartbeat_timeout_override)
+ (libraries async async.async_rpc async_rpc_kernel core
+   core_unix.command_unix)
+ (preprocess
+  (pps ppx_jane)))
