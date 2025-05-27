@@ -209,7 +209,7 @@ module Implementations : sig
              'connection_state
              -> rpc_tag:string
              -> version:int
-             -> metadata:string option
+             -> metadata:Rpc_metadata.V1.t option
              -> Responder.t
              -> Bigstring.t
              -> pos:int
@@ -365,7 +365,7 @@ module Rpc : sig
       :  Connection.t
       -> rpc_tag:string
       -> version:int
-      -> metadata:string option
+      -> metadata:Rpc_metadata.V1.t option
       -> Bigstring.t
       -> pos:int
       -> len:int

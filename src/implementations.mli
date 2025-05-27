@@ -69,7 +69,7 @@ module Instance : sig
 
   val handle_query
     :  t
-    -> query:Nat0.t Query.t
+    -> query:Nat0.t Query.V2.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
     -> close_connection_monitor:Monitor.t
@@ -87,7 +87,7 @@ module Instance : sig
     :  t
     -> (Description.t
         -> query_id:Query_id.t
-        -> Rpc_metadata.t option
+        -> Rpc_metadata.V1.t option
         -> Execution_context.t
         -> Execution_context.t)
     -> unit
@@ -183,7 +183,7 @@ module Expert : sig
            'connection_state
            -> rpc_tag:string
            -> version:int
-           -> metadata:string option
+           -> metadata:Rpc_metadata.V1.t option
            -> Responder.t
            -> Bigstring.t
            -> pos:int
@@ -210,7 +210,7 @@ module Private : sig
            'connection_state
            -> rpc_tag:string
            -> version:int
-           -> metadata:string option
+           -> metadata:Rpc_metadata.V1.t option
            -> Expert.Responder.t
            -> Bigstring.t
            -> pos:int

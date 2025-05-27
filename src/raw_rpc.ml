@@ -11,7 +11,7 @@ let dispatch'
   ~response_handler
   =
   let query =
-    { Protocol.Query.tag
+    { Protocol.Query.V2.tag
     ; version
     ; id = query_id
     ; metadata =

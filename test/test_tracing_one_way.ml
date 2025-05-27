@@ -53,7 +53,7 @@ let write_query ?don't_read_yet ?(id = 100) t =
     ?don't_read_yet
     t
     [%bin_writer: string]
-    (Query
+    (Query_v2
        { tag = Protocol.Rpc_tag.of_string "one-way"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
@@ -67,7 +67,7 @@ let write_plain_query t =
     ~don't_read_yet:()
     t
     [%bin_writer: int]
-    (Query
+    (Query_v2
        { tag = Protocol.Rpc_tag.of_string "plain"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn 99

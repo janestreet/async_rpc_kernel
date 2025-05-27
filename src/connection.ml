@@ -131,14 +131,14 @@ type t =
       *)
   ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
   ; metadata_for_dispatch :
-      (Description.t -> query_id:Int63.t -> Rpc_metadata.t option) Moption.t
+      (Description.t -> query_id:Int63.t -> Rpc_metadata.V1.t option) Moption.t
   ; peer_metadata : Peer_metadata.t Set_once.t
       (* responses to queries are written by the implementations instance. Other events
      are written by this module. *)
   ; metadata_on_receive_to_add_to_implementations_instance :
       (Description.t
        -> query_id:P.Query_id.t
-       -> Rpc_metadata.t option
+       -> Rpc_metadata.V1.t option
        -> Execution_context.t
        -> Execution_context.t)
         Set_once.t
@@ -291,10 +291,10 @@ let handle_send_result
 
 let send_query_with_registered_response_handler
   t
-  (query : 'query P.Query.t)
+  (query : 'query P.Query.V2.t)
   ~response_handler
   ~kind
-  ~(send_query : 'query P.Query.t -> 'response Transport.Send_result.t)
+  ~(send_query : 'query P.Query.V2.t -> 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
   let rpc : Description.t =
@@ -321,7 +321,7 @@ let send_query_with_registered_response_handler
   result
 ;;
 
-let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) =
+let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.V2.t) =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
@@ -330,7 +330,10 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.t) 
       | Some metadata ->
         { query with
           metadata =
-            Some (String.prefix metadata (Byte_units.bytes_int_exn t.max_metadata_size))
+            Some
+              (Rpc_metadata.V1.truncate
+                 metadata
+                 (Byte_units.bytes_int_exn t.max_metadata_size))
         }
       | None -> query
     in
@@ -360,7 +363,7 @@ let make_dispatch_bigstring
   | Ok writer ->
     let id = P.Query_id.create () in
     let metadata = compute_metadata t ~tag ~version ~id ~metadata in
-    let query : unit P.Query.t = { tag; version; id; metadata; data = () } in
+    let query : unit P.Query.V2.t = { tag; version; id; metadata; data = () } in
     send_query_with_registered_response_handler
       t
       query
@@ -548,7 +551,7 @@ let handle_msg
       ~read_buffer
       ~read_buffer_pos_ref
       ~protocol_message_len
-  | Query query ->
+  | Query_v2 query ->
     let instance = Set_once.get_exn t.implementations_instance in
     Implementations.Instance.handle_query
       instance
@@ -559,7 +562,7 @@ let handle_msg
       ~close_connection_monitor
   | Query_v1 query ->
     let instance = Set_once.get_exn t.implementations_instance in
-    let query = P.Query.of_v1 query in
+    let query = P.Query.V2.of_v1 query in
     Implementations.Instance.handle_query
       instance
       ~query
@@ -1153,7 +1156,7 @@ let with_close
   let handle_handshake_error =
     match on_handshake_error with
     | `Call f -> f
-    | `Raise -> raise
+    | `Raise -> fun x -> raise x
   in
   let%bind t =
     create

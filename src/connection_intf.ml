@@ -239,7 +239,7 @@ module type S_private = sig
   (* Internally, we use a couple of extra functions on connections that aren't exposed to
      users. *)
 
-  val compute_metadata : t -> Description.t -> Query_id.t -> Rpc_metadata.t option
+  val compute_metadata : t -> Description.t -> Query_id.t -> Rpc_metadata.V1.t option
 
   module Response_handler_action : sig
     type response_with_determinable_status =
@@ -279,7 +279,7 @@ module type S_private = sig
     -> kind:Tracing_event.Sent_response_kind.t Tracing_event.Kind.t
     -> response_handler:Response_handler.t option
     -> bin_writer_query:'a Bin_prot.Type_class.writer
-    -> query:'a Query.t
+    -> query:'a Query.V2.t
     -> (unit, Dispatch_error.t) Result.t
 
   val dispatch_bigstring
@@ -308,7 +308,7 @@ module type S_private = sig
     :  t
     -> tag:Rpc_tag.t
     -> version:int
-    -> metadata:string option
+    -> metadata:Rpc_metadata.V1.t option
     -> Bigstring.t
     -> pos:int
     -> len:int
@@ -338,11 +338,11 @@ module type S_private = sig
       The passed [query_id] may be used to correlate with a listener on the {!events} bus. *)
   val set_metadata_hooks
     :  t
-    -> when_sending:(Description.t -> query_id:Int63.t -> Rpc_metadata.t option)
+    -> when_sending:(Description.t -> query_id:Int63.t -> Rpc_metadata.V1.t option)
     -> on_receive:
          (Description.t
           -> query_id:Int63.t
-          -> Rpc_metadata.t option
+          -> Rpc_metadata.V1.t option
           -> Execution_context.t
           -> Execution_context.t)
     -> [ `Ok | `Already_set ]

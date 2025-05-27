@@ -44,7 +44,7 @@ let write_query ?metadata ?don't_read_yet ?(id = 123) t =
     ?don't_read_yet
     t
     [%bin_writer: string]
-    (Query
+    (Query_v2
        { tag = Protocol.Rpc_tag.of_string "rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
@@ -711,7 +711,7 @@ let%expect_test "connection closes before response received" =
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send (Query_v2 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -751,7 +751,7 @@ let%expect_test "expert unknown rpc handler" =
                 "Unknown rpc"
                   ~rpc_tag
                   (version : int)
-                  (metadata : string option)
+                  (metadata : Async_rpc_kernel.Rpc_metadata.V1.t option)
                   ~data:([%bin_read: string] bs ~pos_ref:(ref pos))];
             Rpc.Rpc.Expert.Responder.write_error
               responder
@@ -781,7 +781,7 @@ let%expect_test "expert unknown rpc handler" =
       (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   Mock_peer.expect_message t [%bin_reader: Nothing.t] [%sexp_of: Nothing.t];
-  write_query ~metadata:"example metadata" t;
+  write_query ~metadata:(Async_rpc_kernel.Rpc_metadata.V1.of_string "example metadata") t;
   [%expect
     {|
     (Tracing_event
