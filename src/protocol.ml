@@ -192,47 +192,51 @@ end
 
 module Header = Protocol_version_header
 
-module Query_v1 = struct
-  type 'a needs_length =
-    { tag : Rpc_tag.t
-    ; version : int
-    ; id : Query_id.t
-    ; data : 'a
-    }
-  [@@deriving bin_io ~localize, globalize, sexp_of]
-
-  let%expect_test _ =
-    print_endline [%bin_digest: unit needs_length];
-    [%expect {| be5888691d73427b3ac8ea300c169422 |}]
-  ;;
-
-  type 'a t = 'a needs_length [@@deriving bin_read]
-end
-
 module Query = struct
-  type 'a needs_length =
-    { tag : Rpc_tag.t
-    ; version : int
-    ; id : Query_id.t
-    ; metadata : string option
-    ; data : 'a
-    }
-  [@@deriving bin_io ~localize, globalize, sexp_of]
+  module V1 = struct
+    type 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; data : 'a
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
 
-  let%expect_test _ =
-    print_endline [%bin_digest: unit needs_length];
-    [%expect {| ef70ea2dd0bb812a601d28810e6637d4 |}]
-  ;;
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| be5888691d73427b3ac8ea300c169422 |}]
+    ;;
 
-  type 'a t = 'a needs_length [@@deriving bin_read]
+    type 'a t = 'a needs_length [@@deriving bin_read]
+  end
 
-  let to_v1 { tag; version; id; metadata = (_ : string option); data } : _ Query_v1.t =
-    { tag; version; id; data }
-  ;;
+  module V2 = struct
+    type 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V1.t option
+      ; data : 'a
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
 
-  let of_v1 ?metadata { Query_v1.tag; version; id; data } =
-    { tag; version; id; metadata; data }
-  ;;
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| ef70ea2dd0bb812a601d28810e6637d4 |}]
+    ;;
+
+    type 'a t = 'a needs_length [@@deriving bin_read]
+
+    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V1.t option); data }
+      : _ V1.t
+      =
+      { tag; version; id; data }
+    ;;
+
+    let of_v1 ?metadata { V1.tag; version; id; data } =
+      { tag; version; id; metadata; data }
+    ;;
+  end
 end
 
 module Impl_menu_index = Nat0.Option
@@ -332,9 +336,9 @@ module Message = struct
      incorrect index. *)
   type 'a maybe_needs_length =
     | Heartbeat
-    | Query_v1 of 'a Query_v1.needs_length
+    | Query_v1 of 'a Query.V1.needs_length
     | Response_v1 of 'a Response.V1.needs_length
-    | Query of 'a Query.needs_length
+    | Query_v2 of 'a Query.V2.needs_length
     | Metadata of Connection_metadata.V1.t
     | Close_reason of Info_with_local_bin_io.t
     | Close_reason_duplicated of Info_with_local_bin_io.t
@@ -344,7 +348,7 @@ module Message = struct
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 6258b35f555b1ef6af290732085c0b7d |}]
+    [%expect {| f3502c621ce978a8e1ed90bb8f344e22 |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -369,11 +373,11 @@ module Message = struct
       print_endline [%string "%{variant.name}: %{variant.rank#Int}"];
       f variant.constructor |> print_bin_prot
     in
-    let query : unit Query.needs_length =
+    let query : unit Query.V2.needs_length =
       { tag = Rpc_tag.of_string "tag"
       ; version = 0
       ; id = Query_id.of_int_exn 1
-      ; metadata = None
+      ; metadata = Some (Rpc_metadata.V1.of_string "metadata")
       ; data = ()
       }
     in
@@ -381,11 +385,11 @@ module Message = struct
     let close_reason = Core.Info.create_s [%message "Close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
-      ~query_v1:(print (fun c -> c (Query.to_v1 query)))
+      ~query_v1:(print (fun c -> c (Query.V2.to_v1 query)))
       ~response_v1:
         (print (fun c ->
            c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.V1.needs_length)))
-      ~query:(print (fun c -> c query))
+      ~query_v2:(print (fun c -> c query))
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
@@ -406,8 +410,9 @@ module Message = struct
       00000000  01 03 74 61 67 00 01 00                           |..tag...|
       Response_v1: 2
       00000000  02 00 00 00                                       |....|
-      Query: 3
-      00000000  03 03 74 61 67 00 01 00  00                       |..tag....|
+      Query_v2: 3
+      00000000  03 03 74 61 67 00 01 01  08 6d 65 74 61 64 61 74  |..tag....metadat|
+      00000010  61 00                                             |a.|
       Metadata: 4
       00000000  04 00 00                                          |...|
       Close_reason: 5

@@ -34,7 +34,7 @@ type 'connection_state on_unknown_rpc_with_expert =
     'connection_state
     -> rpc_tag:string
     -> version:int
-    -> metadata:string option
+    -> metadata:Rpc_metadata.V1.t option
     -> Responder.t
     -> Bigstring.t
     -> pos:int
@@ -87,7 +87,7 @@ module Instance = struct
     ; mutable on_receive :
         local_ Description.t
         -> query_id:P.Query_id.t
-        -> Rpc_metadata.t option
+        -> Rpc_metadata.V1.t option
         -> Execution_context.t
         -> Execution_context.t
     }
@@ -576,7 +576,7 @@ module Instance = struct
     t
     implementation
     ~impl_menu_index
-    ~(query : Nat0.t P.Query.t)
+    ~(query : Nat0.t P.Query.V2.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1089,7 +1089,7 @@ module Instance = struct
       (match
          f
            t.connection_state
-           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.tag)
+           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V2.tag)
            ~version:query.version
        with
        | `Close_connection -> Stop (Ok ())
@@ -1098,7 +1098,7 @@ module Instance = struct
 
   let handle_query_internal
     t
-    ~(query : Nat0.t P.Query.t)
+    ~(query : Nat0.t P.Query.V2.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1154,7 +1154,7 @@ module Instance = struct
            };
          (match on_unknown_rpc with
           | `Expert impl ->
-            let { P.Query.tag; version; id; metadata; data = len } = query in
+            let { P.Query.V2.tag; version; id; metadata; data = len } = query in
             let rpc_tag = P.Rpc_tag.to_string tag in
             let d =
               let responder = Responder.create id impl_menu_index t.writer in
@@ -1196,7 +1196,7 @@ module Instance = struct
 
   let handle_query
     (T t)
-    ~(query : Nat0.t P.Query.t)
+    ~(query : Nat0.t P.Query.V2.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor

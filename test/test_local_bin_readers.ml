@@ -58,7 +58,13 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       ; impl_menu_index
       ; data = Error (Unimplemented_rpc (Protocol.Rpc_tag.of_string "a tag", `Version 77))
       }
-  ; Query { tag; version = 10; id; metadata = Some "test metadata"; data }
+  ; Query_v2
+      { tag
+      ; version = 10
+      ; id
+      ; metadata = Some (Async_rpc_kernel.Rpc_metadata.V1.of_string "test metadata v1")
+      ; data
+      }
     (* This allocates: bigstring cannot be allocated on the stack *)
   ; Metadata { identification; menu = Some menu }
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
@@ -110,8 +116,9 @@ let%expect_test "Test reading different kinds of messages" =
     bin_read did not allocate
 
     Parsed message:
-    (Query
-     ((tag test-tag) (version 10) (id 1) (metadata ("test metadata")) (data _)))
+    (Query_v2
+     ((tag test-tag) (version 10) (id 1) (metadata ("test metadata v1"))
+      (data _)))
     bin_read did not allocate
 
     Parsed message:

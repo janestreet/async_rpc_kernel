@@ -129,44 +129,48 @@ module Rpc_result = struct
   ;;
 end
 
-module Query_v1 = struct
-  include Query_v1
-
-  type nonrec 'a needs_length = 'a needs_length =
-    { tag : Rpc_tag.t
-    ; version : int
-    ; id : Query_id.t
-    ; data : 'a
-    }
-
-  let bin_read_t__local bin_read_el buf ~pos_ref = exclave_
-    let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
-    let version = bin_read_int buf ~pos_ref in
-    let id = Query_id.bin_read_t__local buf ~pos_ref in
-    let data = bin_read_el buf ~pos_ref in
-    { tag; version; id; data }
-  ;;
-end
-
 module Query = struct
-  include Query
+  module V1 = struct
+    include Query.V1
 
-  type nonrec 'a needs_length = 'a needs_length =
-    { tag : Rpc_tag.t
-    ; version : int
-    ; id : Query_id.t
-    ; metadata : string option
-    ; data : 'a
-    }
+    type nonrec 'a needs_length = 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; data : 'a
+      }
 
-  let bin_read_t__local bin_read_el buf ~pos_ref = exclave_
-    let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
-    let version = bin_read_int buf ~pos_ref in
-    let id = Query_id.bin_read_t__local buf ~pos_ref in
-    let metadata = bin_read_option__local bin_read_string__local buf ~pos_ref in
-    let data = bin_read_el buf ~pos_ref in
-    { tag; version; id; metadata; data }
-  ;;
+    let bin_read_t__local bin_read_el buf ~pos_ref = exclave_
+      let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
+      let version = bin_read_int buf ~pos_ref in
+      let id = Query_id.bin_read_t__local buf ~pos_ref in
+      let data = bin_read_el buf ~pos_ref in
+      { tag; version; id; data }
+    ;;
+  end
+
+  module V2 = struct
+    include Query.V2
+
+    type nonrec 'a needs_length = 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V1.t option
+      ; data : 'a
+      }
+
+    let bin_read_t__local bin_read_el buf ~pos_ref = exclave_
+      let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
+      let version = bin_read_int buf ~pos_ref in
+      let id = Query_id.bin_read_t__local buf ~pos_ref in
+      let metadata =
+        bin_read_option__local Rpc_metadata.V1.bin_read_t__local buf ~pos_ref
+      in
+      let data = bin_read_el buf ~pos_ref in
+      { tag; version; id; metadata; data }
+    ;;
+  end
 end
 
 module Response = struct
@@ -252,9 +256,9 @@ module Message = struct
 
   type nonrec 'a maybe_needs_length = 'a maybe_needs_length =
     | Heartbeat
-    | Query_v1 of 'a Query_v1.needs_length
+    | Query_v1 of 'a Query.V1.needs_length
     | Response_v1 of 'a Response.V1.needs_length
-    | Query of 'a Query.needs_length
+    | Query_v2 of 'a Query.V2.needs_length
     | Metadata of Connection_metadata.V1.t
     | Close_reason of Info.t
     | Close_reason_duplicated of Info.t
@@ -267,7 +271,7 @@ module Message = struct
     | 0 -> exclave_ Heartbeat
     | 1 ->
       exclave_
-      let query = Query_v1.bin_read_t__local bin_read_el buf ~pos_ref in
+      let query = Query.V1.bin_read_t__local bin_read_el buf ~pos_ref in
       Query_v1 query
     | 2 ->
       exclave_
@@ -275,8 +279,8 @@ module Message = struct
       Response_v1 response
     | 3 ->
       exclave_
-      let query = Query.bin_read_t__local bin_read_el buf ~pos_ref in
-      Query query
+      let query = Query.V2.bin_read_t__local bin_read_el buf ~pos_ref in
+      Query_v2 query
     | 4 ->
       exclave_
       let metadata = Connection_metadata.V1.bin_read_t__local buf ~pos_ref in

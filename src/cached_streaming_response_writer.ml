@@ -89,47 +89,54 @@ let bin_write_string_no_length buf ~pos str =
 ;;
 
 (* The two following functions are used by the 3 variants exposed by this module. They
-       serialize a [Response { id; data = Ok (`Ok data_len) }] value, taking care of
-       writing the [Nat0.t] length prefix where appropriate.
+   serialize a [Response { id; data = Ok (`Ok data_len) }] value, taking care of
+   writing the [Nat0.t] length prefix where appropriate.
 
-       Bear in mind that there are two levels of length prefixes for stream response data
-       message: one for the user data (under the `Ok, before the actual data), and one for
-       the response data (under the .data field, before the Ok).
+   Bear in mind that there are two levels of length prefixes for stream response data
+   message: one for the user data (under the `Ok, before the actual data), and one for
+   the response data (under the .data field, after the Ok and before the `Ok).
 
-       When eventually serialized, we get a sequence of bytes that can be broken down as:
-       {v
-        <Response><id> <length-of-rest> <Ok `Ok> <length-of-rest> <actual-response>
-       |              |                |        |                |<- t.data_len -->|
-       |header_prefix |             -->|        |<--             |                 |
-       |                       stream_response_data_header_len   |                 |
-       |                               |<------ stream_response_data_len --------->|
-       |<----------------------- bin_size_nat0_header ---------------------------->|
-       |<----------- written by bin_write_nat0_header ---------->|
-       v}
+   When eventually serialized, we get a sequence of bytes that can be broken down as:
+   {v
+   <Response> <id> <Ok> <len-of-stream-data> <`Ok> <len-of-actual-data> <actual-response>
+  |                    |                    |     |                    |<- t.data_len -->|
+  |<- header_prefix -->|                 -->|     |<--                 |                 |
+  |                             stream_response_data_header_len        |                 |
+  |                                         |<-------- stream_response_data_len -------->|
+  |<------------------- bin_size_nat0_header ------------------------->|
+  |<---------------- written by bin_write_nat0_header ---------------->|
+   v}
 *)
 let bin_size_nat0_header { header_prefix; data_len; _ } =
+  (* This is the length of [<`Ok> <len-of-actual-data>] *)
   let stream_response_data_nat0_len =
     stream_response_data_header_len + Nat0.bin_size_t data_len
   in
+  (* This is the length of [<`Ok> <len-of-actual-data> <actual-response>] *)
   let stream_response_data_len =
     stream_response_data_nat0_len + (data_len : Nat0.t :> int)
   in
+  (* This is the length of indicated by [bin_size_nat0_header] *)
   String.length header_prefix
   + Nat0.bin_size_t (Nat0.of_int_exn stream_response_data_len)
   + stream_response_data_nat0_len
 ;;
 
 let bin_write_nat0_header buf ~pos { header_prefix; data_len; _ } =
+  (* This wrote [<Response> <id> <Ok>] *)
   let pos = bin_write_string_no_length buf ~pos header_prefix in
   let stream_response_data_len =
     stream_response_data_header_len
     + Nat0.bin_size_t data_len
     + (data_len : Nat0.t :> int)
   in
+  (* This wrote [<len-of-stream-data>] *)
   let pos = Nat0.bin_write_t buf ~pos (Nat0.of_int_exn stream_response_data_len) in
   let next = pos + 4 in
   Bin_prot.Common.check_next buf next;
+  (* This wrote [<`Ok>] *)
   Bigstring.unsafe_set_int32_t_le buf ~pos stream_response_data_header_as_int32;
+  (* This wrote [<len-of-actual-data>] *)
   Nat0.bin_write_t buf ~pos:next data_len
 ;;
 

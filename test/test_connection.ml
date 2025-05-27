@@ -157,7 +157,7 @@ let%expect_test "latest version simple RPC dispatches" =
         00                                                   digests= None
 
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         01                                   id= 1 (int)
@@ -192,7 +192,7 @@ let%expect_test "latest version simple RPC dispatches" =
       [%expect
         {|
         1200 0000 0000 0000    length= 18 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0874 6573 742d 7270    ...
         63                                  tag= test-rpc (8 bytes)
         01                              version= 1 (int)
@@ -217,7 +217,7 @@ let%expect_test "latest version simple RPC dispatches" =
       [%expect
         {|
         1200 0000 0000 0000    length= 18 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0874 6573 742d 7270    ...
         63                                  tag= test-rpc (8 bytes)
         02                              version= 2 (int)
@@ -290,7 +290,7 @@ let%expect_test "latest version pipe RPC dispatches" =
         00                                                   digests= None
 
         1c00 0000 0000 0000    length= 28 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0d74 6573 742d 7069    ...
         7065 2d72 7063                      tag= test-pi... (13 bytes)
         01                              version= 1 (int)
@@ -402,7 +402,7 @@ let%expect_test "pipe RPC Response_v1" =
         00                                                   digests= None
 
         1c00 0000 0000 0000    length= 28 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0d74 6573 742d 7069    ...
         7065 2d72 7063                      tag= test-pi... (13 bytes)
         01                              version= 1 (int)
@@ -921,7 +921,7 @@ let%expect_test "V2 local rpc" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         06                                   id= 6 (int)
@@ -952,7 +952,7 @@ let%expect_test "V2 local rpc" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         07                                   id= 7 (int)
@@ -980,7 +980,7 @@ let%expect_test "V2 local rpc" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         08                                   id= 8 (int)
@@ -1233,7 +1233,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         {|
         ---   client -> server:   ---
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         0f                                   id= 15 (int)
@@ -1268,7 +1268,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         {|
         ---   client -> server:   ---
         0b00 0000 0000 0000    length= 11 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         10                                   id= 16 (int)
@@ -1289,7 +1289,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         {|
         ---   client -> server:   ---
         0b00 0000 0000 0000    length= 11 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         11                                   id= 17 (int)
@@ -1524,7 +1524,7 @@ let%expect_test "expert v2 dispatch" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         18                                   id= 24 (int)
@@ -1555,7 +1555,7 @@ let%expect_test "expert v2 dispatch" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         19                                   id= 25 (int)
@@ -1583,7 +1583,7 @@ let%expect_test "expert v2 dispatch" =
       [%expect
         {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query
+        03                       body= Query_v2
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         1a                                   id= 26 (int)
