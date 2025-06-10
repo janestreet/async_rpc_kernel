@@ -402,8 +402,8 @@ let%expect_test "highest_available_version 2, no alloc" =
       let t = Menu.of_v1_or_v2 (`V1 v1) in
       let t_ref = Reference_menu.of_v1_or_v2 (`V1 v1) in
       let res =
-        Expect_test_helpers_core.require_no_allocation_local (fun () ->
-          exclave_ Menu.highest_available_version t ~rpc_name ~from_sorted_array)
+        Expect_test_helpers_core.require_no_allocation_local (fun () -> exclave_
+          Menu.highest_available_version t ~rpc_name ~from_sorted_array)
         |> Response.globalize
       in
       let expect =
@@ -426,8 +426,8 @@ let%expect_test "highest_available_version disjoint, no alloc" =
     Array.sort ~compare:Int.compare query;
     let t = Menu.of_v1_or_v2 (`V1 (List.map rpc ~f:(fun v -> "foo", v))) in
     let version =
-      Expect_test_helpers_core.require_no_allocation_local (fun () ->
-        exclave_ Menu.highest_available_version t ~rpc_name:"foo" ~from_sorted_array:query)
+      Expect_test_helpers_core.require_no_allocation_local (fun () -> exclave_
+        Menu.highest_available_version t ~rpc_name:"foo" ~from_sorted_array:query)
       |> Response.globalize
     in
     [%test_result: Response.t] version ~expect:(Error `Some_versions_but_none_match)

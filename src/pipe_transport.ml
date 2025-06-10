@@ -209,8 +209,7 @@ module Pipe_writer (Data : DATA) = struct
   ;;
 
   let send_bin_prot t writer x = exclave_
-    check_closed t (fun () ->
-      exclave_
+    check_closed t (fun () -> exclave_
       let buf = Bin_prot.Utils.bin_dump ~header:true writer x in
       let data = Data.of_bigstring buf in
       let len = Data.length data in
@@ -227,8 +226,7 @@ module Pipe_writer (Data : DATA) = struct
     ~pos
     ~len:payload_size
     = exclave_
-    check_closed t (fun () ->
-      exclave_
+    check_closed t (fun () -> exclave_
       (* Write the size header manually and concatenate the two *)
       let data_size = writer.size x in
       let data = Bigstring.create (data_size + Header.length + payload_size) in

@@ -18,8 +18,8 @@ let parse_message_locally_and_show_allocations message =
        , { Gc.For_testing.Allocation_report.major_words_allocated; minor_words_allocated }
        , (_ : Core.Gc.For_testing.Allocation_log.t list) )
     =
-    Gc.For_testing.measure_and_log_allocation_local (fun () ->
-      exclave_ Protocol_local_readers.Message.bin_read_nat0_t__local buf ~pos_ref)
+    Gc.For_testing.measure_and_log_allocation_local (fun () -> exclave_
+      Protocol_local_readers.Message.bin_read_nat0_t__local buf ~pos_ref)
   in
   let result = [%globalize: Protocol.Message.nat0_t] result in
   print_endline "Parsed message:";
@@ -150,8 +150,8 @@ let%expect_test "Test read protocol version header locally" =
   let buf = Bigstring.create ([%bin_size: Header.t] header) in
   let (_ : int) = [%bin_write: Header.t] buf ~pos:0 header in
   let pos_ref = ref 0 in
-  Expect_test_helpers_core.require_no_allocation_local (fun () ->
-    exclave_ Header.bin_read_t__local buf ~pos_ref)
+  Expect_test_helpers_core.require_no_allocation_local (fun () -> exclave_
+    Header.bin_read_t__local buf ~pos_ref)
   |> [%globalize: Header.t]
   |> [%sexp_of: Header.t]
   |> print_s;

@@ -355,11 +355,12 @@ let establish_connection
     in
     let () =
       Async_rpc_kernel.Rpc.Connection.add_heartbeat_callback conn (fun () ->
-        print_s
-          [%message
-            "received heartbeat"
-              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-              (description : Info.t)])
+        print_endline
+          (Sexp.to_string_mach
+             [%message
+               "received heartbeat"
+                 ~now:(Synchronous_time_source.now time_source : Time_ns.t)
+                 (description : Info.t)]))
     in
     ());
   conn >>| Result.ok_exn

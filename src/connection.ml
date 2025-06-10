@@ -343,9 +343,8 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.V2.
       query
       ~response_handler
       ~kind
-      ~send_query:
-        (local_
-        fun query -> exclave_ Protocol_writer.Query.send writer query ~bin_writer_query)
+      ~send_query:(local_ fun query -> exclave_
+        Protocol_writer.Query.send writer query ~bin_writer_query)
     [@nontail]
 ;;
 
@@ -372,16 +371,15 @@ let make_dispatch_bigstring
       query
       ~response_handler
       ~kind:Query
-      ~send_query:
-        (local_
-        fun query -> exclave_
-          Protocol_writer.Query.send_expert
-            writer
-            query
-            ~buf
-            ~pos
-            ~len
-            ~send_bin_prot_and_bigstring:do_send) [@nontail]
+      ~send_query:(local_ fun query -> exclave_
+        Protocol_writer.Query.send_expert
+          writer
+          query
+          ~buf
+          ~pos
+          ~len
+          ~send_bin_prot_and_bigstring:do_send)
+    [@nontail]
 ;;
 
 let dispatch_bigstring =
@@ -512,76 +510,6 @@ let handle_response
            | Lift_error _ -> Stop (Error e))))
 ;;
 
-let set_peer_metadata t connection_metadata =
-  match Set_once.get t.peer_metadata with
-  | None | Some Unsupported ->
-    raise_s
-      [%message
-        "Inconsistent state: receiving a metadata message is unsupported, but a metadata \
-         message was received"]
-  | Some (Expected ivar) ->
-    if Ivar.is_empty t.close_started then Ivar.fill_exn ivar (Ok connection_metadata)
-;;
-
-let handle_msg
-  t
-  (msg : _ P.Message.t)
-  ~read_buffer
-  ~read_buffer_pos_ref
-  ~protocol_message_len
-  ~close_connection_monitor
-  : _ Transport.Handler_result.t
-  =
-  match msg with
-  | Metadata metadata ->
-    set_peer_metadata t (P.Connection_metadata.V2.of_v1 metadata);
-    Continue
-  | Metadata_v2 metadata ->
-    set_peer_metadata t metadata;
-    Continue
-  | Heartbeat ->
-    Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
-    Continue
-  | Response_v1 response ->
-    handle_response
-      t
-      response.id
-      ~data:response.data
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~protocol_message_len
-  | Response_v2 response ->
-    handle_response
-      t
-      response.id
-      ~data:response.data
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~protocol_message_len
-  | Query_v2 query ->
-    let instance = Set_once.get_exn t.implementations_instance in
-    Implementations.Instance.handle_query
-      instance
-      ~query
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
-      ~close_connection_monitor
-  | Query_v1 query ->
-    let instance = Set_once.get_exn t.implementations_instance in
-    let query = P.Query.V2.of_v1 query in
-    Implementations.Instance.handle_query
-      instance
-      ~query
-      ~read_buffer
-      ~read_buffer_pos_ref
-      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
-      ~close_connection_monitor
-  | Close_reason info | Close_reason_duplicated info ->
-    Set_once.set_exn t.received_close_reason info;
-    Stop (Ok ())
-;;
-
 let close_reason t ~on_close =
   let reason = Ivar.read t.close_started in
   match on_close with
@@ -674,6 +602,104 @@ let close
     Protocol_writer.close t.writer
     >>> fun () -> Reader.close t.reader >>> fun () -> Ivar.fill_exn t.close_finished ());
   close_finished t
+;;
+
+let cleanup t ~reason exn =
+  don't_wait_for (close ~reason t);
+  if not (Hashtbl.is_empty t.open_queries)
+  then (
+    let error =
+      match exn with
+      | Rpc_error.Rpc (error, (_ : Info.t)) -> error
+      | exn -> Uncaught_exn (Exn.sexp_of_t exn)
+    in
+    (* clean up open streaming responses *)
+    (* an unfortunate hack; ok because the response handler will have nothing
+       to read following a response where [data] is an error *)
+    let dummy_buffer = Bigstring.create 1 in
+    let dummy_ref = ref 0 in
+    Hashtbl.iteri
+      t.open_queries
+      ~f:
+        (fun
+          ~key:(_ : Protocol.Query_id.t) ~data:((_ : Description.t), response_handler) ->
+        ignore
+          (response_handler
+             ~read_buffer:dummy_buffer
+             ~read_buffer_pos_ref:dummy_ref
+             ~data:(Error error)));
+    Hashtbl.clear t.open_queries;
+    Bigstring.unsafe_destroy dummy_buffer)
+;;
+
+let set_peer_metadata t connection_metadata =
+  match Set_once.get t.peer_metadata with
+  | None | Some Unsupported ->
+    raise_s
+      [%message
+        "Inconsistent state: receiving a metadata message is unsupported, but a metadata \
+         message was received"]
+  | Some (Expected ivar) ->
+    if Ivar.is_empty t.close_started then Ivar.fill_exn ivar (Ok connection_metadata)
+;;
+
+let handle_msg
+  t
+  (msg : _ P.Message.t)
+  ~read_buffer
+  ~read_buffer_pos_ref
+  ~protocol_message_len
+  ~close_connection_monitor
+  : _ Transport.Handler_result.t
+  =
+  match msg with
+  | Metadata metadata ->
+    set_peer_metadata t (P.Connection_metadata.V2.of_v1 metadata);
+    Continue
+  | Metadata_v2 metadata ->
+    set_peer_metadata t metadata;
+    Continue
+  | Heartbeat ->
+    Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
+    Continue
+  | Response_v1 response ->
+    handle_response
+      t
+      response.id
+      ~data:response.data
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~protocol_message_len
+  | Response_v2 response ->
+    handle_response
+      t
+      response.id
+      ~data:response.data
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~protocol_message_len
+  | Query_v2 query ->
+    let instance = Set_once.get_exn t.implementations_instance in
+    Implementations.Instance.handle_query
+      instance
+      ~query
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
+      ~close_connection_monitor
+  | Query_v1 query ->
+    let instance = Set_once.get_exn t.implementations_instance in
+    let query = P.Query.V2.of_v1 query in
+    Implementations.Instance.handle_query
+      instance
+      ~query
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
+      ~close_connection_monitor
+  | Close_reason info | Close_reason_duplicated info ->
+    Set_once.set_exn t.received_close_reason info;
+    Stop (Ok ())
 ;;
 
 let on_message t ~close_connection_monitor =
@@ -781,34 +807,6 @@ let heartbeat_now t =
 
 let default_handshake_timeout = Time_ns.Span.of_int_sec 30
 let default_reader_drain_timeout = Time_ns.Span.of_int_sec 5
-
-let cleanup t ~reason exn =
-  don't_wait_for (close ~reason t);
-  if not (Hashtbl.is_empty t.open_queries)
-  then (
-    let error =
-      match exn with
-      | Rpc_error.Rpc (error, (_ : Info.t)) -> error
-      | exn -> Uncaught_exn (Exn.sexp_of_t exn)
-    in
-    (* clean up open streaming responses *)
-    (* an unfortunate hack; ok because the response handler will have nothing
-       to read following a response where [data] is an error *)
-    let dummy_buffer = Bigstring.create 1 in
-    let dummy_ref = ref 0 in
-    Hashtbl.iteri
-      t.open_queries
-      ~f:
-        (fun
-          ~key:(_ : Protocol.Query_id.t) ~data:((_ : Description.t), response_handler) ->
-        ignore
-          (response_handler
-             ~read_buffer:dummy_buffer
-             ~read_buffer_pos_ref:dummy_ref
-             ~data:(Error error)));
-    Hashtbl.clear t.open_queries;
-    Bigstring.unsafe_destroy dummy_buffer)
-;;
 
 let schedule_heartbeats t =
   t.last_seen_alive <- Synchronous_time_source.now t.time_source;
