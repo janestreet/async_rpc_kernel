@@ -6,6 +6,7 @@ type t =
   | Close_reason
   | Peer_metadata_v2
   | Response_v2
+  | Query_metadata_v2
 [@@deriving enumerate]
 
 val is_supported : t -> version:int -> bool

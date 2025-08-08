@@ -42,9 +42,9 @@ module Stable = struct
   module Just_digests = struct
     module Digest = struct
       module V1 = struct
-        type t = Bin_shape.Digest.t [@@deriving compare, globalize, sexp]
+        type t = Bin_shape.Digest.t [@@deriving compare ~localize, globalize, sexp]
 
-        let equal t1 t2 = [%compare.equal: t] t1 t2
+        let%template[@mode local] equal t1 t2 = [%compare_local.equal: t] t1 t2
         let hash_fold_t s t = Core.Md5.hash_fold_t s (Bin_shape.Digest.to_md5 t)
 
         include
@@ -88,7 +88,8 @@ module Stable = struct
             ; error : Digest.V1.t
             }
         | Unknown
-      [@@deriving bin_io ~localize, equal, compare, globalize, hash, sexp]
+      [@@deriving
+        bin_io ~localize, equal ~localize, compare ~localize, globalize, hash, sexp]
 
       let bin_read_t__local buf ~pos_ref =
         let open Bin_prot.Read in
@@ -161,10 +162,10 @@ module Just_digests = struct
         ; error : Bin_shape.Digest.t
         }
     | Unknown
-  [@@deriving globalize, sexp_of, compare, variants]
+  [@@deriving globalize, sexp_of, compare ~localize, variants]
 
   module Strict_comparison = struct
-    type nonrec t = t [@@deriving compare]
+    type nonrec t = t [@@deriving compare ~localize]
   end
 
   let same_kind = Comparable.lift [%equal: int] ~f:Variants.to_rank

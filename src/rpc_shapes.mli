@@ -41,7 +41,7 @@ module Just_digests : sig
     (** Total order on [t]. [Unknown] is equal only to [Unknown]. You might not want this
         kind of comparison for things other than e.g. making a [Map.t] *)
 
-    type nonrec t = t [@@deriving compare]
+    type nonrec t = t [@@deriving compare ~localize]
   end
 end
 
@@ -55,7 +55,8 @@ module Stable : sig
   module Just_digests : sig
     module V1 : sig
       type t = Just_digests.t
-      [@@deriving bin_io ~localize, compare, equal, globalize, hash, sexp]
+      [@@deriving
+        bin_io ~localize, compare ~localize, equal ~localize, globalize, hash, sexp]
 
       val bin_read_t__local : t Bin_prot.Read.reader__local
     end

@@ -114,8 +114,8 @@ let%expect_test "latest version simple RPC dispatches" =
       print_header tap;
       [%expect
         {|
-        0d00 0000 0000 0000    length= 13 (64-bit LE)
-        08                       body= List: 8 items
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
         02                             2: 2 (int)
@@ -124,13 +124,8 @@ let%expect_test "latest version simple RPC dispatches" =
         05                             5: 5 (int)
         06                             6: 6 (int)
         07                             7: 7 (int)
-        |}];
-      let%bind _response =
-        Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn (Payload.create ())
-      in
-      print_payload_messages tap;
-      [%expect
-        {|
+        08                             8: 8 (int)
+
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
         00                             identification= None
@@ -155,9 +150,15 @@ let%expect_test "latest version simple RPC dispatches" =
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
         00                                                   digests= None
-
+        |}];
+      let%bind _response =
+        Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn (Payload.create ())
+      in
+      print_payload_messages tap;
+      [%expect
+        {|
         1500 0000 0000 0000    length= 21 (64-bit LE)
-        03                       body= Query_v2
+        09                       body= Query_v3
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         01                                   id= 1 (int)
@@ -192,7 +193,7 @@ let%expect_test "latest version simple RPC dispatches" =
       [%expect
         {|
         1200 0000 0000 0000    length= 18 (64-bit LE)
-        03                       body= Query_v2
+        09                       body= Query_v3
         0874 6573 742d 7270    ...
         63                                  tag= test-rpc (8 bytes)
         01                              version= 1 (int)
@@ -217,7 +218,7 @@ let%expect_test "latest version simple RPC dispatches" =
       [%expect
         {|
         1200 0000 0000 0000    length= 18 (64-bit LE)
-        03                       body= Query_v2
+        09                       body= Query_v3
         0874 6573 742d 7270    ...
         63                                  tag= test-rpc (8 bytes)
         02                              version= 2 (int)
@@ -246,8 +247,8 @@ let%expect_test "latest version pipe RPC dispatches" =
       print_header tap;
       [%expect
         {|
-        0d00 0000 0000 0000    length= 13 (64-bit LE)
-        08                       body= List: 8 items
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
         fd52 5043 00                   0: 4411474 (int)
         01                             1: 1 (int)
         02                             2: 2 (int)
@@ -256,14 +257,8 @@ let%expect_test "latest version pipe RPC dispatches" =
         05                             5: 5 (int)
         06                             6: 6 (int)
         07                             7: 7 (int)
-        |}];
-      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
-        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
-      in
-      let%bind _messages = Pipe.to_list pipe in
-      print_stream_messages tap;
-      [%expect
-        {|
+        08                             8: 8 (int)
+
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
         00                             identification= None
@@ -288,9 +283,16 @@ let%expect_test "latest version pipe RPC dispatches" =
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
         00                                                   digests= None
-
+        |}];
+      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
+        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
+      in
+      let%bind _messages = Pipe.to_list pipe in
+      print_stream_messages tap;
+      [%expect
+        {|
         1c00 0000 0000 0000    length= 28 (64-bit LE)
-        03                       body= Query_v2
+        09                       body= Query_v3
         0d74 6573 742d 7069    ...
         7065 2d72 7063                      tag= test-pi... (13 bytes)
         01                              version= 1 (int)
@@ -368,14 +370,7 @@ let%expect_test "pipe RPC Response_v1" =
         04                             4: 4 (int)
         05                             5: 5 (int)
         06                             6: 6 (int)
-        |}];
-      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
-        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
-      in
-      let%bind _messages = Pipe.to_list pipe in
-      print_stream_messages tap;
-      [%expect
-        {|
+
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
         00                             identification= None
@@ -400,7 +395,14 @@ let%expect_test "pipe RPC Response_v1" =
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
         00                                                   digests= None
-
+        |}];
+      let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
+        Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
+      in
+      let%bind _messages = Pipe.to_list pipe in
+      print_stream_messages tap;
+      [%expect
+        {|
         1c00 0000 0000 0000    length= 28 (64-bit LE)
         03                       body= Query_v2
         0d74 6573 742d 7069    ...
@@ -641,6 +643,13 @@ let%expect_test "V3 identification string addition" =
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
+
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    04                       body= Metadata
+    01                             identification= Some
+    0763 6c69 6e2d 6964                             clin-id (7 bytes)
+    01                                       menu= Some
+    00                                              List: 0 items
     ---   server -> client:   ---
     0900 0000 0000 0000    length= 9 (64-bit LE)
     04                       body= List: 4 items
@@ -648,17 +657,7 @@ let%expect_test "V3 identification string addition" =
     01                             1: 1 (int)
     02                             2: 2 (int)
     03                             3: 3 (int)
-    ---   client -> server:   ---
-    0c00 0000 0000 0000    length= 12 (64-bit LE)
-    04                       body= Metadata
-    01                             identification= Some
-    0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
-    00                                              List: 0 items
 
-    0100 0000 0000 0000    length= 1 (64-bit LE)
-    00                       body= Heartbeat
-    ---   server -> client:   ---
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
     01                             identification= Some
@@ -689,9 +688,8 @@ let%expect_test "V3 identification string addition" =
     6174 652d 7270 63                               5: 1.    name= test-st... (14 bytes)
     01                                                    version= 1 (int)
     03                                                 2. Unknown
-
-    0100 0000 0000 0000    length= 1 (64-bit LE)
-    00                       body= Heartbeat
+    ---   client -> server:   ---
+    ---   server -> client:   ---
     ((server_id_from_client (serv-id)) (client_id_from_server (clin-id)))
     |}];
   let%bind () =
@@ -750,11 +748,17 @@ let%expect_test "V3 identification string addition" =
 
 let%expect_test "V4 close reason addition" =
   let connection_test_with_close ~client ~server ~s_to_c ~c_to_s =
-    Rpc.Connection.close client ~reason:(Info.create_s [%message "test reason"])
-    |> don't_wait_for;
-    let%bind () = connection_test_id ~client ~server ~s_to_c ~c_to_s in
-    let%bind () = Rpc.Connection.close_finished client in
-    return ()
+    print_headers ~s_to_c ~c_to_s;
+    let%bind server_id_from_client = Rpc.Connection.peer_identification client in
+    let%bind client_id_from_server = Rpc.Connection.peer_identification server in
+    let%map () =
+      Rpc.Connection.close client ~reason:(Info.create_s [%message "test reason"])
+    in
+    print_payload_messages_bidirectional ~s_to_c ~c_to_s;
+    print_s
+      [%message
+        (server_id_from_client : Bigstring.t option)
+          (client_id_from_server : Bigstring.t option)]
   in
   let%bind () =
     Test_helpers.with_rpc_server_connection
@@ -773,6 +777,13 @@ let%expect_test "V4 close reason addition" =
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
+
+    0c00 0000 0000 0000    length= 12 (64-bit LE)
+    04                       body= Metadata
+    01                             identification= Some
+    0763 6c69 6e2d 6964                             clin-id (7 bytes)
+    01                                       menu= Some
+    00                                              List: 0 items
     ---   server -> client:   ---
     0a00 0000 0000 0000    length= 10 (64-bit LE)
     05                       body= List: 5 items
@@ -781,21 +792,7 @@ let%expect_test "V4 close reason addition" =
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
-    ---   client -> server:   ---
-    0c00 0000 0000 0000    length= 12 (64-bit LE)
-    04                       body= Metadata
-    01                             identification= Some
-    0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
-    00                                              List: 0 items
 
-    0f00 0000 0000 0000    length= 15 (64-bit LE)
-    05                       body= Close_reason
-    03                               Sexp
-    00                                 Atom
-    0b74 6573 7420 7265    ...
-    6173 6f6e                          "test re..." (11 bytes)
-    ---   server -> client:   ---
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
     01                             identification= Some
@@ -826,10 +823,17 @@ let%expect_test "V4 close reason addition" =
     6174 652d 7270 63                               5: 1.    name= test-st... (14 bytes)
     01                                                    version= 1 (int)
     03                                                 2. Unknown
-
+    ---   client -> server:   ---
+    0f00 0000 0000 0000    length= 15 (64-bit LE)
+    05                       body= Close_reason
+    03                               Sexp
+    00                                 Atom
+    0b74 6573 7420 7265    ...
+    6173 6f6e                          "test re..." (11 bytes)
+    ---   server -> client:   ---
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
-    ((server_id_from_client ()) (client_id_from_server (clin-id)))
+    ((server_id_from_client (serv-id)) (client_id_from_server (clin-id)))
     |}];
   let%bind () =
     Test_helpers.with_rpc_server_connection
@@ -848,14 +852,7 @@ let%expect_test "V4 close reason addition" =
     02                             2: 2 (int)
     03                             3: 3 (int)
     04                             4: 4 (int)
-    ---   server -> client:   ---
-    0900 0000 0000 0000    length= 9 (64-bit LE)
-    04                       body= List: 4 items
-    fd52 5043 00                   0: 4411474 (int)
-    01                             1: 1 (int)
-    02                             2: 2 (int)
-    03                             3: 3 (int)
-    ---   client -> server:   ---
+
     0c00 0000 0000 0000    length= 12 (64-bit LE)
     04                       body= Metadata
     01                             identification= Some
@@ -863,6 +860,13 @@ let%expect_test "V4 close reason addition" =
     01                                       menu= Some
     00                                              List: 0 items
     ---   server -> client:   ---
+    0900 0000 0000 0000    length= 9 (64-bit LE)
+    04                       body= List: 4 items
+    fd52 5043 00                   0: 4411474 (int)
+    01                             1: 1 (int)
+    02                             2: 2 (int)
+    03                             3: 3 (int)
+
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
     01                             identification= Some
@@ -893,10 +897,11 @@ let%expect_test "V4 close reason addition" =
     6174 652d 7270 63                               5: 1.    name= test-st... (14 bytes)
     01                                                    version= 1 (int)
     03                                                 2. Unknown
-
+    ---   client -> server:   ---
+    ---   server -> client:   ---
     0100 0000 0000 0000    length= 1 (64-bit LE)
     00                       body= Heartbeat
-    ((server_id_from_client ()) (client_id_from_server (clin-id)))
+    ((server_id_from_client (serv-id)) (client_id_from_server (clin-id)))
     |}];
   return ()
 ;;
@@ -1799,9 +1804,15 @@ let%expect_test "regression test: writer closing between handshake and metadata 
   [%expect
     {|
     (Error
-     (handshake_error.ml.Handshake_error (Transport_closed <created-directly>)))
+     (handshake_error.ml.Handshake_error
+      ((Transport_closed_during_step Connection_metadata) <created-directly>)))
     |}];
   let%bind () = wait_and_print_result conn_b in
-  [%expect {| (Ok _) |}];
+  [%expect
+    {|
+    (Error
+     (handshake_error.ml.Handshake_error
+      ((Transport_closed_during_step Connection_metadata) <created-directly>)))
+    |}];
   return ()
 ;;

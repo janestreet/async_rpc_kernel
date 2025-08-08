@@ -55,9 +55,17 @@ val with_rpc_server_connection
         -> 'a Deferred.t)
   -> 'a Deferred.t
 
+(* [?server_heartbeat_foo] are after the labeled arguments since they default to the
+   value of [heartbeat_foo]. *)
 val setup_server_and_client_connection
   :  heartbeat_timeout:Time_ns.Span.t
   -> heartbeat_every:Time_ns.Span.t
+  -> heartbeat_timeout_style:Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.t
+  -> ?server_heartbeat_timeout:Time_ns.Span.t
+  -> ?server_heartbeat_every:Time_ns.Span.t
+  -> ?server_heartbeat_timeout_style:
+       Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.t
+  -> unit
   -> ([ `Server of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ]
      * [ `Client of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ])
        Deferred.t

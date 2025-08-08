@@ -34,7 +34,7 @@ type 'connection_state on_unknown_rpc_with_expert =
     'connection_state
     -> rpc_tag:string
     -> version:int
-    -> metadata:Rpc_metadata.V1.t option
+    -> metadata:Rpc_metadata.V2.t option
     -> Responder.t
     -> Bigstring.t
     -> pos:int
@@ -84,10 +84,10 @@ module Instance = struct
     ; mutable last_dispatched_implementation :
         (Description.t * ('a Implementation.t[@sexp.opaque]) * Protocol.Impl_menu_index.t)
           option
-    ; mutable on_receive :
+    ; on_receive :
         Description.t
         -> query_id:P.Query_id.t
-        -> Rpc_metadata.V1.t option
+        -> Rpc_metadata.V2.t option
         -> Execution_context.t
         -> Execution_context.t
     }
@@ -95,7 +95,6 @@ module Instance = struct
 
   type t = T : _ unpacked -> t [@@unboxed]
 
-  let set_on_receive (T t) on_receive = t.on_receive <- on_receive
   let sexp_of_t (T t) = [%sexp_of: _ unpacked] t
 
   let write_tracing_event t event =
@@ -576,7 +575,7 @@ module Instance = struct
     t
     implementation
     ~impl_menu_index
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1089,7 +1088,7 @@ module Instance = struct
       (match
          f
            t.connection_state
-           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V2.tag)
+           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V3.tag)
            ~version:query.version
        with
        | `Close_connection -> Stop (Ok ())
@@ -1098,7 +1097,7 @@ module Instance = struct
 
   let handle_query_internal
     t
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1154,7 +1153,7 @@ module Instance = struct
            };
          (match on_unknown_rpc with
           | `Expert impl ->
-            let { P.Query.V2.tag; version; id; metadata; data = len } = query in
+            let { P.Query.V3.tag; version; id; metadata; data = len } = query in
             let rpc_tag = P.Rpc_tag.to_string tag in
             let d =
               let responder = Responder.create id impl_menu_index t.writer in
@@ -1196,7 +1195,7 @@ module Instance = struct
 
   let handle_query
     (T t)
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1260,6 +1259,7 @@ let instantiate
   ~connection_state
   ~writer
   ~tracing_events
+  ~on_receive
   : Instance.t
   =
   T
@@ -1273,9 +1273,7 @@ let instantiate
     ; connection_close_started
     ; stopped = false
     ; last_dispatched_implementation = None
-    ; on_receive =
-        (fun (_ : Description.t) ~query_id:(_ : P.Query_id.t) metadata ctx ->
-          Rpc_metadata.Private.set metadata ctx)
+    ; on_receive
     }
 ;;
 

@@ -2,7 +2,7 @@
  (name async_rpc_kernel)
  (public_name async_rpc_kernel)
  (preprocess
-  (pps ppx_jane))
+  (pps ppx_jane -require-template-extension))
  (libraries async_kernel bin_prot.shape core_kernel.bus core
    async_kernel.eager_deferred core_extended.immediate_kernel base.md5
    core_kernel.moption async_kernel.persistent_connection_kernel

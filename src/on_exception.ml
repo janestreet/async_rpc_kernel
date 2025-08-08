@@ -5,7 +5,7 @@ module Exception_type = struct
   type t =
     | Raised_before_implementation_returned
     | Raised_after_implementation_returned
-  (* [Monitor.try_with ~rest] *) [@@deriving compare, sexp_of]
+  (* [Monitor.try_with ~rest] *) [@@deriving compare ~localize, sexp_of]
 end
 
 module Background_monitor_rest = struct

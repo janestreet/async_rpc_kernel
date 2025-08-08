@@ -1,7 +1,7 @@
 open! Core
 open! Async
 
-let test ~client_handshake_timeout_s ~server_handshake_timeout_s ~expect_close =
+let test ~client_handshake_timeout_s ~server_handshake_timeout_s =
   Dynamic.set_root Backtrace.elide true;
   let transport1, transport2, finished_printing =
     let create_pipe tag =
@@ -81,29 +81,29 @@ let test ~client_handshake_timeout_s ~server_handshake_timeout_s ~expect_close =
     match client_conn with
     | Error _ -> return ()
     | Ok conn ->
-      let%map client_menu_from_server = Rpc.Connection.peer_menu conn in
+      let%bind client_menu_from_server = Rpc.Connection.peer_menu conn in
+      let%map () = Rpc.Connection.close conn in
       print_s [%message (client_menu_from_server : _ option Or_error.t)]
   in
   let%bind () =
     match server_conn with
     | Error _ -> return ()
     | Ok conn ->
-      let%map server_menu_from_client = Rpc.Connection.peer_menu conn in
+      let%bind server_menu_from_client = Rpc.Connection.peer_menu conn in
+      let%map () = Rpc.Connection.close conn in
       print_s [%message (server_menu_from_client : _ option Or_error.t)]
   in
-  let%bind () = if expect_close then finished_printing else return () in
+  let%bind () = finished_printing in
   return ()
 ;;
 
 let%expect_test "client 60s, server 60s" =
-  let%bind () =
-    test ~client_handshake_timeout_s:60 ~server_handshake_timeout_s:60 ~expect_close:false
-  in
+  let%bind () = test ~client_handshake_timeout_s:60 ~server_handshake_timeout_s:60 in
   [%expect
     {|
     c_to_s
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -112,9 +112,10 @@ let%expect_test "client 60s, server 60s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     s_to_c
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -123,7 +124,7 @@ let%expect_test "client 60s, server 60s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
-    ((client_conn (Ok _)) (server_conn (Ok _)))
+    08                             8: 8 (int)
     c_to_s
     0500 0000 0000 0000    length= 5 (64-bit LE)
     07                       body= Metadata_v2
@@ -138,6 +139,7 @@ let%expect_test "client 60s, server 60s" =
     01                                       menu= Some
     00                                              descriptions= Array: 0 items
     00                                                   digests= None
+    ((client_conn (Ok _)) (server_conn (Ok _)))
     (client_menu_from_server (Ok (_)))
     (server_menu_from_client (Ok (_)))
     |}];
@@ -145,14 +147,12 @@ let%expect_test "client 60s, server 60s" =
 ;;
 
 let%expect_test "client 0s, server 60s" =
-  let%bind () =
-    test ~client_handshake_timeout_s:0 ~server_handshake_timeout_s:60 ~expect_close:true
-  in
+  let%bind () = test ~client_handshake_timeout_s:0 ~server_handshake_timeout_s:60 in
   [%expect
     {|
     c_to_s
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -161,9 +161,10 @@ let%expect_test "client 0s, server 60s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     s_to_c
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -172,28 +173,24 @@ let%expect_test "client 0s, server 60s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     ((client_conn
       (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
-     (server_conn (Ok _)))
-    (server_menu_from_client
-     (Error
-      ("Connection closed before we could get peer metadata"
-       (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason
-        (("EOF or connection closed" (connection_description <created-directly>)))))))
+     (server_conn
+      (Error
+       (handshake_error.ml.Handshake_error
+        ((Transport_closed_during_step Connection_metadata) <created-directly>)))))
     |}];
   return ()
 ;;
 
 let%expect_test "client 60s, server 0s" =
-  let%bind () =
-    test ~client_handshake_timeout_s:60 ~server_handshake_timeout_s:0 ~expect_close:true
-  in
+  let%bind () = test ~client_handshake_timeout_s:60 ~server_handshake_timeout_s:0 in
   [%expect
     {|
     c_to_s
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -202,9 +199,10 @@ let%expect_test "client 60s, server 0s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     s_to_c
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -213,28 +211,24 @@ let%expect_test "client 60s, server 0s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
-    ((client_conn (Ok _))
+    08                             8: 8 (int)
+    ((client_conn
+      (Error
+       (handshake_error.ml.Handshake_error
+        ((Transport_closed_during_step Connection_metadata) <created-directly>))))
      (server_conn
       (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>)))))
-    (client_menu_from_server
-     (Error
-      ("Connection closed before we could get peer metadata"
-       (trying_to_get peer_menu) (connection_description <created-directly>)
-       (close_reason
-        (("EOF or connection closed" (connection_description <created-directly>)))))))
     |}];
   return ()
 ;;
 
 let%expect_test "client 0s, server 0s" =
-  let%bind () =
-    test ~client_handshake_timeout_s:0 ~server_handshake_timeout_s:0 ~expect_close:true
-  in
+  let%bind () = test ~client_handshake_timeout_s:0 ~server_handshake_timeout_s:0 in
   [%expect
     {|
     c_to_s
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -243,9 +237,10 @@ let%expect_test "client 0s, server 0s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     s_to_c
-    0d00 0000 0000 0000    length= 13 (64-bit LE)
-    08                       body= List: 8 items
+    0e00 0000 0000 0000    length= 14 (64-bit LE)
+    09                       body= List: 9 items
     fd52 5043 00                   0: 4411474 (int)
     01                             1: 1 (int)
     02                             2: 2 (int)
@@ -254,6 +249,7 @@ let%expect_test "client 0s, server 0s" =
     05                             5: 5 (int)
     06                             6: 6 (int)
     07                             7: 7 (int)
+    08                             8: 8 (int)
     ((client_conn
       (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
      (server_conn

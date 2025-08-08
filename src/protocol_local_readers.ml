@@ -158,6 +158,29 @@ module Query = struct
       { tag; version; id; metadata; data }
     ;;
   end
+
+  module V3 = struct
+    include Query.V3
+
+    type nonrec 'a needs_length = 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+
+    let bin_read_t__local bin_read_el buf ~pos_ref =
+      let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
+      let version = bin_read_int buf ~pos_ref in
+      let id = Query_id.bin_read_t__local buf ~pos_ref in
+      let metadata =
+        bin_read_option__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
+      in
+      let data = bin_read_el buf ~pos_ref in
+      { tag; version; id; metadata; data }
+    ;;
+  end
 end
 
 module Response = struct
@@ -251,6 +274,7 @@ module Message = struct
     | Close_reason_duplicated of Info.t
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
+    | Query_v3 of 'a Query.V3.needs_length
 
   let bin_read_t__local : ('a, 'a t) reader1__local =
     fun bin_read_el buf ~pos_ref ->
@@ -280,6 +304,9 @@ module Message = struct
     | 8 ->
       let response = Response.V2.bin_read_t__local bin_read_el buf ~pos_ref in
       Response_v2 response
+    | 9 ->
+      let query = Query.V3.bin_read_t__local bin_read_el buf ~pos_ref in
+      Query_v3 query
     | _ ->
       Bin_prot.Common.raise_read_error
         (Bin_prot.Common.ReadError.Sum_tag "Message local reader")

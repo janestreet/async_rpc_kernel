@@ -122,14 +122,38 @@ module Tap = struct
   ;;
 
   let print_header t =
-    t (fun buf ~pos ~len:_ ->
+    t (fun buf ~pos ~len ->
+      (* This is mostly mirrored off of {!print_messages}, just unrolled to only print
+         the handshake header and connection metadata (if it exists) *)
+      let header_len =
+        Async_rpc_kernel.Async_rpc_kernel_private.Transport.Header.length
+        + Bigstring.get_int64_le_exn buf ~pos
+      in
       Binio_printer_helper.parse_and_print
         [ [%bin_shape:
             Async_rpc_kernel.Async_rpc_kernel_private.Connection.For_testing.Header.t
               Binio_printer_helper.With_length64.t]
         ]
-        buf
-        ~pos)
+        (Bigstring.sub_shared ~pos ~len:header_len buf)
+        ~pos:0;
+      if header_len <> len
+      then (
+        let metadata_pos = pos + header_len in
+        let metadata_len =
+          Async_rpc_kernel.Async_rpc_kernel_private.Transport.Header.length
+          + Bigstring.get_int64_le_exn buf ~pos:metadata_pos
+        in
+        print_endline "";
+        Binio_printer_helper.parse_and_print
+          [ [%bin_shape:
+              Nothing.t Binio_printer_helper.With_length.t
+                Async_rpc_kernel.Async_rpc_kernel_private.Protocol.Message
+                .maybe_needs_length
+                Binio_printer_helper.With_length64.t]
+          ]
+          (Bigstring.sub_shared ~pos:metadata_pos ~len:metadata_len buf)
+          ~pos:0;
+        assert (header_len + metadata_len = len)))
   ;;
 
   let print_headers ~s_to_c ~c_to_s =
@@ -154,7 +178,10 @@ module Tap = struct
         if pos = stop
         then ()
         else (
-          let message_len = 8 + Bigstring.get_int64_le_exn buf ~pos in
+          let message_len =
+            Async_rpc_kernel.Async_rpc_kernel_private.Transport.Header.length
+            + Bigstring.get_int64_le_exn buf ~pos
+          in
           Binio_printer_helper.parse_and_print
             message_shapes
             (Bigstring.sub_shared ~pos ~len:message_len buf)
@@ -318,6 +345,8 @@ let with_rpc_server_connection ?provide_rpc_shapes () ~server_header ~client_hea
 ;;
 
 let establish_connection
+  ?(heartbeat_timeout_style =
+    Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.Time_between_heartbeats_legacy)
   transport
   time_source
   description
@@ -338,6 +367,7 @@ let establish_connection
            ())
       ~description
       ~time_source
+      ~heartbeat_timeout_style
       transport
   in
   Deferred.upon conn (fun conn ->
@@ -355,17 +385,26 @@ let establish_connection
     in
     let () =
       Async_rpc_kernel.Rpc.Connection.add_heartbeat_callback conn (fun () ->
-        print_s
-          [%message
-            "received heartbeat"
-              ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-              (description : Info.t)])
+        print_endline
+          (Sexp.to_string_mach
+             [%message
+               "received heartbeat"
+                 ~now:(Synchronous_time_source.now time_source : Time_ns.t)
+                 (description : Info.t)]))
     in
     ());
   conn >>| Result.ok_exn
 ;;
 
-let setup_server_and_client_connection ~heartbeat_timeout ~heartbeat_every =
+let setup_server_and_client_connection
+  ~heartbeat_timeout
+  ~heartbeat_every
+  ~heartbeat_timeout_style
+  ?(server_heartbeat_timeout = heartbeat_timeout)
+  ?(server_heartbeat_every = heartbeat_every)
+  ?(server_heartbeat_timeout_style = heartbeat_timeout_style)
+  ()
+  =
   let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
   let client_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
   let client_transport, server_transport =
@@ -376,8 +415,9 @@ let setup_server_and_client_connection ~heartbeat_timeout ~heartbeat_every =
       server_transport
       (Synchronous_time_source.read_only server_time_source)
       (Info.of_string "server")
-      ~heartbeat_timeout
-      ~heartbeat_every
+      ~heartbeat_timeout:server_heartbeat_timeout
+      ~heartbeat_every:server_heartbeat_every
+      ~heartbeat_timeout_style:server_heartbeat_timeout_style
   in
   let client_conn =
     establish_connection
@@ -386,6 +426,7 @@ let setup_server_and_client_connection ~heartbeat_timeout ~heartbeat_every =
       (Info.of_string "client")
       ~heartbeat_timeout
       ~heartbeat_every
+      ~heartbeat_timeout_style
   in
   let%map server_conn, client_conn = Deferred.both server_conn client_conn in
   `Server (server_time_source, server_conn), `Client (client_time_source, client_conn)

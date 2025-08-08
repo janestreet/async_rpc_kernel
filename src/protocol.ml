@@ -9,15 +9,14 @@ module Core_for_testing = Core
 include struct
   open Core
 
-  let compare_int = compare_int
+  let%template compare_int = (compare_int [@mode m]) [@@mode m = (global, local)]
   let globalize_int = globalize_int
   let globalize_option = globalize_option
   let globalize_string = globalize_string
 end
 
 module Rpc_tag : sig
-  include Core.Identifiable
-  include Bin_prot.Binable.S__local with type t := t
+  include%template Core.Identifiable [@mode local]
 
   val globalize : t -> t
   val of_string_local : string -> t
@@ -66,7 +65,7 @@ module Rpc_error : sig
     | Message_too_big of Transport.Send_result.message_too_big
     | Unknown of Sexp.t
     | Lift_error of Sexp.t
-  [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
+  [@@deriving bin_io ~localize, compare ~localize, globalize, sexp, variants]
 
   include Comparable.S with type t := t
 end = struct
@@ -82,7 +81,7 @@ end = struct
       | Message_too_big of Transport.Send_result.message_too_big
       | Unknown of Core.Sexp.t
       | Lift_error of Core.Sexp.t
-    [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
+    [@@deriving bin_io ~localize, compare ~localize, globalize, sexp, variants]
 
     let%expect_test "Stable unless we purposefully add a new variant" =
       print_endline [%bin_digest: t];
@@ -226,8 +225,26 @@ module Query = struct
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
+  end
 
-    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V1.t option); data }
+  module V3 = struct
+    type 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| 353c0fbd857bef60bcc518055e464468 |}]
+    ;;
+
+    type 'a t = 'a needs_length [@@deriving bin_read]
+
+    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V2.t option); data }
       : _ V1.t
       =
       { tag; version; id; data }
@@ -235,6 +252,33 @@ module Query = struct
 
     let of_v1 ?metadata { V1.tag; version; id; data } =
       { tag; version; id; metadata; data }
+    ;;
+
+    let to_v2 { tag; version; id; metadata; data } : _ V2.t =
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
+      ; data
+      }
+    ;;
+
+    let of_v2 { V2.tag; version; id; metadata; data } =
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.map metadata ~f:Rpc_metadata.V2.of_v1
+      ; data
+      }
+    ;;
+
+    let of_v2__local { V2.tag; version; id; metadata; data } =
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.map__local metadata ~f:Rpc_metadata.V2.of_v1__local
+      ; data
+      }
     ;;
   end
 end
@@ -341,11 +385,12 @@ module Message = struct
     | Close_reason_duplicated of Info_with_local_bin_io.t
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
+    | Query_v3 of 'a Query.V3.needs_length
   [@@deriving bin_io ~localize, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| f3502c621ce978a8e1ed90bb8f344e22 |}]
+    [%expect {| 8c4857f25d2ad6fd7e8c0434b8379f9b |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -368,11 +413,16 @@ module Message = struct
       print_endline [%string "%{variant.name}: %{variant.rank#Int}"];
       f variant.constructor |> print_bin_prot
     in
-    let query : unit Query.V2.needs_length =
+    let query : unit Query.V3.needs_length =
       { tag = Rpc_tag.of_string "tag"
       ; version = 0
       ; id = Query_id.of_int_exn 1
-      ; metadata = Some (Rpc_metadata.V1.of_string "metadata")
+      ; metadata =
+          Some
+            (Rpc_metadata.V2.singleton
+               Rpc_metadata.V2.Key.default_for_legacy
+               (Rpc_metadata.V2.Payload.of_string_maybe_truncate "metadata")
+             [@alert "-legacy_query_metadata"])
       ; data = ()
       }
     in
@@ -380,11 +430,12 @@ module Message = struct
     let close_reason = Core.Info.create_s [%message "Close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
-      ~query_v1:(print (fun c -> c (Query.V2.to_v1 query)))
+      ~query_v1:(print (fun c -> c (Query.V3.to_v1 query)))
       ~response_v1:
         (print (fun c ->
            c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.V1.needs_length)))
-      ~query_v2:(print (fun c -> c query))
+      ~query_v2:(print (fun c -> c (Query.V3.to_v2 query)))
+      ~query_v3:(print (fun c -> c query))
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
@@ -418,6 +469,9 @@ module Message = struct
       00000000  07 00 00                                          |...|
       Response_v2: 8
       00000000  08 00 01 05 00 00                                 |......|
+      Query_v3: 9
+      00000000  09 03 74 61 67 00 01 01  01 00 08 6d 65 74 61 64  |..tag......metad|
+      00000010  61 74 61 00                                       |ata.|
       |}]
   ;;
 end

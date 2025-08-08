@@ -44,7 +44,7 @@ let write_query ?metadata ?don't_read_yet ?(id = 123) t =
     ?don't_read_yet
     t
     [%bin_writer: string]
-    (Query_v2
+    (Query_v3
        { tag = Protocol.Rpc_tag.of_string "rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
@@ -711,7 +711,7 @@ let%expect_test "connection closes before response received" =
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query_v2 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send (Query_v3 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -751,7 +751,7 @@ let%expect_test "expert unknown rpc handler" =
                 "Unknown rpc"
                   ~rpc_tag
                   (version : int)
-                  (metadata : Async_rpc_kernel.Rpc_metadata.V1.t option)
+                  (metadata : Async_rpc_kernel.Rpc_metadata.V2.t option)
                   ~data:([%bin_read: string] bs ~pos_ref:(ref pos))];
             Rpc.Rpc.Expert.Responder.write_error
               responder
@@ -781,14 +781,20 @@ let%expect_test "expert unknown rpc handler" =
       (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   Mock_peer.expect_message t [%bin_reader: Nothing.t] [%sexp_of: Nothing.t];
-  write_query ~metadata:(Async_rpc_kernel.Rpc_metadata.V1.of_string "example metadata") t;
+  write_query
+    ~metadata:
+      (Async_rpc_kernel.Rpc_metadata.V2.singleton
+         Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
+         (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
+            "example metadata") [@alert "-legacy_query_metadata"])
+    t;
   [%expect
     {|
     (Tracing_event
      ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
-      (payload_bytes 51)))
-    ("Unknown rpc" (rpc_tag rpc) (version 1) (metadata ("example metadata"))
-     (data "example query (id = 123)"))
+      (payload_bytes 53)))
+    ("Unknown rpc" (rpc_tag rpc) (version 1)
+     (metadata (((0 "example metadata")))) (data "example query (id = 123)"))
     (Send
      (Response_v2
       ((id 123) (impl_menu_index ())

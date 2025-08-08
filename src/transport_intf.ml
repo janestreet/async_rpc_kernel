@@ -37,7 +37,7 @@ module Send_result = struct
     { size : int
     ; max_message_size : int
     }
-  [@@deriving bin_io ~localize, compare, globalize, sexp]
+  [@@deriving bin_io ~localize, compare ~localize, globalize, sexp]
 
   let bin_read_message_too_big__local buf ~pos_ref =
     let size = bin_read_int buf ~pos_ref in
@@ -57,7 +57,7 @@ module Send_result = struct
         }
     | Closed
     | Message_too_big of message_too_big
-  [@@deriving compare, globalize, sexp_of]
+  [@@deriving compare ~localize, globalize, sexp_of]
 end
 
 module type Writer = sig

@@ -18,7 +18,7 @@ let%expect_test "connect and close" =
   let%bind conn = Mock_peer.connect t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3 4 5 6 7))
+    (Send (4411474 1 2 3 4 5 6 7 8))
     (Send
      (Metadata_v2
       ((identification ()) (menu (((descriptions ()) (digests ())))))))
@@ -48,22 +48,24 @@ let%expect_test "close immediately after handshake (with close message sent)" =
     t
     Protocol.Message.bin_writer_nat0_t
     (Protocol.Message.Close_reason (Info.create_s [%message "immediate close"]));
-  let%bind (conn : Rpc.Connection.t) = Mock_peer.connect t >>| Result.ok_exn in
-  let%bind () = Rpc.Connection.close_finished conn in
+  let%map () =
+    match%bind Mock_peer.connect t with
+    | Ok conn -> Rpc.Connection.close_finished conn
+    | Error error -> error |> [%sexp_of: exn] |> print_s |> return
+  in
   [%expect
     {|
     (Send
      (message
-      ("00000000  08 fd 52 50 43 00 01 02  03 04 05 06 07           |..RPC........|")))
+      ("00000000  09 fd 52 50 43 00 01 02  03 04 05 06 07 08        |..RPC.........|")))
     (Send
      (message
       ("00000000  04 00 01 00                                       |....|")))
     Close_writer
     Close_reader
-    (Close_started
-     (("Connection closed by remote side:" "immediate close")
-      (connection_description <created-directly>)))
-    Close_finished
-    |}];
-  return ()
+    (handshake_error.ml.Handshake_error
+     ((Transport_closed_with_reason_from_remote_during_step
+       (step Connection_metadata) (close_reason "immediate close"))
+      <created-directly>))
+    |}]
 ;;

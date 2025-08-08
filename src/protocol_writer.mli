@@ -47,13 +47,13 @@ val is_closed : t -> bool
 module Query : sig
   val send
     :  t
-    -> 'query Protocol.Query.V2.t
+    -> 'query Protocol.Query.V3.t
     -> bin_writer_query:'query Bin_prot.Type_class.writer
     -> unit Transport.Send_result.t
 
   val send_expert
     :  t
-    -> unit Protocol.Query.V2.t
+    -> unit Protocol.Query.V3.t
     -> buf:Bigstring.t
     -> pos:int
     -> len:int

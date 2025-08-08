@@ -10,7 +10,7 @@ module Stable = struct
       }
     [@@deriving
       bin_io ~localize
-      , equal
+      , equal ~localize
       , globalize
       , compare ~localize
       , hash
