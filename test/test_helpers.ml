@@ -303,16 +303,26 @@ let only_heartbeat_once_at_the_beginning =
     ()
 ;;
 
-let with_rpc_server_connection ?provide_rpc_shapes () ~server_header ~client_header ~f =
+let with_rpc_server_connection
+  ?time_source
+  ?provide_rpc_shapes
+  ?(server_implementations = implementations)
+  ?(client_implementations = [])
+  ()
+  ~server_header
+  ~client_header
+  ~f
+  =
   let server_ivar = Ivar.create () in
   let%bind server =
     with_handshake_header server_header ~f:(fun () ->
       Rpc.Connection.serve
+        ?time_source
         ?provide_rpc_shapes
         ~heartbeat_config:only_heartbeat_once_at_the_beginning
         ~implementations:
           (Rpc.Implementations.create_exn
-             ~implementations
+             ~implementations:server_implementations
              ~on_unknown_rpc:`Raise
              ~on_exception:Log_on_background_exn)
         ~initial_connection_state:(fun _ conn ->
@@ -332,6 +342,15 @@ let with_rpc_server_connection ?provide_rpc_shapes () ~server_header ~client_hea
       Rpc.Connection.client
         ~heartbeat_config:only_heartbeat_once_at_the_beginning
         ~identification:client_identification
+        ~implementations:
+          (T
+             { connection_state = (fun _ -> ())
+             ; implementations =
+                 Rpc.Implementations.create_exn
+                   ~implementations:client_implementations
+                   ~on_unknown_rpc:`Raise
+                   ~on_exception:Log_on_background_exn
+             })
         where_to_connect
       >>| Result.ok_exn)
   in

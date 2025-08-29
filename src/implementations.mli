@@ -79,6 +79,9 @@ module Instance : sig
   (* Flushes all open streaming responses *)
   val flush : t -> unit Deferred.t
 
+  (** Return the number of outstanding queries. *)
+  val open_queries : t -> int
+
   (* Stop the instance: drop all responses to pending requests and make all further call
      to [handle_query] or [flush] to fail. *)
   val stop : t -> unit
@@ -88,7 +91,7 @@ val instantiate
   :  'a t
   -> menu:Menu.t option
   -> connection_description:Info.t
-  -> connection_close_started:Info.t Deferred.t
+  -> connection_close_started:Close_reason.t Deferred.t
   -> connection_state:'a
   -> writer:Protocol_writer.t
   -> tracing_events:(Tracing_event.t -> unit) Bus.Read_write.t
@@ -98,6 +101,7 @@ val instantiate
         -> Rpc_metadata.V2.t option
         -> Execution_context.t
         -> Execution_context.t)
+  -> no_open_queries_event:(unit, read_write) Bvar.t
   -> Instance.t
 
 val create_exn

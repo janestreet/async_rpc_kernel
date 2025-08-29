@@ -235,8 +235,9 @@ module Rpc = struct
                (Rpc_error.sexp_of_t_with_reason
                   ~get_connection_close_reason:(fun () ->
                     [%sexp
-                      (Deferred.peek (Connection.close_reason ~on_close:`started conn)
-                       : Info.t option)])
+                      (Deferred.peek
+                         (Connection.close_reason_structured ~on_close:`started conn)
+                       : Close_reason.t option)])
                   e));
           Remove (Ok Expert_indeterminate)
         | Ok len ->
@@ -1006,8 +1007,9 @@ module Streaming_rpc = struct
           ; get_connection_close_reason =
               (fun () ->
                 [%sexp
-                  (Deferred.peek (Connection.close_reason ~on_close:`started connection)
-                   : Info.t option)])
+                  (Deferred.peek
+                     (Connection.close_reason_structured ~on_close:`started connection)
+                   : Close_reason.t option)])
           })
   ;;
 

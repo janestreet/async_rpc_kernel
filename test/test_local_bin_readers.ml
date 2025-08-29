@@ -42,7 +42,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
     ]
   in
   let identification = Some (Bigstring.of_string "my client") in
-  [ Heartbeat
+  [ Protocol.Message.Heartbeat
   ; Query_v1 { tag; version = 10; id; data }
   ; Response_v1 { id; data = Ok data }
   ; Response_v2 { id; impl_menu_index = Protocol.Impl_menu_index.none; data = Ok data }
@@ -82,10 +82,38 @@ let (all_messages : Payload.t Protocol.Message.t list) =
   ; Metadata { identification; menu = Some menu }
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
   ; Close_reason (Info.create_s [%message "my sexp info"])
+    (* This allocates: Info.t is a global ref, and must be allocated globally *)
+  ; Close_reason_duplicated
+      (Info.create_s [%message "my sexp info within Close_reason_duplicated"])
     (* This allocates: bigstrings cannot be allocated on the stack, and mutable arrays
        cannot have their elements allocated on the stack *)
   ; Metadata_v2 { identification; menu = Some (Menu.of_supported_rpcs_and_shapes menu) }
+  ; Close_started
+    (* This allocates: Info.t is a global ref, and must be allocated globally *)
+  ; Close_reason_v2
+      (Async_rpc_kernel.Close_reason.Protocol.binable_of_t
+         (Async_rpc_kernel.Close_reason.Protocol.create
+            ~kind:Unspecified
+            ~debug_info:(Info.create_s [%message "debug info"])
+            ~user_reason:(Info.create_s [%message "user reason"])
+            ()))
   ]
+;;
+
+let%test_unit "All Message variants should be covered" =
+  let all_messages_names =
+    List.map
+      ~f:(fun message -> Protocol.Message.Variants_of_maybe_needs_length.to_name message)
+      all_messages
+    |> List.dedup_and_sort ~compare:String.compare
+  in
+  let expected_all_messages_names =
+    List.map
+      ~f:(fun (name, _number_of_args) -> name)
+      Protocol.Message.Variants_of_maybe_needs_length.descriptions
+    |> List.dedup_and_sort ~compare:String.compare
+  in
+  [%test_eq: string list] all_messages_names expected_all_messages_names
 ;;
 
 let%expect_test "Test reading different kinds of messages" =
@@ -153,11 +181,25 @@ let%expect_test "Test reading different kinds of messages" =
     bin_read allocated
 
     Parsed message:
+    (Close_reason_duplicated "my sexp info within Close_reason_duplicated")
+    bin_read allocated
+
+    Parsed message:
     (Metadata_v2
      ((identification ("my client"))
       (menu
        (((descriptions (((name my-rpc) (version 1))))
          (digests (((One_way (msg dcc5e16520e06e38ccb56d065b8f46f0))))))))))
+    bin_read allocated
+
+    Parsed message:
+    Close_started
+    bin_read did not allocate
+
+    Parsed message:
+    (Close_reason_v2
+     ((kind Unspecified) (debug_info ("debug info"))
+      (user_reason ("user reason"))))
     bin_read allocated
     |}]
 ;;

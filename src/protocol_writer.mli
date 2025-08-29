@@ -33,8 +33,12 @@ val send_heartbeat : t -> unit Transport.Send_result.t
     version doesn't support sending the close reason. *)
 val send_close_reason_if_supported
   :  t
-  -> reason:Info.t
+  -> reason:Close_reason.Protocol.t
   -> unit Transport.Send_result.t option
+
+(** Returns [None] if we haven't negotiated a protocol version yet, or if the protocol
+    version doesn't support sending the close started message. *)
+val send_close_started_if_supported : t -> unit Transport.Send_result.t option
 
 val can_send : t -> bool
 val bytes_to_write : t -> int

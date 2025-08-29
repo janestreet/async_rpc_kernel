@@ -43,7 +43,10 @@ val with_circular_connection
     correspond to the end which calls [accept]. Currently in our tests we always send rpcs
     from the client to the server. *)
 val with_rpc_server_connection
-  :  ?provide_rpc_shapes:bool
+  :  ?time_source:[> read ] Time_source.T1.t
+  -> ?provide_rpc_shapes:bool
+  -> ?server_implementations:unit Rpc.Implementation.t list
+  -> ?client_implementations:unit Rpc.Implementation.t list
   -> unit
   -> server_header:Header.t
   -> client_header:Header.t

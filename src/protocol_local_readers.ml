@@ -275,6 +275,8 @@ module Message = struct
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
     | Query_v3 of 'a Query.V3.needs_length
+    | Close_started
+    | Close_reason_v2 of Close_reason.Protocol.Binable.t
 
   let bin_read_t__local : ('a, 'a t) reader1__local =
     fun bin_read_el buf ~pos_ref ->
@@ -307,6 +309,10 @@ module Message = struct
     | 9 ->
       let query = Query.V3.bin_read_t__local bin_read_el buf ~pos_ref in
       Query_v3 query
+    | 10 -> Close_started
+    | 11 ->
+      let close_reason = Close_reason.Protocol.Binable.bin_read_t buf ~pos_ref in
+      Close_reason_v2 close_reason
     | _ ->
       Bin_prot.Common.raise_read_error
         (Bin_prot.Common.ReadError.Sum_tag "Message local reader")

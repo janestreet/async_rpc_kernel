@@ -87,13 +87,34 @@ let send_close_reason_if_supported t ~reason =
   match Set_once.get t.negotiated_protocol_version with
   | None -> None
   | Some version ->
-    if Version_dependent_feature.is_supported Close_reason ~version
+    if Version_dependent_feature.is_supported Close_reason_v2 ~version
     then
       Some
         (Transport.Writer.send_bin_prot
            t.writer
            Protocol.Message.bin_writer_nat0_t
-           (Close_reason reason))
+           (Close_reason_v2 (Close_reason.Protocol.binable_of_t reason)))
+    else if Version_dependent_feature.is_supported Close_reason ~version
+    then
+      Some
+        (Transport.Writer.send_bin_prot
+           t.writer
+           Protocol.Message.bin_writer_nat0_t
+           (Close_reason (Close_reason.Protocol.info_of_t reason)))
+    else None
+;;
+
+let send_close_started_if_supported t =
+  match Set_once.get t.negotiated_protocol_version with
+  | None -> None
+  | Some version ->
+    if Version_dependent_feature.is_supported Close_started ~version
+    then
+      Some
+        (Transport.Writer.send_bin_prot
+           t.writer
+           Protocol.Message.bin_writer_nat0_t
+           Close_started)
     else None
 ;;
 

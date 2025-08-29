@@ -210,6 +210,7 @@ module%test [@name "skewed heartbeat timeouts"] _ = struct
       (client (last_seen_alive "1970-01-01 00:00:00Z"))
       -----Advancing client time by 25s to demonstrate synchronous work on the client longer than its heartbeat timeout.
            We expect 6 heartbeats from the server.-----
+      ("received heartbeat"(now"1970-01-01 00:00:25Z")(description client))
       ("connection closed"
         (now         "1970-01-01 00:00:25Z")
         (description client)
@@ -225,7 +226,6 @@ module%test [@name "skewed heartbeat timeouts"] _ = struct
           ("Connection closed by remote side:"
            "No heartbeats received for 15s. Last seen at: 1969-12-31 19:00-05:00, now: 1969-12-31 19:00:25-05:00.")
           (connection_description server))))
-      ("received heartbeat"(now"1970-01-01 00:00:25Z")(description client))
       ("received heartbeat"(now"1970-01-01 00:00:25Z")(description client))
       ("received heartbeat"(now"1970-01-01 00:00:25Z")(description client))
       ("received heartbeat"(now"1970-01-01 00:00:25Z")(description client))

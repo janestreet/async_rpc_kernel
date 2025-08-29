@@ -784,10 +784,11 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
     {|
     (Send
      (message
-      ("00000000  05 07 00 02 01 21 52 70  63 20 6d 65 73 73 61 67  |.....!Rpc messag|"
-       "00000010  65 20 68 61 6e 64 6c 69  6e 67 20 6c 6f 6f 70 20  |e handling loop |"
-       "00000020  73 74 6f 70 70 65 64 03  01 02 00 10 55 6e 6b 6e  |stopped.....Unkn|"
-       "00000030  6f 77 6e 5f 71 75 65 72  79 5f 69 64 00 01 31     |own_query_id..1|")))
+      ("00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 07  |...Unspecified..|"
+       "00000010  00 02 01 21 52 70 63 20  6d 65 73 73 61 67 65 20  |...!Rpc message |"
+       "00000020  68 61 6e 64 6c 69 6e 67  20 6c 6f 6f 70 20 73 74  |handling loop st|"
+       "00000030  6f 70 70 65 64 03 01 02  00 10 55 6e 6b 6e 6f 77  |opped.....Unknow|"
+       "00000040  6e 5f 71 75 65 72 79 5f  69 64 00 01 31 00        |n_query_id..1.|")))
     (Close_started
      ("Rpc message handling loop stopped" (Unknown_query_id 1)
       (connection_description <created-directly>)))

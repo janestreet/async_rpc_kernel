@@ -362,13 +362,6 @@ module Stream_response_data = struct
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
 end
 
-module Info_with_local_bin_io = struct
-  include Core.Info
-
-  let bin_size_t__local t = bin_size_t ([%globalize: Core.Info.t] t)
-  let bin_write_t__local buf ~pos t = bin_write_t buf ~pos ([%globalize: Core.Info.t] t)
-end
-
 module Message = struct
   (* [Close_reason_duplicated] exists because we accidentally rolled [Metadata_v2] without
      preserving backwards compatibility (it was placed in the variants list before
@@ -386,11 +379,13 @@ module Message = struct
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
     | Query_v3 of 'a Query.V3.needs_length
+    | Close_started
+    | Close_reason_v2 of Close_reason.Protocol.Binable.t
   [@@deriving bin_io ~localize, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 8c4857f25d2ad6fd7e8c0434b8379f9b |}]
+    [%expect {| 2f32dba228167d341e3ce0bba5fed65a |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -428,6 +423,7 @@ module Message = struct
     in
     let metadata : Connection_metadata.V2.t = { identification = None; menu = None } in
     let close_reason = Core.Info.create_s [%message "Close reason"] in
+    let user_close_reason = Core.Info.create_s [%message "User close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
       ~query_v1:(print (fun c -> c (Query.V3.to_v1 query)))
@@ -439,6 +435,15 @@ module Message = struct
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
+      ~close_reason_v2:
+        (print (fun c ->
+           c
+             (Close_reason.Protocol.binable_of_t
+                (Close_reason.Protocol.create
+                   ~kind:Unspecified
+                   ~debug_info:close_reason
+                   ~user_reason:user_close_reason
+                   ()))))
       ~metadata_v2:(print (fun c -> c metadata))
       ~response_v2:
         (print (fun c ->
@@ -447,7 +452,8 @@ module Message = struct
               ; impl_menu_index = Nat0.Option.some (Nat0.of_int_exn 5)
               ; data = Ok ()
               }
-              : _ Response.V2.needs_length)));
+              : _ Response.V2.needs_length)))
+      ~close_started:(print (fun c -> c));
     [%expect
       {|
       Heartbeat: 0
@@ -472,6 +478,13 @@ module Message = struct
       Query_v3: 9
       00000000  09 03 74 61 67 00 01 01  01 00 08 6d 65 74 61 64  |..tag......metad|
       00000010  61 74 61 00                                       |ata.|
+      Close_started: 10
+      00000000  0a                                                |.|
+      Close_reason_v2: 11
+      00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 03  |...Unspecified..|
+      00000010  00 0c 43 6c 6f 73 65 20  72 65 61 73 6f 6e 01 03  |..Close reason..|
+      00000020  00 11 55 73 65 72 20 63  6c 6f 73 65 20 72 65 61  |..User close rea|
+      00000030  73 6f 6e                                          |son|
       |}]
   ;;
 end

@@ -6,6 +6,8 @@ type t =
   | Peer_metadata_v2
   | Response_v2
   | Query_metadata_v2
+  | Close_started
+  | Close_reason_v2
 [@@deriving enumerate]
 
 let minimum_version = function
@@ -14,6 +16,8 @@ let minimum_version = function
   | Peer_metadata_v2 -> 6
   | Response_v2 -> 7
   | Query_metadata_v2 -> 8
+  | Close_started -> 9
+  | Close_reason_v2 -> 10
 ;;
 
 let is_supported t ~version = version >= minimum_version t

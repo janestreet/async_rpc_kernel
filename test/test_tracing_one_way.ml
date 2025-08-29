@@ -124,18 +124,19 @@ let%expect_test "One-way immediately raises with on_exception:Close_connection" 
       (rpc ((name one-way) (version 1))) (id 100) (payload_bytes 0)))
     (Send
      (message
-      ("00000000  05 07 00 02 01 21 52 70  63 20 6d 65 73 73 61 67  |.....!Rpc messag|"
-       "00000010  65 20 68 61 6e 64 6c 69  6e 67 20 6c 6f 6f 70 20  |e handling loop |"
-       "00000020  73 74 6f 70 70 65 64 03  01 02 00 0c 55 6e 63 61  |stopped.....Unca|"
-       "00000030  75 67 68 74 5f 65 78 6e  01 02 01 02 00 08 6c 6f  |ught_exn......lo|"
-       "00000040  63 61 74 69 6f 6e 00 23  73 65 72 76 65 72 2d 73  |cation.#server-s|"
-       "00000050  69 64 65 20 6f 6e 65 2d  77 61 79 20 72 70 63 20  |ide one-way rpc |"
-       "00000060  63 6f 6d 70 75 74 61 74  69 6f 6e 01 02 00 03 65  |computation....e|"
-       "00000070  78 6e 01 03 00 10 6d 6f  6e 69 74 6f 72 2e 6d 6c  |xn....monitor.ml|"
-       "00000080  2e 45 72 72 6f 72 01 02  00 07 46 61 69 6c 75 72  |.Error....Failur|"
-       "00000090  65 00 0e 69 6e 6a 65 63  74 65 64 20 65 72 72 6f  |e..injected erro|"
-       "000000a0  72 01 01 00 1a 3c 62 61  63 6b 74 72 61 63 65 20  |r....<backtrace |"
-       "000000b0  65 6c 69 64 65 64 20 69  6e 20 74 65 73 74 3e     |elided in test>|")))
+      ("00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 07  |...Unspecified..|"
+       "00000010  00 02 01 21 52 70 63 20  6d 65 73 73 61 67 65 20  |...!Rpc message |"
+       "00000020  68 61 6e 64 6c 69 6e 67  20 6c 6f 6f 70 20 73 74  |handling loop st|"
+       "00000030  6f 70 70 65 64 03 01 02  00 0c 55 6e 63 61 75 67  |opped.....Uncaug|"
+       "00000040  68 74 5f 65 78 6e 01 02  01 02 00 08 6c 6f 63 61  |ht_exn......loca|"
+       "00000050  74 69 6f 6e 00 23 73 65  72 76 65 72 2d 73 69 64  |tion.#server-sid|"
+       "00000060  65 20 6f 6e 65 2d 77 61  79 20 72 70 63 20 63 6f  |e one-way rpc co|"
+       "00000070  6d 70 75 74 61 74 69 6f  6e 01 02 00 03 65 78 6e  |mputation....exn|"
+       "00000080  01 03 00 10 6d 6f 6e 69  74 6f 72 2e 6d 6c 2e 45  |....monitor.ml.E|"
+       "00000090  72 72 6f 72 01 02 00 07  46 61 69 6c 75 72 65 00  |rror....Failure.|"
+       "000000a0  0e 69 6e 6a 65 63 74 65  64 20 65 72 72 6f 72 01  |.injected error.|"
+       "000000b0  01 00 1a 3c 62 61 63 6b  74 72 61 63 65 20 65 6c  |...<backtrace el|"
+       "000000c0  69 64 65 64 20 69 6e 20  74 65 73 74 3e 00        |ided in test>.|")))
     (Close_started
      ("Rpc message handling loop stopped"
       (Uncaught_exn
@@ -183,14 +184,15 @@ let%expect_test "One-way asynchronously raises with on_exception:Close_connectio
       (rpc ((name one-way) (version 1))) (id 200) (payload_bytes 0)))
     (Send
      (message
-      ("00000000  05 03 01 02 00 24 55 6e  63 61 75 67 68 74 20 65  |.....$Uncaught e|"
-       "00000010  78 63 65 70 74 69 6f 6e  20 69 6e 20 69 6d 70 6c  |xception in impl|"
-       "00000020  65 6d 65 6e 74 61 74 69  6f 6e 01 02 00 03 65 78  |ementation....ex|"
-       "00000030  6e 01 03 00 10 6d 6f 6e  69 74 6f 72 2e 6d 6c 2e  |n....monitor.ml.|"
-       "00000040  45 72 72 6f 72 01 02 00  07 46 61 69 6c 75 72 65  |Error....Failure|"
-       "00000050  00 0e 69 6e 6a 65 63 74  65 64 20 65 72 72 6f 72  |..injected error|"
-       "00000060  01 01 00 1a 3c 62 61 63  6b 74 72 61 63 65 20 65  |....<backtrace e|"
-       "00000070  6c 69 64 65 64 20 69 6e  20 74 65 73 74 3e        |lided in test>|")))
+      ("00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 03  |...Unspecified..|"
+       "00000010  01 02 00 24 55 6e 63 61  75 67 68 74 20 65 78 63  |...$Uncaught exc|"
+       "00000020  65 70 74 69 6f 6e 20 69  6e 20 69 6d 70 6c 65 6d  |eption in implem|"
+       "00000030  65 6e 74 61 74 69 6f 6e  01 02 00 03 65 78 6e 01  |entation....exn.|"
+       "00000040  03 00 10 6d 6f 6e 69 74  6f 72 2e 6d 6c 2e 45 72  |...monitor.ml.Er|"
+       "00000050  72 6f 72 01 02 00 07 46  61 69 6c 75 72 65 00 0e  |ror....Failure..|"
+       "00000060  69 6e 6a 65 63 74 65 64  20 65 72 72 6f 72 01 01  |injected error..|"
+       "00000070  00 1a 3c 62 61 63 6b 74  72 61 63 65 20 65 6c 69  |..<backtrace eli|"
+       "00000080  64 65 64 20 69 6e 20 74  65 73 74 3e 00           |ded in test>.|")))
     (Close_started
      (("Connection closed by local side:"
        ("Uncaught exception in implementation"
