@@ -9,15 +9,14 @@ module Core_for_testing = Core
 include struct
   open Core
 
-  let compare_int = compare_int
+  let%template compare_int = (compare_int [@mode m]) [@@mode m = (global, local)]
   let globalize_int = globalize_int
   let globalize_option = globalize_option
   let globalize_string = globalize_string
 end
 
 module Rpc_tag : sig
-  include Core.Identifiable
-  include Bin_prot.Binable.S__local with type t := t
+  include%template Core.Identifiable [@mode local]
 
   val globalize : local_ t -> t
   val of_string_local : local_ string -> local_ t
@@ -32,7 +31,7 @@ end
 module Query_id = struct
   include Core.Unique_id.Int63 ()
 
-  let globalize (local_ t) = t
+  let globalize (local_ t) : t = t
   let bin_size_t__local (local_ t) = bin_size_t (globalize t)
   let bin_write_t__local buf ~pos (local_ t) = bin_write_t buf ~pos (globalize t)
 end
@@ -66,7 +65,7 @@ module Rpc_error : sig
     | Message_too_big of Transport.Send_result.message_too_big
     | Unknown of Sexp.t
     | Lift_error of Sexp.t
-  [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
+  [@@deriving bin_io ~localize, compare ~localize, globalize, sexp, variants]
 
   include Comparable.S with type t := t
 end = struct
@@ -82,7 +81,7 @@ end = struct
       | Message_too_big of Transport.Send_result.message_too_big
       | Unknown of Core.Sexp.t
       | Lift_error of Core.Sexp.t
-    [@@deriving bin_io ~localize, compare, globalize, sexp, variants]
+    [@@deriving bin_io ~localize, compare ~localize, globalize, sexp, variants]
 
     let%expect_test "Stable unless we purposefully add a new variant" =
       print_endline [%bin_digest: t];
@@ -226,8 +225,26 @@ module Query = struct
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
+  end
 
-    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V1.t option); data }
+  module V3 = struct
+    type 'a needs_length =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| 353c0fbd857bef60bcc518055e464468 |}]
+    ;;
+
+    type 'a t = 'a needs_length [@@deriving bin_read]
+
+    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V2.t option); data }
       : _ V1.t
       =
       { tag; version; id; data }
@@ -235,6 +252,91 @@ module Query = struct
 
     let of_v1 ?metadata { V1.tag; version; id; data } =
       { tag; version; id; metadata; data }
+    ;;
+
+    let to_v2 { tag; version; id; metadata; data } : _ V2.t =
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
+      ; data
+      }
+    ;;
+
+    let of_v2 { V2.tag; version; id; metadata; data } =
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.map metadata ~f:Rpc_metadata.V2.of_v1
+      ; data
+      }
+    ;;
+
+    let of_v2__local (local_ { V2.tag; version; id; metadata; data }) = exclave_
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.map__local metadata ~f:Rpc_metadata.V2.of_v1__local
+      ; data
+      }
+    ;;
+  end
+
+  module Validated = struct
+    (* NB: that this seems like it should just be type-equal to [V3.t], but subsequent
+       versions of the Query wire message allow for specifying the rank of the RPC (the
+       index of the RPC + version in the callee menu), so this Validated type encodes that
+       we've received such a message and have appropriately translated it into a known RPC
+       tag and version. *)
+    type 'a t =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+    [@@deriving globalize, sexp_of]
+
+    [%%template
+    [@@@alloc.default a @ m = (heap @ global, stack @ local)]
+
+    let of_v3 (v3_query : 'a V3.t @ m) : 'a t @ m =
+      let { V3.tag; version; id; metadata; data } = v3_query in
+      { tag; version; id; metadata; data } [@exclave_if_stack a]
+    ;;
+
+    let to_v3 (t : 'a t @ m) : 'a V3.t @ m =
+      let { tag; version; id; metadata; data } = t in
+      { tag; version; id; metadata; data } [@exclave_if_stack a]
+    ;;
+
+    let of_v2 (v2_query : 'a V2.t @ m) : 'a t @ m =
+      (let { V2.tag; version; id; metadata; data } = v2_query in
+       let metadata =
+         (Base.Option.map [@mode m]) metadata ~f:(Rpc_metadata.V2.of_v1 [@mode m])
+       in
+       { tag; version; id; metadata; data })
+      [@exclave_if_stack a]
+    ;;]
+
+    let to_v2 (t : 'a t) : 'a V2.t =
+      let { tag; version; id; metadata; data } = t in
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
+      ; data
+      }
+    ;;
+
+    let of_v1 (v1_query : 'a V1.t) : 'a t =
+      let { V1.tag; version; id; data } = v1_query in
+      { tag; version; id; metadata = None; data }
+    ;;
+
+    let to_v1 (t : 'a t) : 'a V1.t =
+      let { tag; version; id; data; metadata = _ } = t in
+      { tag; version; id; data }
     ;;
   end
 end
@@ -279,7 +381,7 @@ module Stream_query = struct
     [ `Query of 'a
     | `Abort
     ]
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -294,7 +396,7 @@ module Stream_initial_message = struct
     { unused_query_id : Unused_query_id.t
     ; initial : ('response, 'error) Core.Result.t
     }
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: (unit, unit) t];
@@ -307,7 +409,7 @@ module Stream_response_data = struct
     [ `Ok of 'a
     | `Eof
     ]
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -316,16 +418,6 @@ module Stream_response_data = struct
 
   type 'a t = 'a needs_length [@@deriving bin_read, sexp_of]
   type nat0_t = Nat0.t needs_length [@@deriving bin_read, bin_write]
-end
-
-module Info_with_local_bin_io = struct
-  include Core.Info
-
-  let bin_size_t__local (local_ t) = bin_size_t ([%globalize: Core.Info.t] t)
-
-  let bin_write_t__local buf ~pos (local_ t) =
-    bin_write_t buf ~pos ([%globalize: Core.Info.t] t)
-  ;;
 end
 
 module Message = struct
@@ -344,11 +436,14 @@ module Message = struct
     | Close_reason_duplicated of Info_with_local_bin_io.t
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
+    | Query_v3 of 'a Query.V3.needs_length
+    | Close_started
+    | Close_reason_v2 of Close_reason.Protocol.Binable.t
   [@@deriving bin_io ~localize, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| f3502c621ce978a8e1ed90bb8f344e22 |}]
+    [%expect {| 2f32dba228167d341e3ce0bba5fed65a |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -373,26 +468,42 @@ module Message = struct
       print_endline [%string "%{variant.name}: %{variant.rank#Int}"];
       f variant.constructor |> print_bin_prot
     in
-    let query : unit Query.V2.needs_length =
+    let query : unit Query.V3.needs_length =
       { tag = Rpc_tag.of_string "tag"
       ; version = 0
       ; id = Query_id.of_int_exn 1
-      ; metadata = Some (Rpc_metadata.V1.of_string "metadata")
+      ; metadata =
+          Some
+            (Rpc_metadata.V2.singleton
+               Rpc_metadata.V2.Key.default_for_legacy
+               (Rpc_metadata.V2.Payload.of_string_maybe_truncate "metadata")
+             [@alert "-legacy_query_metadata"])
       ; data = ()
       }
     in
     let metadata : Connection_metadata.V2.t = { identification = None; menu = None } in
     let close_reason = Core.Info.create_s [%message "Close reason"] in
+    let user_close_reason = Core.Info.create_s [%message "User close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
-      ~query_v1:(print (fun c -> c (Query.V2.to_v1 query)))
+      ~query_v1:(print (fun c -> c (Query.V3.to_v1 query)))
       ~response_v1:
         (print (fun c ->
            c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.V1.needs_length)))
-      ~query_v2:(print (fun c -> c query))
+      ~query_v2:(print (fun c -> c (Query.V3.to_v2 query)))
+      ~query_v3:(print (fun c -> c query))
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
+      ~close_reason_v2:
+        (print (fun c ->
+           c
+             (Close_reason.Protocol.binable_of_t
+                (Close_reason.Protocol.create
+                   ~kind:Unspecified
+                   ~debug_info:close_reason
+                   ~user_reason:user_close_reason
+                   ()))))
       ~metadata_v2:(print (fun c -> c metadata))
       ~response_v2:
         (print (fun c ->
@@ -401,7 +512,8 @@ module Message = struct
               ; impl_menu_index = Nat0.Option.some (Nat0.of_int_exn 5)
               ; data = Ok ()
               }
-              : _ Response.V2.needs_length)));
+              : _ Response.V2.needs_length)))
+      ~close_started:(print (fun c -> c));
     [%expect
       {|
       Heartbeat: 0
@@ -423,6 +535,16 @@ module Message = struct
       00000000  07 00 00                                          |...|
       Response_v2: 8
       00000000  08 00 01 05 00 00                                 |......|
+      Query_v3: 9
+      00000000  09 03 74 61 67 00 01 01  01 00 08 6d 65 74 61 64  |..tag......metad|
+      00000010  61 74 61 00                                       |ata.|
+      Close_started: 10
+      00000000  0a                                                |.|
+      Close_reason_v2: 11
+      00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 03  |...Unspecified..|
+      00000010  00 0c 43 6c 6f 73 65 20  72 65 61 73 6f 6e 01 03  |..Close reason..|
+      00000020  00 11 55 73 65 72 20 63  6c 6f 73 65 20 72 65 61  |..User close rea|
+      00000030  73 6f 6e                                          |son|
       |}]
   ;;
 end

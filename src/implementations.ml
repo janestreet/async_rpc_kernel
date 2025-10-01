@@ -34,7 +34,7 @@ type 'connection_state on_unknown_rpc_with_expert =
     'connection_state
     -> rpc_tag:string
     -> version:int
-    -> metadata:Rpc_metadata.V1.t option
+    -> metadata:Rpc_metadata.V2.t option
     -> Responder.t
     -> Bigstring.t
     -> pos:int
@@ -76,18 +76,21 @@ module Instance = struct
     ; menu : Menu.t option
     ; writer : Protocol_writer.t
     ; tracing_events : (local_ Tracing_event.t -> unit) Bus.Read_write.t
+    ; no_open_queries_event : (unit, read_write) Bvar.t
     ; open_streaming_responses : (Protocol.Query_id.t, Streaming_response.t) Hashtbl.t
+    ; mutable open_queries : int
     ; mutable stopped : bool
     ; connection_state : 'a
     ; connection_description : Info.t
-    ; connection_close_started : Info.t Deferred.t
+    ; connection_close_started : Close_reason.t Deferred.t
+    ; connection_close_started_info : Info.t Deferred.t
     ; mutable last_dispatched_implementation :
         (Description.t * ('a Implementation.t[@sexp.opaque]) * Protocol.Impl_menu_index.t)
           option
-    ; mutable on_receive :
+    ; on_receive :
         local_ Description.t
         -> query_id:P.Query_id.t
-        -> Rpc_metadata.V1.t option
+        -> Rpc_metadata.V2.t option
         -> Execution_context.t
         -> Execution_context.t
     }
@@ -95,7 +98,6 @@ module Instance = struct
 
   type t = T : _ unpacked -> t [@@unboxed]
 
-  let set_on_receive (T t) on_receive = t.on_receive <- on_receive
   let sexp_of_t (T t) = [%sexp_of: _ unpacked] t
 
   let write_tracing_event t (local_ event) =
@@ -572,11 +574,33 @@ module Instance = struct
         after_initial_response ())
   ;;
 
+  let[@inline] increment_open_queries
+    (type a b)
+    t
+    (result_mode : (a, b) Implementation_mode.Result_mode.t)
+    =
+    match result_mode with
+    | Deferred -> t.open_queries <- t.open_queries + 1
+    | Blocking -> ()
+  ;;
+
+  let[@inline] decrement_open_queries
+    (type a b)
+    t
+    (result_mode : (a, b) Implementation_mode.Result_mode.t)
+    =
+    match result_mode with
+    | Deferred ->
+      t.open_queries <- t.open_queries - 1;
+      if t.open_queries = 0 then Bvar.broadcast t.no_open_queries_event ()
+    | Blocking -> ()
+  ;;
+
   let apply_implementation
     t
     implementation
     ~impl_menu_index
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -695,6 +719,7 @@ module Instance = struct
     | Implementation.F.Rpc
         (bin_query_reader, bin_response_writer, f, error_mode, result_mode, here) ->
       emit_regular_query_tracing_event ();
+      increment_open_queries t result_mode;
       let query_contents =
         bin_read_from_bigstring
           bin_query_reader
@@ -775,6 +800,7 @@ module Instance = struct
                    Ok result))
          in
          let handle_result result =
+           decrement_open_queries t result_mode;
            let write_response response =
              let local_ rpc =
                ({ name = P.Rpc_tag.to_string query.tag; version = query.version }
@@ -867,10 +893,11 @@ module Instance = struct
       Continue
     | Implementation.F.Rpc_expert (f, result_mode) ->
       emit_regular_query_tracing_event ();
+      increment_open_queries t result_mode;
       let responder =
         Implementation.Expert.Responder.create query.id impl_menu_index t.writer
       in
-      let d =
+      let deferred =
         (* We need the [Monitor.try_with] even for the blocking mode as the implementation
            might return [Delayed_reponse], so we don't bother optimizing the blocking
            mode. *)
@@ -924,25 +951,25 @@ module Instance = struct
           handle_exn
             (computation_failure_result (Failure "Expert implementation did not reply"))
       in
-      let d =
+      let deferred =
         let open Eager_deferred.Let_syntax in
-        match%map d with
+        match%map deferred with
         | Ok (Ok (Authorized result)) ->
-          let d =
+          let deferred =
             match result with
             | Replied -> Deferred.unit
-            | Delayed_response d -> d
+            | Delayed_response deferred -> deferred
           in
-          if Deferred.is_determined d
+          if Deferred.is_determined deferred
           then check_responded ()
           else (
-            upon d (fun () ->
+            upon deferred (fun () ->
               check_responded ()
               |> Rpc_result.or_error
                    ~rpc_description:
                      { name = P.Rpc_tag.to_string query.tag; version = query.version }
                    ~connection_description:t.connection_description
-                   ~connection_close_started:t.connection_close_started
+                   ~connection_close_started:t.connection_close_started_info
               |> ok_exn);
             Ok ())
         | Ok (Ok (Not_authorized error)) ->
@@ -960,18 +987,20 @@ module Instance = struct
           in
           result
       in
-      (match Deferred.peek d with
+      (match Deferred.peek deferred with
        | None ->
          Wait
-           (let%map r = d in
+           (let%map result = deferred in
+            decrement_open_queries t result_mode;
             ok_exn
               (Rpc_result.or_error
                  ~rpc_description:
                    { name = P.Rpc_tag.to_string query.tag; version = query.version }
                  ~connection_description:t.connection_description
-                 ~connection_close_started:t.connection_close_started
-                 r))
+                 ~connection_close_started:t.connection_close_started_info
+                 result))
        | Some result ->
+         decrement_open_queries t result_mode;
          (match result with
           | Ok () -> Continue
           | Error _ -> Stop result))
@@ -1056,6 +1085,8 @@ module Instance = struct
     Deferred.all_unit producers_flushed
   ;;
 
+  let open_queries (T t) = t.open_queries
+
   let stop (T t) =
     t.stopped <- true;
     (* We collect the writers manually so that it's safe to modify
@@ -1089,7 +1120,7 @@ module Instance = struct
       (match
          f
            t.connection_state
-           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V2.tag)
+           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V3.tag)
            ~version:query.version
        with
        | `Close_connection -> Stop (Ok ())
@@ -1098,7 +1129,7 @@ module Instance = struct
 
   let handle_query_internal
     t
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1154,7 +1185,7 @@ module Instance = struct
            };
          (match on_unknown_rpc with
           | `Expert impl ->
-            let { P.Query.V2.tag; version; id; metadata; data = len } = query in
+            let { P.Query.V3.tag; version; id; metadata; data = len } = query in
             let rpc_tag = P.Rpc_tag.to_string tag in
             let d =
               let responder = Responder.create id impl_menu_index t.writer in
@@ -1196,7 +1227,7 @@ module Instance = struct
 
   let handle_query
     (T t)
-    ~(query : Nat0.t P.Query.V2.t)
+    ~(query : Nat0.t P.Query.V3.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1260,6 +1291,8 @@ let instantiate
   ~connection_state
   ~writer
   ~tracing_events
+  ~on_receive
+  ~no_open_queries_event
   : Instance.t
   =
   T
@@ -1267,15 +1300,17 @@ let instantiate
     ; menu
     ; writer
     ; tracing_events
+    ; no_open_queries_event
     ; open_streaming_responses = Hashtbl.Poly.create ()
+    ; open_queries = 0
     ; connection_state
     ; connection_description
     ; connection_close_started
+    ; connection_close_started_info =
+        Deferred.map connection_close_started ~f:Close_reason.info_of_t
     ; stopped = false
     ; last_dispatched_implementation = None
-    ; on_receive =
-        (fun (_ : Description.t) ~query_id:(_ : P.Query_id.t) metadata ctx ->
-          Rpc_metadata.Private.set metadata ctx)
+    ; on_receive
     }
 ;;
 

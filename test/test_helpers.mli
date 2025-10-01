@@ -43,7 +43,10 @@ val with_circular_connection
     correspond to the end which calls [accept]. Currently in our tests we always send rpcs
     from the client to the server. *)
 val with_rpc_server_connection
-  :  ?provide_rpc_shapes:bool
+  :  ?time_source:[> read ] Time_source.T1.t
+  -> ?provide_rpc_shapes:bool
+  -> ?server_implementations:unit Rpc.Implementation.t list
+  -> ?client_implementations:unit Rpc.Implementation.t list
   -> unit
   -> server_header:Header.t
   -> client_header:Header.t
@@ -55,9 +58,17 @@ val with_rpc_server_connection
         -> 'a Deferred.t)
   -> 'a Deferred.t
 
+(* [?server_heartbeat_foo] are after the labeled arguments since they default to the
+   value of [heartbeat_foo]. *)
 val setup_server_and_client_connection
   :  heartbeat_timeout:Time_ns.Span.t
   -> heartbeat_every:Time_ns.Span.t
+  -> heartbeat_timeout_style:Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.t
+  -> ?server_heartbeat_timeout:Time_ns.Span.t
+  -> ?server_heartbeat_every:Time_ns.Span.t
+  -> ?server_heartbeat_timeout_style:
+       Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.t
+  -> unit
   -> ([ `Server of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ]
      * [ `Client of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ])
        Deferred.t

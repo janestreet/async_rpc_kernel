@@ -69,7 +69,7 @@ module Instance : sig
 
   val handle_query
     :  t
-    -> query:Nat0.t Query.V2.t
+    -> query:Nat0.t Query.V3.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
     -> close_connection_monitor:Monitor.t
@@ -79,28 +79,29 @@ module Instance : sig
   (* Flushes all open streaming responses *)
   val flush : t -> unit Deferred.t
 
+  (** Return the number of outstanding queries. *)
+  val open_queries : t -> int
+
   (* Stop the instance: drop all responses to pending requests and make all further call
      to [handle_query] or [flush] to fail. *)
   val stop : t -> unit
-
-  val set_on_receive
-    :  t
-    -> (local_ Description.t
-        -> query_id:Query_id.t
-        -> Rpc_metadata.V1.t option
-        -> Execution_context.t
-        -> Execution_context.t)
-    -> unit
 end
 
 val instantiate
   :  'a t
   -> menu:Menu.t option
   -> connection_description:Info.t
-  -> connection_close_started:Info.t Deferred.t
+  -> connection_close_started:Close_reason.t Deferred.t
   -> connection_state:'a
   -> writer:Protocol_writer.t
   -> tracing_events:(local_ Tracing_event.t -> unit) Bus.Read_write.t
+  -> on_receive:
+       (local_ Description.t
+        -> query_id:Query_id.t
+        -> Rpc_metadata.V2.t option
+        -> Execution_context.t
+        -> Execution_context.t)
+  -> no_open_queries_event:(unit, read_write) Bvar.t
   -> Instance.t
 
 val create_exn
@@ -183,7 +184,7 @@ module Expert : sig
            'connection_state
            -> rpc_tag:string
            -> version:int
-           -> metadata:Rpc_metadata.V1.t option
+           -> metadata:Rpc_metadata.V2.t option
            -> Responder.t
            -> Bigstring.t
            -> pos:int
@@ -210,7 +211,7 @@ module Private : sig
            'connection_state
            -> rpc_tag:string
            -> version:int
-           -> metadata:Rpc_metadata.V1.t option
+           -> metadata:Rpc_metadata.V2.t option
            -> Expert.Responder.t
            -> Bigstring.t
            -> pos:int

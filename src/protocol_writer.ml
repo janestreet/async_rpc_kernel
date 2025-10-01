@@ -22,18 +22,20 @@ let set_negotiated_protocol_version t negotiated_protocol_version =
 ;;
 
 module For_handshake = struct
-  let handle_handshake_result : local_ _ Transport.Send_result.t -> _ = function
+  let handle_handshake_result ~step : local_ _ Transport.Send_result.t -> _ = function
     | Sent { result = (); bytes = (_ : int) } -> Ok ()
-    | Closed -> Error Handshake_error.Transport_closed
+    | Closed -> Error (Handshake_error.Transport_closed_during_step step)
     | Message_too_big error ->
       Error
-        (Handshake_error.Message_too_big
-           ([%globalize: Transport.Send_result.message_too_big] error))
+        (Handshake_error.Message_too_big_during_step
+           { message_too_big = [%globalize: Transport.Send_result.message_too_big] error
+           ; step
+           })
   ;;
 
   let send_handshake_header t header =
     (Transport.Writer.send_bin_prot t.writer Header.bin_t.writer header
-     |> handle_handshake_result)
+     |> handle_handshake_result ~step:Handshake_error.Step.Header)
     [@nontail]
   ;;
 
@@ -47,7 +49,7 @@ module For_handshake = struct
             (Protocol.Message.bin_writer_maybe_needs_length
                Protocol.Connection_metadata.V2.bin_writer_t)
             (Protocol.Message.Metadata_v2 { identification; menu })
-          |> handle_handshake_result)
+          |> handle_handshake_result ~step:Handshake_error.Step.Connection_metadata)
          [@nontail]))
       else (
         (* We used to unconditionally send rpc shapes over the wire. It turns out that
@@ -68,7 +70,7 @@ module For_handshake = struct
            (Protocol.Message.bin_writer_maybe_needs_length
               Protocol.Connection_metadata.V1.bin_writer_t)
            (Protocol.Message.Metadata { identification; menu })
-         |> handle_handshake_result)
+         |> handle_handshake_result ~step:Handshake_error.Step.Connection_metadata)
         [@nontail])
     | None
     (* [None] should be impossible to hit, but it doesn't hurt much to not send metadata
@@ -85,13 +87,34 @@ let send_close_reason_if_supported t ~reason = exclave_
   match Set_once.get t.negotiated_protocol_version with
   | None -> None
   | Some version ->
-    if Version_dependent_feature.is_supported Close_reason ~version
+    if Version_dependent_feature.is_supported Close_reason_v2 ~version
     then
       Some
         (Transport.Writer.send_bin_prot
            t.writer
            Protocol.Message.bin_writer_nat0_t
-           (Close_reason reason))
+           (Close_reason_v2 (Close_reason.Protocol.binable_of_t reason)))
+    else if Version_dependent_feature.is_supported Close_reason ~version
+    then
+      Some
+        (Transport.Writer.send_bin_prot
+           t.writer
+           Protocol.Message.bin_writer_nat0_t
+           (Close_reason (Close_reason.Protocol.info_of_t reason)))
+    else None
+;;
+
+let send_close_started_if_supported t = exclave_
+  match Set_once.get t.negotiated_protocol_version with
+  | None -> None
+  | Some version ->
+    if Version_dependent_feature.is_supported Close_started ~version
+    then
+      Some
+        (Transport.Writer.send_bin_prot
+           t.writer
+           Protocol.Message.bin_writer_nat0_t
+           Close_started)
     else None
 ;;
 
@@ -107,8 +130,11 @@ let is_closed = of_writer Transport.Writer.is_closed
 module Query = struct
   let query_message t query : _ Protocol.Message.t =
     match Set_once.get_exn t.negotiated_protocol_version with
-    | 1 -> Query_v1 (Protocol.Query.V2.to_v1 query)
-    | _ -> Query_v2 query
+    | 1 -> Query_v1 (Protocol.Query.Validated.to_v1 query)
+    | version ->
+      if Version_dependent_feature.is_supported Query_metadata_v2 ~version
+      then Query_v3 (Protocol.Query.Validated.to_v3 query)
+      else Query_v2 (Protocol.Query.Validated.to_v2 query)
   ;;
 
   let send t query ~bin_writer_query = exclave_

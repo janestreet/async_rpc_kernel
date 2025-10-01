@@ -4,36 +4,43 @@ module Stable = struct
   open Core.Core_stable
 
   module V1 = struct
-    type t =
-      { global_ name : string
-      ; version : int
-      }
-    [@@deriving
-      bin_io ~localize
-      , equal
-      , globalize
-      , compare ~localize
-      , hash
-      , sexp
-      , globalize
-      , stable_witness]
+    module T = struct
+      type t =
+        { global_ name : string
+        ; version : int
+        }
+      [@@deriving
+        bin_io ~localize
+        , equal ~localize
+        , globalize
+        , compare ~localize
+        , hash
+        , sexp
+        , globalize
+        , stable_witness]
 
-    let bin_read_t__local buf ~pos_ref = exclave_
-      let name = bin_read_string buf ~pos_ref in
-      let version = bin_read_int buf ~pos_ref in
-      { name; version }
-    ;;
+      let bin_read_t__local buf ~pos_ref = exclave_
+        let name = bin_read_string buf ~pos_ref in
+        let version = bin_read_int buf ~pos_ref in
+        { name; version }
+      ;;
 
-    let%expect_test _ =
-      print_endline [%bin_digest: t];
-      [%expect {| 4521f44dbc6098c0afc2770cc84552b1 |}]
-    ;;
+      let%expect_test _ =
+        print_endline [%bin_digest: t];
+        [%expect {| 4521f44dbc6098c0afc2770cc84552b1 |}]
+      ;;
+
+      include (val Comparator.V1.make ~compare ~sexp_of_t)
+    end
+
+    include T
+    include Comparable.V1.Make (T)
   end
 end
 
 include Stable.V1
-include Comparable.Make (Stable.V1)
 include Hashable.Make (Stable.V1)
+include Comparable.Make_using_comparator (Stable.V1)
 
 let to_alist ts = List.map ts ~f:(fun { name; version } -> name, version)
 let of_alist list = List.map list ~f:(fun (name, version) -> { name; version })

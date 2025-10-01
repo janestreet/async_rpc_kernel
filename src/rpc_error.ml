@@ -1,5 +1,4 @@
 open Core
-open Async_kernel
 include Protocol.Rpc_error
 include Sexpable.To_stringable (Protocol.Rpc_error)
 
@@ -32,13 +31,7 @@ let to_error
   =
   let rpc_error =
     sexp_of_t_with_reason t ~get_connection_close_reason:(fun () ->
-      let close_reason =
-        (* Usually (always?) here we will have the deferred already full
-           because Connection_closed error means the connection is already
-           closed *)
-        Deferred.peek connection_close_started
-      in
-      [%sexp (close_reason : Info.t option)])
+      [%sexp (connection_close_started |> Async_kernel.Deferred.peek : Info.t option)])
   in
   Error.create_s
     [%sexp

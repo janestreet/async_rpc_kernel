@@ -124,6 +124,10 @@ let default_on_emit t event =
       then (
         print_s [%message kind "Heartbeat"];
         false)
+      else if Bigstring.length bs = 1 && Char.( = ) '\010' (Bigstring.get bs 0)
+      then (
+        print_s [%message kind "Close_started"];
+        false)
       else (
         match next_expected_message t with
         | Some (T { reader; sexp_of }) ->
@@ -376,6 +380,8 @@ let write_handshake ?don't_read_yet t handshake =
     | `v5 -> Test_helpers.Header.v5
     | `v6 -> Test_helpers.Header.v6
     | `v7 -> Test_helpers.Header.v7
+    | `v8 -> Test_helpers.Header.v8
+    | `v9 -> Test_helpers.Header.v9
     | `latest -> Test_helpers.Header.latest
   in
   write ?don't_read_yet t [%bin_writer: Test_helpers.Header.t] header;
@@ -395,8 +401,13 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
   in
   let nat0 =
     match message with
-    | (Heartbeat | Metadata _ | Metadata_v2 _ | Close_reason _ | Close_reason_duplicated _)
-      as x -> x
+    | ( Heartbeat
+      | Metadata _
+      | Metadata_v2 _
+      | Close_reason _
+      | Close_reason_duplicated _
+      | Close_reason_v2 _
+      | Close_started ) as x -> x
     | Query_v1 x -> Query_v1 { x with data = length x.data }
     | (Response_v1 { data = Error _; _ } | Response_v2 { data = Error _; _ }) as x -> x
     | Response_v1 ({ data = Ok data; _ } as x) ->
@@ -404,6 +415,7 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
     | Response_v2 ({ data = Ok data; _ } as x) ->
       Response_v2 { x with data = Ok (length data) }
     | Query_v2 x -> Query_v2 { x with data = length x.data }
+    | Query_v3 x -> Query_v3 { x with data = length x.data }
   in
   let first_part =
     Bin_prot.Writer.to_bigstring [%bin_writer: Protocol.Message.nat0_t] nat0
@@ -457,11 +469,11 @@ let connect ?implementations ?(send_handshake = Some `latest) t =
   upon r (function
     | Error _ -> ()
     | Ok conn ->
-      upon (Rpc.Connection.close_reason ~on_close:`started conn) (fun reason ->
+      upon (Rpc.Connection.close_reason_structured ~on_close:`started conn) (fun reason ->
         let reason =
           let old_elide = Dynamic.get Backtrace.elide in
           Dynamic.set_root Backtrace.elide true;
-          let r = [%sexp_of: Info.t] reason in
+          let r = [%sexp_of: Rpc.Connection.Close_reason.t] reason in
           Dynamic.set_root Backtrace.elide old_elide;
           r
         in

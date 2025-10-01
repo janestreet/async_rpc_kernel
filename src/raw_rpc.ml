@@ -8,10 +8,11 @@ let dispatch'
   ~bin_writer_query
   ~query
   ~query_id
+  ~metadata
   ~response_handler
   =
   let query =
-    { Protocol.Query.V2.tag
+    { Protocol.Query.Validated.tag
     ; version
     ; id = query_id
     ; metadata =
@@ -19,6 +20,7 @@ let dispatch'
           connection
           { name = Protocol.Rpc_tag.to_string tag; version }
           query_id
+          ~dispatch_metadata:metadata
     ; data = query
     }
   in
@@ -31,7 +33,7 @@ let dispatch'
     Error (Rpc_error.Message_too_big message_too_big)
 ;;
 
-let dispatch connection ~tag ~version ~bin_writer_query ~query ~query_id ~f =
+let dispatch connection ~tag ~version ~bin_writer_query ~query ~query_id ~metadata ~f =
   let response_ivar = Ivar.create () in
   (match
      dispatch'
@@ -41,6 +43,7 @@ let dispatch connection ~tag ~version ~bin_writer_query ~query ~query_id ~f =
        ~bin_writer_query
        ~query
        ~query_id
+       ~metadata
        ~response_handler:(Some (f response_ivar))
    with
    | Ok () -> ()

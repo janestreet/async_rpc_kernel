@@ -8,6 +8,7 @@ module Rpc_result = Rpc_result
 module Rpc_shapes = Rpc_shapes
 module Tracing_event = Tracing_event
 module Or_not_authorized = Or_not_authorized
+module Close_reason = Close_reason
 
 open struct
   module Rpc_metadata_private = Rpc_metadata

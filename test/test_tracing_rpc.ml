@@ -44,7 +44,7 @@ let write_query ?metadata ?don't_read_yet ?(id = 123) t =
     ?don't_read_yet
     t
     [%bin_writer: string]
-    (Query_v2
+    (Query_v3
        { tag = Protocol.Rpc_tag.of_string "rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
@@ -255,25 +255,26 @@ let%expect_test "Single rpc implementation fails to send twice" =
          (Write_error (Message_too_big ((size 100) (max_message_size 10)))))))))
     (Send
      (message
-      ("00000000  05 05 21 65 78 6e 20 72  61 69 73 65 64 20 69 6e  |..!exn raised in|"
-       "00000010  20 52 50 43 20 63 6f 6e  6e 65 63 74 69 6f 6e 20  | RPC connection |"
-       "00000020  6c 6f 6f 70 02 01 03 00  10 6d 6f 6e 69 74 6f 72  |loop.....monitor|"
-       "00000030  2e 6d 6c 2e 45 72 72 6f  72 01 02 00 24 46 61 69  |.ml.Error...$Fai|"
-       "00000040  6c 65 64 20 74 6f 20 73  65 6e 64 20 77 72 69 74  |led to send writ|"
-       "00000050  65 20 65 72 72 6f 72 20  74 6f 20 63 6c 69 65 6e  |e error to clien|"
-       "00000060  74 01 02 01 02 00 05 65  72 72 6f 72 01 02 00 0f  |t......error....|"
-       "00000070  4d 65 73 73 61 67 65 5f  74 6f 6f 5f 62 69 67 01  |Message_too_big.|"
-       "00000080  02 01 02 00 04 73 69 7a  65 00 03 31 30 30 01 02  |.....size..100..|"
-       "00000090  00 10 6d 61 78 5f 6d 65  73 73 61 67 65 5f 73 69  |..max_message_si|"
-       "000000a0  7a 65 00 02 31 30 01 02  00 06 72 65 61 73 6f 6e  |ze..10....reason|"
-       "000000b0  01 02 00 0f 4d 65 73 73  61 67 65 5f 74 6f 6f 5f  |....Message_too_|"
-       "000000c0  62 69 67 01 02 01 02 00  04 73 69 7a 65 00 03 32  |big......size..2|"
-       "000000d0  30 30 01 02 00 10 6d 61  78 5f 6d 65 73 73 61 67  |00....max_messag|"
-       "000000e0  65 5f 73 69 7a 65 00 02  31 30 01 02 00 1a 3c 62  |e_size..10....<b|"
-       "000000f0  61 63 6b 74 72 61 63 65  20 65 6c 69 64 65 64 20  |acktrace elided |"
-       "00000100  69 6e 20 74 65 73 74 3e  00 25 43 61 75 67 68 74  |in test>.%Caught|"
-       "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
-       "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
+      ("00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 05  |...Unspecified..|"
+       "00000010  21 65 78 6e 20 72 61 69  73 65 64 20 69 6e 20 52  |!exn raised in R|"
+       "00000020  50 43 20 63 6f 6e 6e 65  63 74 69 6f 6e 20 6c 6f  |PC connection lo|"
+       "00000030  6f 70 02 01 03 00 10 6d  6f 6e 69 74 6f 72 2e 6d  |op.....monitor.m|"
+       "00000040  6c 2e 45 72 72 6f 72 01  02 00 24 46 61 69 6c 65  |l.Error...$Faile|"
+       "00000050  64 20 74 6f 20 73 65 6e  64 20 77 72 69 74 65 20  |d to send write |"
+       "00000060  65 72 72 6f 72 20 74 6f  20 63 6c 69 65 6e 74 01  |error to client.|"
+       "00000070  02 01 02 00 05 65 72 72  6f 72 01 02 00 0f 4d 65  |.....error....Me|"
+       "00000080  73 73 61 67 65 5f 74 6f  6f 5f 62 69 67 01 02 01  |ssage_too_big...|"
+       "00000090  02 00 04 73 69 7a 65 00  03 31 30 30 01 02 00 10  |...size..100....|"
+       "000000a0  6d 61 78 5f 6d 65 73 73  61 67 65 5f 73 69 7a 65  |max_message_size|"
+       "000000b0  00 02 31 30 01 02 00 06  72 65 61 73 6f 6e 01 02  |..10....reason..|"
+       "000000c0  00 0f 4d 65 73 73 61 67  65 5f 74 6f 6f 5f 62 69  |..Message_too_bi|"
+       "000000d0  67 01 02 01 02 00 04 73  69 7a 65 00 03 32 30 30  |g......size..200|"
+       "000000e0  01 02 00 10 6d 61 78 5f  6d 65 73 73 61 67 65 5f  |....max_message_|"
+       "000000f0  73 69 7a 65 00 02 31 30  01 02 00 1a 3c 62 61 63  |size..10....<bac|"
+       "00000100  6b 74 72 61 63 65 20 65  6c 69 64 65 64 20 69 6e  |ktrace elided in|"
+       "00000110  20 74 65 73 74 3e 00 25  43 61 75 67 68 74 20 62  | test>.%Caught b|"
+       "00000120  79 20 6d 6f 6e 69 74 6f  72 20 52 50 43 20 63 6f  |y monitor RPC co|"
+       "00000130  6e 6e 65 63 74 69 6f 6e  20 6c 6f 6f 70 00        |nnection loop.|")))
     (Close_started
      (("exn raised in RPC connection loop"
        (monitor.ml.Error
@@ -418,25 +419,26 @@ let%expect_test "Single rpc implementation fails to send twice" =
          (Write_error (Message_too_big ((size 100) (max_message_size 10)))))))))
     (Send
      (message
-      ("00000000  05 05 21 65 78 6e 20 72  61 69 73 65 64 20 69 6e  |..!exn raised in|"
-       "00000010  20 52 50 43 20 63 6f 6e  6e 65 63 74 69 6f 6e 20  | RPC connection |"
-       "00000020  6c 6f 6f 70 02 01 03 00  10 6d 6f 6e 69 74 6f 72  |loop.....monitor|"
-       "00000030  2e 6d 6c 2e 45 72 72 6f  72 01 02 00 24 46 61 69  |.ml.Error...$Fai|"
-       "00000040  6c 65 64 20 74 6f 20 73  65 6e 64 20 77 72 69 74  |led to send writ|"
-       "00000050  65 20 65 72 72 6f 72 20  74 6f 20 63 6c 69 65 6e  |e error to clien|"
-       "00000060  74 01 02 01 02 00 05 65  72 72 6f 72 01 02 00 0f  |t......error....|"
-       "00000070  4d 65 73 73 61 67 65 5f  74 6f 6f 5f 62 69 67 01  |Message_too_big.|"
-       "00000080  02 01 02 00 04 73 69 7a  65 00 03 31 30 30 01 02  |.....size..100..|"
-       "00000090  00 10 6d 61 78 5f 6d 65  73 73 61 67 65 5f 73 69  |..max_message_si|"
-       "000000a0  7a 65 00 02 31 30 01 02  00 06 72 65 61 73 6f 6e  |ze..10....reason|"
-       "000000b0  01 02 00 0f 4d 65 73 73  61 67 65 5f 74 6f 6f 5f  |....Message_too_|"
-       "000000c0  62 69 67 01 02 01 02 00  04 73 69 7a 65 00 03 32  |big......size..2|"
-       "000000d0  30 30 01 02 00 10 6d 61  78 5f 6d 65 73 73 61 67  |00....max_messag|"
-       "000000e0  65 5f 73 69 7a 65 00 02  31 30 01 02 00 1a 3c 62  |e_size..10....<b|"
-       "000000f0  61 63 6b 74 72 61 63 65  20 65 6c 69 64 65 64 20  |acktrace elided |"
-       "00000100  69 6e 20 74 65 73 74 3e  00 25 43 61 75 67 68 74  |in test>.%Caught|"
-       "00000110  20 62 79 20 6d 6f 6e 69  74 6f 72 20 52 50 43 20  | by monitor RPC |"
-       "00000120  63 6f 6e 6e 65 63 74 69  6f 6e 20 6c 6f 6f 70     |connection loop|")))
+      ("00000000  0b 00 0b 55 6e 73 70 65  63 69 66 69 65 64 01 05  |...Unspecified..|"
+       "00000010  21 65 78 6e 20 72 61 69  73 65 64 20 69 6e 20 52  |!exn raised in R|"
+       "00000020  50 43 20 63 6f 6e 6e 65  63 74 69 6f 6e 20 6c 6f  |PC connection lo|"
+       "00000030  6f 70 02 01 03 00 10 6d  6f 6e 69 74 6f 72 2e 6d  |op.....monitor.m|"
+       "00000040  6c 2e 45 72 72 6f 72 01  02 00 24 46 61 69 6c 65  |l.Error...$Faile|"
+       "00000050  64 20 74 6f 20 73 65 6e  64 20 77 72 69 74 65 20  |d to send write |"
+       "00000060  65 72 72 6f 72 20 74 6f  20 63 6c 69 65 6e 74 01  |error to client.|"
+       "00000070  02 01 02 00 05 65 72 72  6f 72 01 02 00 0f 4d 65  |.....error....Me|"
+       "00000080  73 73 61 67 65 5f 74 6f  6f 5f 62 69 67 01 02 01  |ssage_too_big...|"
+       "00000090  02 00 04 73 69 7a 65 00  03 31 30 30 01 02 00 10  |...size..100....|"
+       "000000a0  6d 61 78 5f 6d 65 73 73  61 67 65 5f 73 69 7a 65  |max_message_size|"
+       "000000b0  00 02 31 30 01 02 00 06  72 65 61 73 6f 6e 01 02  |..10....reason..|"
+       "000000c0  00 0f 4d 65 73 73 61 67  65 5f 74 6f 6f 5f 62 69  |..Message_too_bi|"
+       "000000d0  67 01 02 01 02 00 04 73  69 7a 65 00 03 32 30 30  |g......size..200|"
+       "000000e0  01 02 00 10 6d 61 78 5f  6d 65 73 73 61 67 65 5f  |....max_message_|"
+       "000000f0  73 69 7a 65 00 02 31 30  01 02 00 1a 3c 62 61 63  |size..10....<bac|"
+       "00000100  6b 74 72 61 63 65 20 65  6c 69 64 65 64 20 69 6e  |ktrace elided in|"
+       "00000110  20 74 65 73 74 3e 00 25  43 61 75 67 68 74 20 62  | test>.%Caught b|"
+       "00000120  79 20 6d 6f 6e 69 74 6f  72 20 52 50 43 20 63 6f  |y monitor RPC co|"
+       "00000130  6e 6e 65 63 74 69 6f 6e  20 6c 6f 6f 70 00        |nnection loop.|")))
     (Close_started
      (("exn raised in RPC connection loop"
        (monitor.ml.Error
@@ -711,7 +713,7 @@ let%expect_test "connection closes before response received" =
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query_v2 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send (Query_v3 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -751,7 +753,7 @@ let%expect_test "expert unknown rpc handler" =
                 "Unknown rpc"
                   ~rpc_tag
                   (version : int)
-                  (metadata : Async_rpc_kernel.Rpc_metadata.V1.t option)
+                  (metadata : Async_rpc_kernel.Rpc_metadata.V2.t option)
                   ~data:([%bin_read: string] bs ~pos_ref:(ref pos))];
             Rpc.Rpc.Expert.Responder.write_error
               responder
@@ -781,14 +783,20 @@ let%expect_test "expert unknown rpc handler" =
       (rpc ((name rpc) (version 1))) (id 123) (payload_bytes 0)))
     |}];
   Mock_peer.expect_message t [%bin_reader: Nothing.t] [%sexp_of: Nothing.t];
-  write_query ~metadata:(Async_rpc_kernel.Rpc_metadata.V1.of_string "example metadata") t;
+  write_query
+    ~metadata:
+      (Async_rpc_kernel.Rpc_metadata.V2.singleton
+         Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
+         (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
+            "example metadata") [@alert "-legacy_query_metadata"])
+    t;
   [%expect
     {|
     (Tracing_event
      ((event (Received Query)) (rpc ((name rpc) (version 1))) (id 123)
-      (payload_bytes 51)))
-    ("Unknown rpc" (rpc_tag rpc) (version 1) (metadata ("example metadata"))
-     (data "example query (id = 123)"))
+      (payload_bytes 53)))
+    ("Unknown rpc" (rpc_tag rpc) (version 1)
+     (metadata (((0 "example metadata")))) (data "example query (id = 123)"))
     (Send
      (Response_v2
       ((id 123) (impl_menu_index ())
