@@ -15,6 +15,11 @@ module Protocol : sig
       | Other of Flexible_sexp.Variant.Stable.Other.V1.t
       | Unspecified
       | Connection_limit_reached
+      | Connection_validation_failed
+      (** Indicates the peer closed the connection based on their [validate_connection]
+          callback in {!Connection.create}. The validation error [Error.t] provided by the
+          peer can be found in [user_reason] unmodified ([Error.to_info] is the identity
+          function). *)
     [@@deriving sexp, compare, variants, bin_io]
   end
 

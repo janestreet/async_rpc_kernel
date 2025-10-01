@@ -15,11 +15,17 @@ module Protocol = struct
         | Other of Flexible_sexp.Variant.Stable.Other.V1.t
         | Unspecified
         | Connection_limit_reached
+        | Connection_validation_failed
       [@@deriving sexp, compare, variants, globalize]
     end
 
     include T
     include Flexible_sexp.Variant.Stable.Make.V1 (T) ()
+
+    let%expect_test "Kind is stable unless a new variant is added" =
+      print_endline [%bin_digest: t];
+      [%expect {| 832b40ae394f2851da8ba67b3339b429 |}]
+    ;;
   end
 
   type t =
@@ -100,6 +106,7 @@ module For_testing = struct
       | Other of Flexible_sexp.Variant.Stable.Other.V1.t
       | Unspecified
       | Connection_limit_reached
+      | Connection_validation_failed
       | Extra_variant
     [@@deriving sexp, compare, variants, globalize]
   end

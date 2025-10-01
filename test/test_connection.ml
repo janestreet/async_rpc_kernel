@@ -2275,3 +2275,343 @@ let%expect_test "V10 Close_reason_v2 addition" =
     |}];
   return ()
 ;;
+
+let%expect_test "[V7 -> V8] Query_v3 compatibility test" =
+  Test_helpers.with_rpc_server_connection
+    ()
+    ~client_header:Test_helpers.Header.v7
+    ~server_header:Test_helpers.Header.v8
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        08                       body= List: 8 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0763 6c69 6e2d 6964                             clin-id (7 bytes)
+        01                                       menu= Some
+        00                                              descriptions= Array: 0 items
+        00                                                   digests= None
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        08                             8: 8 (int)
+
+        5800 0000 0000 0000    length= 88 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0773 6572 762d 6964                             serv-id (7 bytes)
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+        |}];
+      let%bind dispatch_result =
+        Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
+      in
+      print_s [%message (dispatch_result : int array Or_error.t)];
+      [%expect {| (dispatch_result (Ok (1 2 3 4 5))) |}];
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        1000 0000 0000 0000    length= 16 (64-bit LE)
+        03                       body= Query_v2
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        1e                                   id= 30 (int)
+        00                             metadata= None
+        06                                 data= length= 6 (int)
+        05                                         body= Array: 5 items
+        05                                               0: 5 (int)
+        04                                               1: 4 (int)
+        03                                               2: 3 (int)
+        02                                               3: 2 (int)
+        01                                               4: 1 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0c00 0000 0000 0000    length= 12 (64-bit LE)
+        08                       body= Response_v2
+        1e                                          id= 30 (int)
+        01                             impl_menu_index= Some
+        00                                               0 (nat0)
+        00                                        data= Ok
+        06                                              length= 6 (int)
+        05                                                body= Array: 5 items
+        01                                                      0: 1 (int)
+        02                                                      1: 2 (int)
+        03                                                      2: 3 (int)
+        04                                                      3: 4 (int)
+        05                                                      4: 5 (int)
+        |}];
+      return ())
+;;
+
+let%expect_test "[V8 -> V7] Query_v3 compatibility test" =
+  Test_helpers.with_rpc_server_connection
+    ()
+    ~client_header:Test_helpers.Header.v8
+    ~server_header:Test_helpers.Header.v7
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        08                             8: 8 (int)
+
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0763 6c69 6e2d 6964                             clin-id (7 bytes)
+        01                                       menu= Some
+        00                                              descriptions= Array: 0 items
+        00                                                   digests= None
+        ---   server -> client:   ---
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        08                       body= List: 8 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+
+        5800 0000 0000 0000    length= 88 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0773 6572 762d 6964                             serv-id (7 bytes)
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+        |}];
+      let%bind dispatch_result =
+        Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
+      in
+      print_s [%message (dispatch_result : int array Or_error.t)];
+      [%expect {| (dispatch_result (Ok (1 2 3 4 5))) |}];
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        1000 0000 0000 0000    length= 16 (64-bit LE)
+        03                       body= Query_v2
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        1f                                   id= 31 (int)
+        00                             metadata= None
+        06                                 data= length= 6 (int)
+        05                                         body= Array: 5 items
+        05                                               0: 5 (int)
+        04                                               1: 4 (int)
+        03                                               2: 3 (int)
+        02                                               3: 2 (int)
+        01                                               4: 1 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0c00 0000 0000 0000    length= 12 (64-bit LE)
+        08                       body= Response_v2
+        1f                                          id= 31 (int)
+        01                             impl_menu_index= Some
+        00                                               0 (nat0)
+        00                                        data= Ok
+        06                                              length= 6 (int)
+        05                                                body= Array: 5 items
+        01                                                      0: 1 (int)
+        02                                                      1: 2 (int)
+        03                                                      2: 3 (int)
+        04                                                      3: 4 (int)
+        05                                                      4: 5 (int)
+        |}];
+      return ())
+;;
+
+let%expect_test "[V8 -> V8] Query_v3 same version test" =
+  Test_helpers.with_rpc_server_connection
+    ()
+    ~client_header:Test_helpers.Header.v8
+    ~server_header:Test_helpers.Header.v8
+    ~f:(fun ~client ~server:_ ~s_to_c ~c_to_s ->
+      print_headers ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        08                             8: 8 (int)
+
+        0d00 0000 0000 0000    length= 13 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0763 6c69 6e2d 6964                             clin-id (7 bytes)
+        01                                       menu= Some
+        00                                              descriptions= Array: 0 items
+        00                                                   digests= None
+        ---   server -> client:   ---
+        0e00 0000 0000 0000    length= 14 (64-bit LE)
+        09                       body= List: 9 items
+        fd52 5043 00                   0: 4411474 (int)
+        01                             1: 1 (int)
+        02                             2: 2 (int)
+        03                             3: 3 (int)
+        04                             4: 4 (int)
+        05                             5: 5 (int)
+        06                             6: 6 (int)
+        07                             7: 7 (int)
+        08                             8: 8 (int)
+
+        5800 0000 0000 0000    length= 88 (64-bit LE)
+        07                       body= Metadata_v2
+        01                             identification= Some
+        0773 6572 762d 6964                             serv-id (7 bytes)
+        01                                       menu= Some
+        06                                              descriptions= Array: 6 items
+        0473 6f72 74                                                  0:    name= sort (4 bytes)
+        01                                                               version= 1 (int)
+        1074 6573 742d 6f6e    ...
+        652d 7761 792d 7270    ...
+        63                                                            1:    name= test-on... (16 bytes)
+        01                                                               version= 1 (int)
+        0d74 6573 742d 7069    ...
+        7065 2d72 7063                                                2:    name= test-pi... (13 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            3:    name= test-rpc (8 bytes)
+        01                                                               version= 1 (int)
+        0874 6573 742d 7270    ...
+        63                                                            4:    name= test-rpc (8 bytes)
+        02                                                               version= 2 (int)
+        0e74 6573 742d 7374    ...
+        6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
+        01                                                               version= 1 (int)
+        00                                                   digests= None
+        |}];
+      let%bind dispatch_result =
+        Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
+      in
+      print_s [%message (dispatch_result : int array Or_error.t)];
+      [%expect {| (dispatch_result (Ok (1 2 3 4 5))) |}];
+      print_payload_messages_bidirectional ~s_to_c ~c_to_s;
+      [%expect
+        {|
+        ---   client -> server:   ---
+        1000 0000 0000 0000    length= 16 (64-bit LE)
+        09                       body= Query_v3
+        0473 6f72 74                        tag= sort (4 bytes)
+        01                              version= 1 (int)
+        20                                   id= 32 (int)
+        00                             metadata= None
+        06                                 data= length= 6 (int)
+        05                                         body= Array: 5 items
+        05                                               0: 5 (int)
+        04                                               1: 4 (int)
+        03                                               2: 3 (int)
+        02                                               3: 2 (int)
+        01                                               4: 1 (int)
+
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+        ---   server -> client:   ---
+        0100 0000 0000 0000    length= 1 (64-bit LE)
+        00                       body= Heartbeat
+
+        0c00 0000 0000 0000    length= 12 (64-bit LE)
+        08                       body= Response_v2
+        20                                          id= 32 (int)
+        01                             impl_menu_index= Some
+        00                                               0 (nat0)
+        00                                        data= Ok
+        06                                              length= 6 (int)
+        05                                                body= Array: 5 items
+        01                                                      0: 1 (int)
+        02                                                      1: 2 (int)
+        03                                                      2: 3 (int)
+        04                                                      3: 4 (int)
+        05                                                      4: 5 (int)
+        |}];
+      return ())
+;;

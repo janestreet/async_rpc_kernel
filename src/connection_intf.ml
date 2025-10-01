@@ -187,8 +187,9 @@ module type S = sig
     -> unit Deferred.t
 
   (** [close_finished] becomes determined after the close of the connection's transport
-      completes, i.e. the same deferred that [close] returns. [close_finished] differs
-      from [close] in that it does not have the side effect of initiating a close. *)
+      completes, i.e. the same deferred that [close] returns (although it also becomes
+      determined if the other side closes the connection). [close_finished] differs from
+      [close] in that it does not have the side effect of initiating a close. *)
   val close_finished : t -> unit Deferred.t
 
   (** [close_reason ~on_close t] becomes determined when close starts or finishes based on
@@ -350,7 +351,7 @@ module type S_private = sig
     -> kind:Tracing_event.Sent_response_kind.t Tracing_event.Kind.t
     -> response_handler:Response_handler.t option
     -> bin_writer_query:'a Bin_prot.Type_class.writer
-    -> query:'a Query.V3.t
+    -> query:'a Query.Validated.t
     -> (unit, Dispatch_error.t) Result.t
 
   val dispatch_bigstring

@@ -28,5 +28,10 @@ module Stable : sig
       , stable_witness]
 
     val bin_read_t__local : t Bin_prot.Read.reader__local
+
+    include
+      Stable_comparable.V1
+      with type t := t
+       and type comparator_witness := comparator_witness
   end
 end

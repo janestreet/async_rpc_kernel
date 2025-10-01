@@ -31,7 +31,7 @@ end
 module Query_id = struct
   include Core.Unique_id.Int63 ()
 
-  let globalize t = t
+  let globalize t : t = t
   let bin_size_t__local t = bin_size_t (globalize t)
   let bin_write_t__local buf ~pos t = bin_write_t buf ~pos (globalize t)
 end
@@ -281,6 +281,64 @@ module Query = struct
       }
     ;;
   end
+
+  module Validated = struct
+    (* NB: that this seems like it should just be type-equal to [V3.t], but subsequent
+       versions of the Query wire message allow for specifying the rank of the RPC (the
+       index of the RPC + version in the callee menu), so this Validated type encodes that
+       we've received such a message and have appropriately translated it into a known RPC
+       tag and version. *)
+    type 'a t =
+      { tag : Rpc_tag.t
+      ; version : int
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+    [@@deriving globalize, sexp_of]
+
+    [%%template
+    [@@@alloc.default a @ m = (heap @ global, stack @ local)]
+
+    let of_v3 (v3_query : 'a V3.t) : 'a t =
+      let { V3.tag; version; id; metadata; data } = v3_query in
+      { tag; version; id; metadata; data } [@exclave_if_stack a]
+    ;;
+
+    let to_v3 (t : 'a t) : 'a V3.t =
+      let { tag; version; id; metadata; data } = t in
+      { tag; version; id; metadata; data } [@exclave_if_stack a]
+    ;;
+
+    let of_v2 (v2_query : 'a V2.t) : 'a t =
+      (let { V2.tag; version; id; metadata; data } = v2_query in
+       let metadata =
+         (Base.Option.map [@mode m]) metadata ~f:(Rpc_metadata.V2.of_v1 [@mode m])
+       in
+       { tag; version; id; metadata; data })
+      [@exclave_if_stack a]
+    ;;]
+
+    let to_v2 (t : 'a t) : 'a V2.t =
+      let { tag; version; id; metadata; data } = t in
+      { tag
+      ; version
+      ; id
+      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
+      ; data
+      }
+    ;;
+
+    let of_v1 (v1_query : 'a V1.t) : 'a t =
+      let { V1.tag; version; id; data } = v1_query in
+      { tag; version; id; metadata = None; data }
+    ;;
+
+    let to_v1 (t : 'a t) : 'a V1.t =
+      let { tag; version; id; data; metadata = _ } = t in
+      { tag; version; id; data }
+    ;;
+  end
 end
 
 module Impl_menu_index = Nat0.Option
@@ -323,7 +381,7 @@ module Stream_query = struct
     [ `Query of 'a
     | `Abort
     ]
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];
@@ -338,7 +396,7 @@ module Stream_initial_message = struct
     { unused_query_id : Unused_query_id.t
     ; initial : ('response, 'error) Core.Result.t
     }
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: (unit, unit) t];
@@ -351,7 +409,7 @@ module Stream_response_data = struct
     [ `Ok of 'a
     | `Eof
     ]
-  [@@deriving bin_io, sexp_of]
+  [@@deriving bin_io ~localize, sexp_of]
 
   let%expect_test _ =
     print_endline [%bin_digest: unit needs_length];

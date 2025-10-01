@@ -337,10 +337,10 @@ let remove_query_id_and_broadcast_if_empty t ~id =
 
 let send_query_with_registered_response_handler
   t
-  (query : 'query P.Query.V3.t)
+  (query : 'query P.Query.Validated.t)
   ~response_handler
   ~kind
-  ~(send_query : 'query P.Query.V3.t -> 'response Transport.Send_result.t)
+  ~(send_query : 'query P.Query.Validated.t -> 'response Transport.Send_result.t)
   : ('response, Dispatch_error.t) Result.t
   =
   let rpc : Description.t =
@@ -367,7 +367,7 @@ let send_query_with_registered_response_handler
   result
 ;;
 
-let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.V3.t) =
+let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.Validated.t) =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
   | Ok writer ->
@@ -409,7 +409,7 @@ let make_dispatch_bigstring
   | Ok writer ->
     let id = P.Query_id.create () in
     let metadata = compute_metadata t ~tag ~version ~id ~metadata in
-    let query : unit P.Query.V3.t = { tag; version; id; metadata; data = () } in
+    let query : unit P.Query.Validated.t = { tag; version; id; metadata; data = () } in
     send_query_with_registered_response_handler
       t
       query
@@ -1202,10 +1202,10 @@ let set_peer_metadata_and_validate t metadata ~validate_connection =
               Private.Close_reason.By_local
               { reason =
                   Close_reason.Protocol.create
-                    ~kind:Unspecified
-                    ~debug_info:
-                      (Error.tag error ~tag:"Connection validation failed"
-                       |> Error.to_info)
+                    ~kind:Connection_validation_failed
+                      (* [Error.to_info] is the identity function, so we are not
+                          modifying the user error in any way *)
+                    ~user_reason:(Error.to_info error)
                     ()
               ; send_reason_to_peer = true
               }));

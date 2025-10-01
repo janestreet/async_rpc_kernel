@@ -20,6 +20,10 @@ let latest_version_number = 10
 
 (* [latest] is used as the [Connection]'s default header *)
 let latest = create ~supported_versions:(versions_range 1 latest_version_number)
+let v10_at_least_v7 = create ~supported_versions:(versions_range 7 10)
+let v9_at_least_v7 = create ~supported_versions:(versions_range 7 9)
+let v8_at_least_v7 = create ~supported_versions:(versions_range 7 8)
+let v7_at_least_v7 = create ~supported_versions:(versions_range 7 7)
 
 let latest_at_least_v7 =
   create ~supported_versions:(versions_range 7 latest_version_number)

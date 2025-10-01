@@ -64,6 +64,11 @@ module Description : sig
     module V1 : sig
       type nonrec t = t
       [@@deriving compare ~localize, equal ~localize, sexp, bin_io, hash, stable_witness]
+
+      include
+        Stable_comparable.V1
+        with type t := t
+         and type comparator_witness := comparator_witness
     end
   end
 end

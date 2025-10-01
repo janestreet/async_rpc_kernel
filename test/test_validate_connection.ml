@@ -83,7 +83,7 @@ let%expect_test "no server identification" =
   let%bind response =
     with_rpc_server_connection
       ~client_identification:Test_helpers.client_identification
-      (fun conn -> Rpc.Rpc.dispatch rpc conn ())
+      (fun (_ : Rpc.Connection.t) -> failwith "connection should not be established")
       ~on_client_connected:(fun _ -> print_endline "client connected")
   in
   [%sexp_of: unit Or_error.t] response |> print_s;
@@ -102,7 +102,18 @@ let%expect_test "no client identification" =
   let%bind response =
     with_rpc_server_connection
       ~server_identification:Test_helpers.server_identification
-      (fun conn -> Rpc.Rpc.dispatch rpc conn ())
+      (fun conn ->
+        let%bind response = Rpc.Rpc.dispatch rpc conn () in
+        let%map close_reason =
+          Rpc.Connection.close_reason_structured conn ~on_close:`started
+        in
+        match close_reason.reason.kind with
+        | Connection_validation_failed -> response
+        | _ ->
+          raise_s
+            [%message
+              "Unexpected close reason kind"
+                (close_reason : Async_rpc_kernel.Close_reason.t)])
       ~on_client_connected:(fun _ -> print_endline "client connected")
   in
   [%sexp_of: unit Or_error.t] response |> print_s;
@@ -113,7 +124,7 @@ let%expect_test "no client identification" =
        ((rpc_error
          (Connection_closed
           ((("Connection closed by remote side:"
-             ("Connection validation failed" "Missing peer identity"))
+             (Connection_validation_failed "Missing peer identity"))
             (connection_description ("Client connected via TCP" (localhost PORT)))))))
         (connection_description ("Client connected via TCP" (localhost PORT)))
         (rpc_name test_rpc) (rpc_version 1)))
@@ -125,7 +136,18 @@ let%expect_test "wrong client identification" =
     with_rpc_server_connection
       ~client_identification:(Bigstring.of_string "identity")
       ~server_identification:Test_helpers.server_identification
-      (fun conn -> Rpc.Rpc.dispatch rpc conn ())
+      (fun conn ->
+        let%bind response = Rpc.Rpc.dispatch rpc conn () in
+        let%map close_reason =
+          Rpc.Connection.close_reason_structured conn ~on_close:`started
+        in
+        match close_reason.reason.kind with
+        | Connection_validation_failed -> response
+        | _ ->
+          raise_s
+            [%message
+              "Unexpected close reason kind"
+                (close_reason : Async_rpc_kernel.Close_reason.t)])
       ~on_client_connected:(fun _ -> print_endline "client connected")
   in
   [%sexp_of: unit Or_error.t] response |> print_s;
@@ -136,7 +158,7 @@ let%expect_test "wrong client identification" =
        ((rpc_error
          (Connection_closed
           ((("Connection closed by remote side:"
-             ("Connection validation failed" "Wrong peer identity: identity"))
+             (Connection_validation_failed "Wrong peer identity: identity"))
             (connection_description ("Client connected via TCP" (localhost PORT)))))))
         (connection_description ("Client connected via TCP" (localhost PORT)))
         (rpc_name test_rpc) (rpc_version 1)))
@@ -148,7 +170,7 @@ let%expect_test "wrong server identification" =
     with_rpc_server_connection
       ~client_identification:Test_helpers.client_identification
       ~server_identification:(Bigstring.of_string "identity")
-      (fun conn -> Rpc.Rpc.dispatch rpc conn ())
+      (fun (_ : Rpc.Connection.t) -> failwith "connection should not be established")
       ~on_client_connected:(fun _ -> print_endline "client connected")
   in
   [%sexp_of: unit Or_error.t] response |> print_s;

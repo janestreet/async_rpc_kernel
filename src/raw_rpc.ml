@@ -12,7 +12,7 @@ let dispatch'
   ~response_handler
   =
   let query =
-    { Protocol.Query.V3.tag
+    { Protocol.Query.Validated.tag
     ; version
     ; id = query_id
     ; metadata =

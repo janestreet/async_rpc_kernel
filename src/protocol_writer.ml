@@ -130,11 +130,11 @@ let is_closed = of_writer Transport.Writer.is_closed
 module Query = struct
   let query_message t query : _ Protocol.Message.t =
     match Set_once.get_exn t.negotiated_protocol_version with
-    | 1 -> Query_v1 (Protocol.Query.V3.to_v1 query)
+    | 1 -> Query_v1 (Protocol.Query.Validated.to_v1 query)
     | version ->
       if Version_dependent_feature.is_supported Query_metadata_v2 ~version
-      then Query_v3 query
-      else Query_v2 (Protocol.Query.V3.to_v2 query)
+      then Query_v3 (Protocol.Query.Validated.to_v3 query)
+      else Query_v2 (Protocol.Query.Validated.to_v2 query)
   ;;
 
   let send t query ~bin_writer_query =

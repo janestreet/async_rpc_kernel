@@ -34,6 +34,12 @@ module Query_id = struct
   let[@zero_alloc opt] bin_read_t__local buf ~pos_ref = bin_read_t buf ~pos_ref
 end
 
+module Unused_query_id = struct
+  include Unused_query_id
+
+  let[@zero_alloc opt] bin_read_t__local buf ~pos_ref = bin_read_t buf ~pos_ref
+end
+
 module Rpc_error = struct
   include Rpc_error
 
@@ -96,18 +102,16 @@ module Rpc_error = struct
   ;;
 end
 
-module Rpc_result = struct
-  include Rpc_result
+module Result = struct
+  include Result
 
-  type nonrec 'a t = ('a, Rpc_error.t) Core.Result.t
-
-  let bin_read_t__local bin_read_el buf ~pos_ref =
+  let[@zero_alloc opt] bin_read_t__local bin_read_ok bin_read_error buf ~pos_ref =
     match Bin_prot.Read.bin_read_int_8bit buf ~pos_ref with
     | 0 ->
-      let data = bin_read_el buf ~pos_ref in
+      let data = (bin_read_ok [@zero_alloc assume]) buf ~pos_ref in
       Ok data
     | 1 ->
-      let err = Rpc_error.bin_read_t__local buf ~pos_ref in
+      let err = (bin_read_error [@zero_alloc assume]) buf ~pos_ref in
       Error err
     | _ ->
       Bin_prot.Common.raise_read_error
@@ -116,7 +120,19 @@ module Rpc_result = struct
   ;;
 end
 
+module Rpc_result = struct
+  include Rpc_result
+
+  type nonrec 'a t = ('a, Rpc_error.t) Core.Result.t
+
+  let[@zero_alloc opt] bin_read_t__local bin_read_el buf ~pos_ref =
+    Result.bin_read_t__local bin_read_el Rpc_error.bin_read_t__local buf ~pos_ref
+  ;;
+end
+
 module Query = struct
+  include Query
+
   module V1 = struct
     include Query.V1
 
@@ -320,4 +336,54 @@ module Message = struct
   ;;
 
   let bin_read_nat0_t__local = bin_read_t__local Nat0.bin_read_t
+end
+
+module Stream_query = struct
+  include Stream_query
+
+  let bin_read_needs_length__local : ('a, 'a needs_length) reader1__local =
+    fun bin_read_el buf ~pos_ref ->
+    match Bin_prot.Read.bin_read_variant_int__local buf ~pos_ref with
+    | -250086680 ->
+      let el = bin_read_el buf ~pos_ref in
+      `Query el
+    | 774323088 -> `Abort
+    | _ ->
+      Bin_prot.Common.raise_read_error
+        (Bin_prot.Common.ReadError.Sum_tag "Stream_query local reader")
+        !pos_ref
+  ;;
+
+  let bin_read_nat0_t__local = bin_read_needs_length__local Nat0.bin_read_t
+end
+
+module Stream_initial_message = struct
+  include Stream_initial_message
+
+  let bin_read_t__local bin_read_response bin_read_error buf ~pos_ref =
+    let unused_query_id = Unused_query_id.bin_read_t__local buf ~pos_ref in
+    let initial =
+      (Result.bin_read_t__local bin_read_response bin_read_error) buf ~pos_ref
+    in
+    { unused_query_id; initial }
+  ;;
+end
+
+module Stream_response_data = struct
+  include Stream_response_data
+
+  let bin_read_needs_length__local : ('a, 'a needs_length) reader1__local =
+    fun bin_read_el buf ~pos_ref ->
+    match Bin_prot.Read.bin_read_variant_int__local buf ~pos_ref with
+    | 17724 ->
+      let el = bin_read_el buf ~pos_ref in
+      `Ok el
+    | 3456156 -> `Eof
+    | _ ->
+      Bin_prot.Common.raise_read_error
+        (Bin_prot.Common.ReadError.Sum_tag "Stream_response_data local reader")
+        !pos_ref
+  ;;
+
+  let bin_read_nat0_t__local = bin_read_needs_length__local Nat0.bin_read_t
 end

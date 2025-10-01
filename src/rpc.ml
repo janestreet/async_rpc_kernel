@@ -691,7 +691,12 @@ module Streaming_rpc = struct
 
   let abort t conn id =
     let query =
-      { P.Query.V3.tag = t.tag; version = t.version; id; metadata = None; data = `Abort }
+      { P.Query.Validated.tag = t.tag
+      ; version = t.version
+      ; id
+      ; metadata = None
+      ; data = `Abort
+      }
     in
     ignore
       (Connection.dispatch
