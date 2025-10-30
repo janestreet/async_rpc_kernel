@@ -1045,16 +1045,38 @@ module Streaming_rpc = struct
         (* Set a small buffer to reduce the number of pushback events *)
         Pipe.set_size_budget pipe_w 100;
         let close_reason : Pipe_close_reason.t Ivar.t = Ivar.create () in
+        (* The regular TCP transport [lib/async_rpc/core/src/rpc_transport.ml], unlike
+           other transports (low latency, pipe), does not immediately bind on the
+           [flushed] deferred when it receives [Wait] and instead will call [f] in a
+           synchronous loop until the end of its batch of messages and [bind] on all the
+           [Wait]s it received in that batch.
+
+           Instead of allocating a bunch of deferreds in this case, we cache the
+           deferred of the first [Wait] we send back. This does mean that the transport
+           could send its next batch of messages before the previous batch has flushed,
+           so we'll buffer at most two batches of messages on the pipe (compared to just
+           one batch if we didn't cache). This is likely fine for memory usage since the
+           transport already had these messages buffered anyways. *)
+        let cached_flush_deferred : unit Deferred.t or_null ref = ref Null in
+        let get_flush_deferred () =
+          match !cached_flush_deferred with
+          | This d when not (Deferred.is_determined d) -> d
+          | _ ->
+            incr Util.For_testing.number_of_unique_flushed_waits_due_to_streaming_pushback;
+            let d =
+              match%map Pipe.downstream_flushed pipe_w with
+              | `Ok | `Reader_closed -> ()
+            in
+            cached_flush_deferred := This d;
+            d
+        in
         let f : _ Pipe_message.t -> Pipe_response.t = function
           | Update data ->
             if not (Pipe.is_closed pipe_w)
             then (
               Pipe.write_without_pushback pipe_w data;
               if t.client_pushes_back && Pipe.length pipe_w >= Pipe.size_budget pipe_w
-              then
-                Wait
-                  (match%map Pipe.downstream_flushed pipe_w with
-                   | `Ok | `Reader_closed -> ())
+              then Wait (get_flush_deferred ())
               else Continue)
             else Continue
           | Closed reason ->

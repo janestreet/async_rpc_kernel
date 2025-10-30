@@ -167,19 +167,38 @@ let get t index =
   else Some (Modes.Global.wrap t.descriptions.(index))
 ;;
 
-let index t description =
+let index__local t ~tag ~version =
+  let reference_tag = tag in
+  let reference_version = version in
   match
-    Array.binary_search_segmented
+    (Array.binary_search_segmented [@zero_alloc assume])
+      (* We can assume that binary_search_segmented does not alloc because the [segment_of]
+       parameter to it is zero_alloc. Additionally, microbenchmarks show that the change
+       that provoked this (invoking RPCs by menu rank) did not introduce an alloc in the
+       dispatch path. *)
       t.descriptions
-      ~segment_of:(fun d ->
-        if [%compare_local: Description.t] d description <= 0 then `Left else `Right)
+      ~segment_of:(fun [@zero_alloc] d ->
+        let { Description.name; version } = d in
+        let cmp =
+          [%compare_local: string * int] (name, version) (reference_tag, reference_version)
+        in
+        if cmp <= 0 then `Left else `Right)
       `Last_on_left
   with
   | None -> None
   | Some i ->
-    if [%compare_local.equal: Description.t] t.descriptions.(i) description
+    let { Description.name; version } = t.descriptions.(i) in
+    if [%compare_local.equal: string] name reference_tag
+       && [%compare_local.equal: int] version reference_version
     then Some i
     else None
+;;
+
+(* Even though [description] is annotated local_, the [name] field on [Description.t] is
+   forced to be [global_], thus requiring a separate local version of [index]. *)
+let index t description =
+  let { Description.name = tag; version } = description in
+  index__local t ~tag ~version
 ;;
 
 let mem t description =
@@ -390,4 +409,59 @@ let highest_shared_version ~rpc_name ~callee_menu ~caller_versions =
           (rpc_name : string)
           (caller_versions : Int.Set.t)
           (callee_menu : t)]
+;;
+
+let check_digests_consistent (t1 : t) (t2 : t) =
+  match Option.both t1.digests t2.digests with
+  | None ->
+    Or_error.error_s
+      [%message
+        "Menu missing digests"
+          (t1.digests : Rpc_shapes.Just_digests.t array option)
+          (t2.digests : Rpc_shapes.Just_digests.t array option)]
+  | Some (t1_digests, t2_digests) ->
+    (* We know that both arrays are sorted which is not verified by the types but is done
+       in the constructors. *)
+    let rec aux_check_digests_consistent t1_index t2_index =
+      if [%equal: int] t1_index (Array.length t1_digests)
+         || [%equal: int] t2_index (Array.length t2_digests)
+      then Ok ()
+      else (
+        match
+          Ordering.of_int
+            ([%compare: Description.t]
+               t1.descriptions.(t1_index)
+               t2.descriptions.(t2_index))
+        with
+        | Less -> aux_check_digests_consistent (t1_index + 1) t2_index
+        | Greater -> aux_check_digests_consistent t1_index (t2_index + 1)
+        | Equal ->
+          let description = t1.descriptions.(t1_index) in
+          let t1_digest = t1_digests.(t1_index) in
+          let t2_digest = t2_digests.(t2_index) in
+          (* If either digest is [Unknown] then we cannot check consistency properly so we
+             return an error. *)
+          (match t1_digest, t2_digest with
+           | Unknown, (_ : Rpc_shapes.Just_digests.t)
+           | (_ : Rpc_shapes.Just_digests.t), Unknown ->
+             Or_error.error_s
+               [%message
+                 "Menu contains [Unknown] digest"
+                   (description : Description.t)
+                   (t1_digest : Rpc_shapes.Just_digests.t)
+                   (t2_digest : Rpc_shapes.Just_digests.t)]
+           | t1_digest, t2_digest ->
+             if [%compare.equal: Rpc_shapes.Just_digests.Strict_comparison.t]
+                  t1_digest
+                  t2_digest
+             then aux_check_digests_consistent (t1_index + 1) (t2_index + 1)
+             else
+               Or_error.error_s
+                 [%message
+                   "Found digest mismatch"
+                     (description : Description.t)
+                     (t1_digest : Rpc_shapes.Just_digests.t)
+                     (t2_digest : Rpc_shapes.Just_digests.t)]))
+    in
+    aux_check_digests_consistent 0 0
 ;;

@@ -188,6 +188,12 @@ module Instance = struct
       ~ok_kind:Single_succeeded
   ;;
 
+  let get_description_from_menu_rank (T t) rank =
+    match t.menu with
+    | None -> None
+    | Some menu -> Menu.get menu rank
+  ;;
+
   module Direct_stream_writer = struct
     module T = Implementation_types.Direct_stream_writer
     module State = T.State
@@ -600,7 +606,7 @@ module Instance = struct
     t
     implementation
     ~impl_menu_index
-    ~(query : Nat0.t P.Query.V3.t)
+    ~(query : Nat0.t P.Query.Validated.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -609,14 +615,14 @@ module Instance = struct
     : _ Transport.Handler_result.t
     =
     let id = query.id in
-    let rpc =
-      ({ name = P.Rpc_tag.to_string query.tag; version = query.version } : Description.t)
+    let rpc : Description.t =
+      { name = P.Rpc_tag.to_string query.tag; version = query.version }
     in
     let emit_regular_query_tracing_event () =
       write_tracing_event
         t
         { event = Received Query
-        ; rpc = { name = P.Rpc_tag.to_string query.tag; version = query.version }
+        ; rpc
         ; id = (query.id :> Int63.t)
         ; payload_bytes = message_bytes_for_tracing
         }
@@ -646,7 +652,7 @@ module Instance = struct
                ~on_background_exception:
                  (On_exception.to_background_monitor_rest
                     on_exception
-                    { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                    rpc
                     ~close_connection_monitor)
                ~location:"server-side one-way rpc computation"
            in
@@ -667,7 +673,7 @@ module Instance = struct
                    On_exception.handle_exn_before_implementation_returns
                      on_exception
                      (Exn.create_s sexp)
-                     { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                     rpc
                      ~close_connection_monitor
                  with
                  | `Stop -> Stop (Error (Rpc_error.Uncaught_exn sexp))
@@ -698,7 +704,7 @@ module Instance = struct
              On_exception.handle_exn_before_implementation_returns
                on_exception
                exn
-               { name = P.Rpc_tag.to_string query.tag; version = query.version }
+               rpc
                ~close_connection_monitor
            with
            | `Stop ->
@@ -711,7 +717,7 @@ module Instance = struct
       write_tracing_event
         t
         { event = Sent (Response One_way_so_no_response)
-        ; rpc = { name = P.Rpc_tag.to_string query.tag; version = query.version }
+        ; rpc
         ; id :> Int63.t
         ; payload_bytes = 0
         };
@@ -772,7 +778,7 @@ module Instance = struct
               On_exception.handle_exn_before_implementation_returns
                 on_exception
                 exn
-                { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                rpc
                 ~close_connection_monitor
             in
             ())
@@ -790,22 +796,18 @@ module Instance = struct
              ~on_background_exception:
                (On_exception.to_background_monitor_rest
                   on_exception
-                  { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                  rpc
                   ~close_connection_monitor)
              (fun () ->
-               match query_contents with
-               | Error err -> Deferred.return (Error err)
-               | Ok query ->
-                 Eager_deferred.map (f t.connection_state query) ~f:(fun result ->
-                   Ok result))
+                match query_contents with
+                | Error err -> Deferred.return (Error err)
+                | Ok query ->
+                  Eager_deferred.map (f t.connection_state query) ~f:(fun result ->
+                    Ok result))
          in
          let handle_result result =
            decrement_open_queries t result_mode;
            let write_response response =
-             let rpc =
-               ({ name = P.Rpc_tag.to_string query.tag; version = query.version }
-                : Description.t)
-             in
              write_single_response
                t
                id
@@ -818,11 +820,7 @@ module Instance = struct
            match result with
            | Error error as result ->
              write_response result;
-             maybe_dispatch_on_exception
-               error
-               on_exception
-               { name = P.Rpc_tag.to_string query.tag; version = query.version }
-               ~close_connection_monitor
+             maybe_dispatch_on_exception error on_exception rpc ~close_connection_monitor
            | Ok (Ok (Or_not_authorized.Authorized result)) -> write_response (Ok result)
            | Ok (Ok (Not_authorized error)) ->
              write_response (authorization_failure_result error ~rpc_kind:"rpc")
@@ -886,7 +884,7 @@ module Instance = struct
            On_exception.handle_exn_before_implementation_returns
              on_exception
              exn
-             { name = P.Rpc_tag.to_string query.tag; version = query.version }
+             rpc
              ~close_connection_monitor
          in
          ());
@@ -905,16 +903,16 @@ module Instance = struct
           ?rest:
             (On_exception.to_background_monitor_rest
                on_exception
-               { name = P.Rpc_tag.to_string query.tag; version = query.version }
+               rpc
                ~close_connection_monitor)
           (fun () ->
-            let len = (query.data :> int) in
-            let result =
-              f t.connection_state responder read_buffer ~pos:!read_buffer_pos_ref ~len
-            in
-            match result_mode with
-            | Implementation_mode.Result_mode.Deferred -> result
-            | Blocking -> Deferred.return result)
+             let len = (query.data :> int) in
+             let result =
+               f t.connection_state responder read_buffer ~pos:!read_buffer_pos_ref ~len
+             in
+             match result_mode with
+             | Implementation_mode.Result_mode.Deferred -> result
+             | Blocking -> Deferred.return result)
       in
       let computation_failure_result exn =
         Rpc_result.uncaught_exn exn ~location:"server-side rpc expert computation"
@@ -930,7 +928,7 @@ module Instance = struct
               impl_menu_index
               bin_writer_unit
               result
-              ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+              ~rpc
               ~error_mode:Always_ok;
             Ok ())
         in
@@ -942,7 +940,7 @@ module Instance = struct
           write_tracing_event
             t
             { event = Sent (Response Expert_single_succeeded_or_failed)
-            ; rpc = { name = P.Rpc_tag.to_string query.tag; version = query.version }
+            ; rpc
             ; id :> Int63.t
             ; payload_bytes = 0
             };
@@ -966,8 +964,7 @@ module Instance = struct
             upon deferred (fun () ->
               check_responded ()
               |> Rpc_result.or_error
-                   ~rpc_description:
-                     { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                   ~rpc_description:rpc
                    ~connection_description:t.connection_description
                    ~connection_close_started:t.connection_close_started_info
               |> ok_exn);
@@ -982,7 +979,7 @@ module Instance = struct
             On_exception.handle_exn_before_implementation_returns
               on_exception
               exn
-              { name = P.Rpc_tag.to_string query.tag; version = query.version }
+              rpc
               ~close_connection_monitor
           in
           result
@@ -994,8 +991,7 @@ module Instance = struct
             decrement_open_queries t result_mode;
             ok_exn
               (Rpc_result.or_error
-                 ~rpc_description:
-                   { name = P.Rpc_tag.to_string query.tag; version = query.version }
+                 ~rpc_description:rpc
                  ~connection_description:t.connection_description
                  ~connection_close_started:t.connection_close_started_info
                  result))
@@ -1036,13 +1032,13 @@ module Instance = struct
            [%bin_writer: Nothing.t]
            error
            ~ok_kind:Single_or_streaming_rpc_error_or_exn
-           ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+           ~rpc
            ~error_mode:Always_ok
        | Ok `Abort ->
          write_tracing_event
            t
            { event = Received Abort_streaming_rpc_query
-           ; rpc = { name = P.Rpc_tag.to_string query.tag; version = query.version }
+           ; rpc
            ; id = (query.id :> Int63.t)
            ; payload_bytes = message_bytes_for_tracing
            };
@@ -1065,7 +1061,7 @@ module Instance = struct
            ~read_buffer_pos_ref
            ~id
            ~impl_menu_index
-           ~rpc:{ name = P.Rpc_tag.to_string query.tag; version = query.version }
+           ~rpc
            ~on_exception
            ~close_connection_monitor);
       Continue
@@ -1111,25 +1107,22 @@ module Instance = struct
     List.iter direct_stream_writers ~f:(fun f -> f ())
   ;;
 
-  let handle_unknown_rpc on_unknown_rpc error t query : _ Transport.Handler_result.t =
+  let handle_unknown_rpc on_unknown_rpc error t { Description.name; version }
+    : _ Transport.Handler_result.t
+    =
     match on_unknown_rpc with
     | `Continue -> Continue
     | `Raise -> Rpc_error.raise error t.connection_description
     | `Close_connection -> Stop (Ok ())
     | `Call f ->
-      (match
-         f
-           t.connection_state
-           ~rpc_tag:(P.Rpc_tag.to_string query.P.Query.V3.tag)
-           ~version:query.version
-       with
+      (match f t.connection_state ~rpc_tag:name ~version with
        | `Close_connection -> Stop (Ok ())
        | `Continue -> Continue)
   ;;
 
   let handle_query_internal
     t
-    ~(query : Nat0.t P.Query.V3.t)
+    ~(query : Nat0.t P.Query.Validated.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1155,11 +1148,11 @@ module Instance = struct
     | None | Some _ ->
       let impl_menu_index =
         match t.menu with
-        | None -> Protocol.Impl_menu_index.none
+        | None -> P.Impl_menu_index.none
         | Some menu ->
           (match Menu.index menu description with
-           | None -> Protocol.Impl_menu_index.none
-           | Some index -> Protocol.Impl_menu_index.some (Nat0.of_int_exn index))
+           | None -> P.Impl_menu_index.none
+           | Some index -> P.Impl_menu_index.some (Nat0.of_int_exn index))
       in
       (match Hashtbl.find implementations description with
        | Some implementation ->
@@ -1179,13 +1172,13 @@ module Instance = struct
          write_tracing_event
            t
            { event = Received Query
-           ; rpc = { name = P.Rpc_tag.to_string query.tag; version = query.version }
+           ; rpc = description
            ; id = (query.id :> Int63.t)
            ; payload_bytes = message_bytes_for_tracing
            };
          (match on_unknown_rpc with
           | `Expert impl ->
-            let { P.Query.V3.tag; version; id; metadata; data = len } = query in
+            let { P.Query.Validated.id; metadata; data = len; tag; version } = query in
             let rpc_tag = P.Rpc_tag.to_string tag in
             let d =
               let responder = Responder.create id impl_menu_index t.writer in
@@ -1207,7 +1200,7 @@ module Instance = struct
             write_tracing_event
               t
               { event = Sent (Response Expert_single_succeeded_or_failed)
-              ; rpc = { name = rpc_tag; version }
+              ; rpc = { name = rpc_tag; version = description.version }
               ; id :> Int63.t
               ; payload_bytes = 0
               };
@@ -1222,12 +1215,12 @@ module Instance = struct
               (Error error)
               ~rpc:description
               ~error_mode:Always_ok;
-            handle_unknown_rpc on_unknown_rpc error t query))
+            handle_unknown_rpc on_unknown_rpc error t description))
   ;;
 
   let handle_query
     (T t)
-    ~(query : Nat0.t P.Query.V3.t)
+    ~(query : Nat0.t P.Query.Validated.t)
     ~read_buffer
     ~read_buffer_pos_ref
     ~close_connection_monitor
@@ -1236,14 +1229,11 @@ module Instance = struct
     if t.stopped || Protocol_writer.is_closed t.writer
     then Transport.Handler_result.Stop (Ok ())
     else (
-      let old_ctx = Async_kernel_scheduler.current_execution_context () in
-      let new_ctx =
-        t.on_receive
-          { name = P.Rpc_tag.to_string query.tag; version = query.version }
-          ~query_id:query.id
-          query.metadata
-          old_ctx
+      let description =
+        { Description.name = P.Rpc_tag.to_string query.tag; version = query.version }
       in
+      let old_ctx = Async_kernel_scheduler.current_execution_context () in
+      let new_ctx = t.on_receive description ~query_id:query.id query.metadata old_ctx in
       (* The reason for the weirdness here is that there is no equivalent of
          [Async_kernel_scheduler.within_context] that doesn’t return a [Result.t]. The
          difference between the code below and calling [within_context] is that errors are

@@ -18,7 +18,7 @@ let%expect_test "connect and close" =
   let%bind conn = Mock_peer.connect t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3 4 5 6 7 8 9 10))
+    (Send (4411474 1 2 3 4 5 6 7 8 9 10 11))
     (Send
      (Metadata_v2
       ((identification ()) (menu (((descriptions ()) (digests ())))))))
@@ -57,7 +57,8 @@ let%expect_test "close immediately after handshake (with close message sent)" =
     {|
     (Send
      (message
-      ("00000000  0b fd 52 50 43 00 01 02  03 04 05 06 07 08 09 0a  |..RPC...........|")))
+      ("00000000  0c fd 52 50 43 00 01 02  03 04 05 06 07 08 09 0a  |..RPC...........|"
+       "00000010  0b                                                |.|")))
     (Send
      (message
       ("00000000  04 00 01 00                                       |....|")))
@@ -107,7 +108,7 @@ let%expect_test "close with grace period" =
   let%bind conn = Mock_peer.connect ~implementations t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3 4 5 6 7 8 9 10))
+    (Send (4411474 1 2 3 4 5 6 7 8 9 10 11))
     (Send
      (Metadata_v2
       ((identification ())
@@ -185,7 +186,7 @@ let%expect_test "will not send close started message to old peer" =
   let%bind conn = Mock_peer.connect ~send_handshake:(Some `v8) t >>| Result.ok_exn in
   [%expect
     {|
-    (Send (4411474 1 2 3 4 5 6 7 8 9 10))
+    (Send (4411474 1 2 3 4 5 6 7 8 9 10 11))
     (Send
      (Metadata_v2
       ((identification ()) (menu (((descriptions ()) (digests ())))))))

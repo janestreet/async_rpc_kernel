@@ -128,17 +128,23 @@ let close = of_writer Transport.Writer.close
 let is_closed = of_writer Transport.Writer.is_closed
 
 module Query = struct
-  let query_message t query : _ Protocol.Message.t =
+  let query_message t query ~peer_menu : _ Protocol.Message.t =
     match Set_once.get_exn t.negotiated_protocol_version with
     | 1 -> Query_v1 (Protocol.Query.Validated.to_v1 query)
     | version ->
-      if Version_dependent_feature.is_supported Query_metadata_v2 ~version
+      let use_v4 = Version_dependent_feature.is_supported Query_v4 ~version in
+      if use_v4
+      then
+        (* Check if we can optimize by sending the rank of the RPC rather than the full
+         name and index *)
+        Query_v4 (Protocol.Query.Validated.to_v4 query ~callee_menu:peer_menu)
+      else if Version_dependent_feature.is_supported Query_metadata_v2 ~version
       then Query_v3 (Protocol.Query.Validated.to_v3 query)
       else Query_v2 (Protocol.Query.Validated.to_v2 query)
   ;;
 
-  let send t query ~bin_writer_query =
-    let message = query_message t query in
+  let send t query ~bin_writer_query ~peer_menu =
+    let message = query_message t ~peer_menu query in
     Transport.Writer.send_bin_prot
       t.writer
       (Protocol.Message.bin_writer_maybe_needs_length
@@ -146,8 +152,11 @@ module Query = struct
       message
   ;;
 
-  let send_expert t query ~buf ~pos ~len ~send_bin_prot_and_bigstring =
-    let header = query_message t { query with data = Nat0.of_int_exn len } in
+  let send_expert t query ~buf ~pos ~len ~send_bin_prot_and_bigstring ~peer_menu =
+    let query_with_len_data =
+      { query with Protocol.Query.Validated.data = Nat0.of_int_exn len }
+    in
+    let header = query_message t ~peer_menu query_with_len_data in
     send_bin_prot_and_bigstring
       t.writer
       Protocol.Message.bin_writer_nat0_t

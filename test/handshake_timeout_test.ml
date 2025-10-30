@@ -102,8 +102,8 @@ let%expect_test "client 60s, server 60s" =
   [%expect
     {|
     c_to_s
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -115,9 +115,10 @@ let%expect_test "client 60s, server 60s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     s_to_c
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -129,6 +130,7 @@ let%expect_test "client 60s, server 60s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     c_to_s
     0500 0000 0000 0000    length= 5 (64-bit LE)
     07                       body= Metadata_v2
@@ -155,8 +157,8 @@ let%expect_test "client 0s, server 60s" =
   [%expect
     {|
     c_to_s
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -168,9 +170,10 @@ let%expect_test "client 0s, server 60s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     s_to_c
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -182,6 +185,7 @@ let%expect_test "client 0s, server 60s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     ((client_conn
       (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
      (server_conn
@@ -197,8 +201,8 @@ let%expect_test "client 60s, server 0s" =
   [%expect
     {|
     c_to_s
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -210,9 +214,10 @@ let%expect_test "client 60s, server 0s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     s_to_c
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -224,6 +229,7 @@ let%expect_test "client 60s, server 0s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     ((client_conn
       (Error
        (handshake_error.ml.Handshake_error
@@ -239,8 +245,8 @@ let%expect_test "client 0s, server 0s" =
   [%expect
     {|
     c_to_s
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -252,9 +258,10 @@ let%expect_test "client 0s, server 0s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     s_to_c
-    1000 0000 0000 0000    length= 16 (64-bit LE)
-    0b                       body= List: 11 items
+    1100 0000 0000 0000    length= 17 (64-bit LE)
+    0c                       body= List: 12 items
     fd52 5043 00                    0: 4411474 (int)
     01                              1: 1 (int)
     02                              2: 2 (int)
@@ -266,6 +273,7 @@ let%expect_test "client 0s, server 0s" =
     08                              8: 8 (int)
     09                              9: 9 (int)
     0a                             10: 10 (int)
+    0b                             11: 11 (int)
     ((client_conn
       (Error (handshake_error.ml.Handshake_error (Timeout <created-directly>))))
      (server_conn

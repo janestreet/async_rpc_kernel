@@ -416,6 +416,7 @@ let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =
       Response_v2 { x with data = Ok (length data) }
     | Query_v2 x -> Query_v2 { x with data = length x.data }
     | Query_v3 x -> Query_v3 { x with data = length x.data }
+    | Query_v4 x -> Query_v4 { x with data = length x.data }
   in
   let first_part =
     Bin_prot.Writer.to_bigstring [%bin_writer: Protocol.Message.nat0_t] nat0

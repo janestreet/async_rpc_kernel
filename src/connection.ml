@@ -367,6 +367,19 @@ let send_query_with_registered_response_handler
   result
 ;;
 
+let peer_menu_of_connection t =
+  match Set_once.get t.peer_metadata with
+  | Some (Peer_metadata.Expected ivar) ->
+    (* This peek should always give back a [Some] since the peer metadata is now filled
+       during the handshake *)
+    (match Ivar.peek ivar with
+     | Some (Ok metadata) -> metadata.menu
+     | Some (Error `Connection_closed) -> None
+     | None -> None)
+  | Some Peer_metadata.Unsupported -> None
+  | None -> None
+;;
+
 let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.Validated.t) =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
@@ -388,7 +401,12 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.Val
       query
       ~response_handler
       ~kind
-      ~send_query:(fun query -> Protocol_writer.Query.send writer query ~bin_writer_query)
+      ~send_query:(fun query ->
+        Protocol_writer.Query.send
+          writer
+          query
+          ~bin_writer_query
+          ~peer_menu:(peer_menu_of_connection t))
     [@nontail]
 ;;
 
@@ -422,7 +440,8 @@ let make_dispatch_bigstring
           ~buf
           ~pos
           ~len
-          ~send_bin_prot_and_bigstring:do_send)
+          ~send_bin_prot_and_bigstring:do_send
+          ~peer_menu:(peer_menu_of_connection t))
     [@nontail]
 ;;
 
@@ -719,9 +738,7 @@ let cleanup t ~reason exn =
     let dummy_ref = ref 0 in
     Hashtbl.iteri
       t.open_queries
-      ~f:
-        (fun
-          ~key:(_ : Protocol.Query_id.t) ~data:((_ : Description.t), response_handler) ->
+      ~f:(fun ~key:(_ : P.Query_id.t) ~data:((_ : Description.t), response_handler) ->
         ignore
           (response_handler
              ~read_buffer:dummy_buffer
@@ -802,28 +819,49 @@ let handle_msg
       ~read_buffer
       ~read_buffer_pos_ref
       ~protocol_message_len
+  | Query_v4 query ->
+    let instance = Set_once.get_exn t.implementations_instance in
+    let description =
+      match query.specifier with
+      | Tag_and_version (tag, version) ->
+        { Description.name = Protocol.Rpc_tag.to_string tag; version }
+      | Rank rank ->
+        (match Implementations.Instance.get_description_from_menu_rank instance rank with
+         | None ->
+           raise_s
+             [%message
+               "Received Query_v4 with invalid rank - no such RPC in our menu"
+                 ~rank:(rank : int)
+                 ~query_id:(query.id : P.Query_id.t)]
+         | Some description -> description.global)
+    in
+    Implementations.Instance.handle_query
+      instance
+      ~query:(P.Query.Validated.of_v4 query ~description)
+      ~read_buffer
+      ~read_buffer_pos_ref
+      ~message_bytes_for_tracing:(protocol_message_len + (query.data :> int))
+      ~close_connection_monitor
   | Query_v3 query ->
     handle_query
       t
-      ~query
+      ~query:(P.Query.Validated.of_v3 query)
       ~read_buffer
       ~read_buffer_pos_ref
       ~protocol_message_len
       ~close_connection_monitor
   | Query_v2 query ->
-    let query = P.Query.V3.of_v2 query in
     handle_query
       t
-      ~query
+      ~query:(P.Query.Validated.of_v2 query)
       ~read_buffer
       ~read_buffer_pos_ref
       ~protocol_message_len
       ~close_connection_monitor
   | Query_v1 query ->
-    let query = P.Query.V3.of_v1 query in
     handle_query
       t
-      ~query
+      ~query:(P.Query.Validated.of_v1 query)
       ~read_buffer
       ~read_buffer_pos_ref
       ~protocol_message_len

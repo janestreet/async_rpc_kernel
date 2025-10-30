@@ -72,3 +72,10 @@ val setup_server_and_client_connection
   -> ([ `Server of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ]
      * [ `Client of read_write Synchronous_time_source.T1.t * Rpc.Connection.t ])
        Deferred.t
+
+module Payload : sig
+  type t = int array [@@deriving bin_io]
+
+  val get_random_size : unit -> int
+  val create : unit -> t
+end

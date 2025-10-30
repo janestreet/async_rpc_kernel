@@ -450,3 +450,14 @@ let setup_server_and_client_connection
   let%map server_conn, client_conn = Deferred.both server_conn client_conn in
   `Server (server_time_source, server_conn), `Client (client_time_source, client_conn)
 ;;
+
+module Payload = struct
+  type t = int array [@@deriving bin_io]
+
+  let get_random_size () = Random.int 5
+
+  let create () =
+    let size = get_random_size () in
+    size |> Array.init ~f:(fun (_ : int) -> Random.int 1000)
+  ;;
+end
