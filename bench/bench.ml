@@ -327,7 +327,7 @@ end
 module%bench [@name "query metadata"] _ = struct
   module Protocol = Async_rpc_kernel.Async_rpc_kernel_private.Protocol
 
-  let query_no_metadata : unit Protocol.Query.V3.needs_length =
+  let query_no_metadata : unit Protocol.Query.Validated.t =
     { tag = Protocol.Rpc_tag.of_string "tag"
     ; version = 0
     ; id = Protocol.Query_id.of_int_exn 1
@@ -414,8 +414,9 @@ module%bench [@name "query metadata"] _ = struct
     let query = { query_no_metadata with metadata } in
     let query =
       match metadata_type with
-      | `V1 -> Protocol.Query.V3.to_v2 query |> Protocol.Message.Query_v2
-      | `V2_single | `V2_double -> Protocol.Message.Query_v3 query
+      | `V1 -> Protocol.Query.Validated.to_v2 query |> Protocol.Message.Query_v2
+      | `V2_single | `V2_double ->
+        Protocol.Query.Validated.to_v3 query |> Protocol.Message.Query_v3
     in
     let buf_len =
       payload_sizes_bytes + 64

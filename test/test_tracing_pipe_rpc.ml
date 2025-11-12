@@ -637,8 +637,9 @@ let%expect_test "error dispatching a pipe rpc" =
   [%expect
     {|
     (Send
-     (Query_v3
-      ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
+     (Query_v4
+      ((specifier (Tag_and_version pipe-rpc 1)) (id 1) (metadata ())
+       (data (Query query)))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -674,8 +675,9 @@ let%expect_test "initial error response when dispatching a pipe rpc" =
   [%expect
     {|
     (Send
-     (Query_v3
-      ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
+     (Query_v4
+      ((specifier (Tag_and_version pipe-rpc 1)) (id 1) (metadata ())
+       (data (Query query)))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -719,7 +721,9 @@ let%expect_test "calling pipe_rpc expecting a regular rpc" =
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query_v3 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send
+     (Query_v4
+      ((specifier (Tag_and_version rpc 1)) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -761,7 +765,9 @@ let%expect_test "calling pipe_rpc expecting a one-way rpc" =
   let result = Async_rpc_kernel.Rpc.One_way.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query_v3 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send
+     (Query_v4
+      ((specifier (Tag_and_version rpc 1)) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -806,8 +812,9 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   [%expect
     {|
     (Send
-     (Query_v3
-      ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data (Query query)))))
+     (Query_v4
+      ((specifier (Tag_and_version pipe-rpc 1)) (id 1) (metadata ())
+       (data (Query query)))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name pipe-rpc) (version 1))) (id 1)
       (payload_bytes 1)))
@@ -835,7 +842,9 @@ let%expect_test "attempt to abort a pipe-rpc and server returns an Rpc_error" =
   [%expect
     {|
     (Send
-     (Query_v3 ((tag pipe-rpc) (version 1) (id 1) (metadata ()) (data Abort))))
+     (Query_v4
+      ((specifier (Tag_and_version pipe-rpc 1)) (id 1) (metadata ())
+       (data Abort))))
     (Tracing_event
      ((event (Sent Abort_streaming_rpc_query))
       (rpc ((name pipe-rpc) (version 1))) (id 1) (payload_bytes 1)))

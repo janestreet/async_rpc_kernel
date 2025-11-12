@@ -53,6 +53,7 @@ module Query : sig
     :  t
     -> 'query Protocol.Query.Validated.t
     -> bin_writer_query:'query Bin_prot.Type_class.writer
+    -> peer_menu:Menu.t option
     -> local_ unit Transport.Send_result.t
 
   val send_expert
@@ -69,6 +70,7 @@ module Query : sig
           -> pos:int
           -> len:int
           -> local_ 'result Transport.Send_result.t)
+    -> peer_menu:Menu.t option
     -> local_ 'result Transport.Send_result.t
 end
 

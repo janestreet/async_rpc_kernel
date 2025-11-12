@@ -13,8 +13,8 @@ open! Async_kernel
     binary compatibility. *)
 module Header : sig
   val length : int
-  val unsafe_get_payload_length : Bigstring.t -> pos:int -> int
-  val unsafe_set_payload_length : Bigstring.t -> pos:int -> int -> unit
+  val unsafe_get_payload_length : Bigstring.t @ local -> pos:int -> int
+  val unsafe_set_payload_length : Bigstring.t @ local -> pos:int -> int -> unit
 end
 
 module Handler_result = Transport_intf.Handler_result

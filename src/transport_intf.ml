@@ -39,7 +39,7 @@ module Send_result = struct
     }
   [@@deriving bin_io ~localize, compare ~localize, globalize, sexp]
 
-  let bin_read_message_too_big__local buf ~pos_ref =
+  let bin_read_message_too_big__local (buf @ local) ~(pos_ref @ local) =
     let size = bin_read_int buf ~pos_ref in
     let max_message_size = bin_read_int buf ~pos_ref in
     exclave_ { size; max_message_size }

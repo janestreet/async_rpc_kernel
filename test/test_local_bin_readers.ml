@@ -78,6 +78,30 @@ let (all_messages : Payload.t Protocol.Message.t list) =
           [@alert "-legacy_query_metadata"]
       ; data
       }
+  ; Query_v4
+      { specifier = Rank 13
+      ; id
+      ; metadata =
+          Some
+            (Async_rpc_kernel.Rpc_metadata.V2.singleton
+               Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
+               (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
+                  "test metadata v2"))
+          [@alert "-legacy_query_metadata"]
+      ; data
+      }
+  ; Query_v4
+      { specifier = Tag_and_version (tag, 10)
+      ; id
+      ; metadata =
+          Some
+            (Async_rpc_kernel.Rpc_metadata.V2.singleton
+               Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
+               (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
+                  "test metadata v2"))
+          [@alert "-legacy_query_metadata"]
+      ; data
+      }
     (* This allocates: bigstring cannot be allocated on the stack *)
   ; Metadata { identification; menu = Some menu }
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
@@ -166,6 +190,18 @@ let%expect_test "Test reading different kinds of messages" =
     (Query_v3
      ((tag test-tag) (version 10) (id 1) (metadata (((0 "test metadata v2"))))
       (data _)))
+    bin_read did not allocate
+
+    Parsed message:
+    (Query_v4
+     ((specifier (Rank 13)) (id 1) (metadata (((0 "test metadata v2"))))
+      (data _)))
+    bin_read did not allocate
+
+    Parsed message:
+    (Query_v4
+     ((specifier (Tag_and_version test-tag 10)) (id 1)
+      (metadata (((0 "test metadata v2")))) (data _)))
     bin_read did not allocate
 
     Parsed message:

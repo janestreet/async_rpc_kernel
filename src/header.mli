@@ -14,9 +14,11 @@ val v7 : t
 val v8 : t
 val v9 : t
 val v10 : t
+val v11 : t
 val v7_at_least_v7 : t
 val v8_at_least_v7 : t
 val v9_at_least_v7 : t
 val v10_at_least_v7 : t
+val v11_at_least_v7 : t
 val latest_at_least_v7 : t
 val negotiate : us:t -> peer:t -> (int, Handshake_error.t) result

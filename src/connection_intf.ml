@@ -438,6 +438,7 @@ module type S_private = sig
       val v8 : t
       val v9 : t
       val v10 : t
+      val v11 : t
       val latest : t
     end
 

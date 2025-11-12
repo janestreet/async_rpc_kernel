@@ -69,7 +69,7 @@ module Instance : sig
 
   val handle_query
     :  t
-    -> query:Nat0.t Query.V3.t
+    -> query:Nat0.t Query.Validated.t
     -> read_buffer:Bigstring.t
     -> read_buffer_pos_ref:int ref
     -> close_connection_monitor:Monitor.t
@@ -85,6 +85,7 @@ module Instance : sig
   (* Stop the instance: drop all responses to pending requests and make all further call
      to [handle_query] or [flush] to fail. *)
   val stop : t -> unit
+  val get_description_from_menu_rank : t -> int -> local_ Description.t global option
 end
 
 val instantiate

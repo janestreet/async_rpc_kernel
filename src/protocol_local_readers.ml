@@ -147,7 +147,7 @@ module Query = struct
   include Query
 
   module V1 = struct
-    include Query.V1
+    include V1
 
     type nonrec 'a needs_length = 'a needs_length =
       { tag : Rpc_tag.t
@@ -166,7 +166,7 @@ module Query = struct
   end
 
   module V2 = struct
-    include Query.V2
+    include V2
 
     type nonrec 'a needs_length = 'a needs_length =
       { tag : Rpc_tag.t
@@ -189,7 +189,7 @@ module Query = struct
   end
 
   module V3 = struct
-    include Query.V3
+    include V3
 
     type nonrec 'a needs_length = 'a needs_length =
       { tag : Rpc_tag.t
@@ -208,6 +208,50 @@ module Query = struct
       in
       let data = bin_read_el buf ~pos_ref in
       { tag; version; id; metadata; data }
+    ;;
+  end
+
+  module V4 = struct
+    include V4
+
+    module Rpc_specifier = struct
+      include Rpc_specifier
+
+      type nonrec t = t =
+        | Tag_and_version of Rpc_tag.t * int
+        | Rank of int
+
+      let bin_read_t__local buf ~pos_ref =
+        match Bin_prot.Read.bin_read_int_8bit buf ~pos_ref with
+        | 0 ->
+          exclave_
+          let tag = Rpc_tag.bin_read_t__local buf ~pos_ref in
+          let version = Bin_prot.Read.bin_read_int buf ~pos_ref in
+          Rpc_specifier.Tag_and_version (tag, version)
+        | 1 ->
+          exclave_
+          let rank = Bin_prot.Read.bin_read_int buf ~pos_ref in
+          Rpc_specifier.Rank rank
+        | n ->
+          Bin_prot.Common.raise_variant_wrong_type "Protocol.Query.V4.Rpc_specifier" n
+      ;;
+    end
+
+    type nonrec 'a needs_length = 'a needs_length =
+      { specifier : Rpc_specifier.t
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
+      }
+
+    let bin_read_t__local bin_read_el buf ~pos_ref = exclave_
+      let specifier = Rpc_specifier.bin_read_t__local buf ~pos_ref in
+      let id = Query_id.bin_read_t__local buf ~pos_ref in
+      let metadata =
+        bin_read_option__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
+      in
+      let data = bin_read_el buf ~pos_ref in
+      { specifier; id; metadata; data }
     ;;
   end
 end
@@ -306,6 +350,7 @@ module Message = struct
     | Query_v3 of 'a Query.V3.needs_length
     | Close_started
     | Close_reason_v2 of Close_reason.Protocol.Binable.t
+    | Query_v4 of 'a Query.V4.needs_length
 
   let bin_read_t__local : ('a, 'a t) reader1__local =
     fun bin_read_el buf ~pos_ref ->
@@ -352,6 +397,10 @@ module Message = struct
       exclave_
       let close_reason = Close_reason.Protocol.Binable.bin_read_t buf ~pos_ref in
       Close_reason_v2 close_reason
+    | 12 ->
+      exclave_
+      let query = Query.V4.bin_read_t__local bin_read_el buf ~pos_ref in
+      Query_v4 query
     | _ ->
       Bin_prot.Common.raise_read_error
         (Bin_prot.Common.ReadError.Sum_tag "Message local reader")

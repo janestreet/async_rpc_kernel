@@ -236,7 +236,7 @@ end
 
 module Transport = Transport
 module Connection : Connection_intf.S with type t = Connection.t
-module How_to_recognise_errors = How_to_recognise_errors
+module How_to_recognize_errors = How_to_recognize_errors
 
 module Rpc : sig
   type ('query, 'response) t
@@ -246,7 +246,7 @@ module Rpc : sig
     -> version:int
     -> bin_query:'a Bin_prot.Type_class.t
     -> bin_response:'response Bin_prot.Type_class.t
-    -> include_in_error_count:'response How_to_recognise_errors.t
+    -> include_in_error_count:'response How_to_recognize_errors.t
     -> ('a, 'response) t
 
   (** the same values as were passed to create. *)
@@ -1317,7 +1317,7 @@ module Stable : sig
       -> version:int
       -> bin_query:'query Bin_prot.Type_class.t
       -> bin_response:'response Bin_prot.Type_class.t
-      -> include_in_error_count:'response How_to_recognise_errors.t
+      -> include_in_error_count:'response How_to_recognize_errors.t
       -> ('query, 'response) t
 
     val description : (_, _) t -> Description.t

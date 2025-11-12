@@ -6,5 +6,4 @@
  (libraries async_kernel bin_prot.shape core_kernel.bus core
    async_kernel.eager_deferred flexible_sexp core_extended.immediate_kernel
    base.md5 core_kernel.moption async_kernel.persistent_connection_kernel
-   pipe_with_writer_error protocol_version_header core_kernel.reversed_list
-   sexplib))
+   pipe_with_writer_error protocol_version_header sexplib))

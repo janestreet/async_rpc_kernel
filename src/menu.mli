@@ -32,6 +32,7 @@ val supported_versions : t -> rpc_name:string -> Int.Set.t
 
 val get : t -> int -> local_ Description.t Modes.Global.t option
 val index : t -> local_ Description.t -> local_ int option
+val index__local : t -> tag:local_ string -> version:local_ int -> local_ int option
 
 (** Checks if a given rpc appears in the menu *)
 val mem : t -> local_ Description.t -> bool
@@ -64,6 +65,12 @@ val highest_shared_version
 
 (** Test if there is an rpc with this name with some version in the menu *)
 val has_some_versions : t -> rpc_name:string -> bool
+
+(** [check_digests_consistent t1 t2] returns whether shape digests are consistent for all
+    rpcs with matching names and versions between the two menus. There is an error if
+    there is a digest mismatch, either of the two menus do not [includes_shape_digests],
+    or an rpc that shows up in both menus has an [Unknown] shape digest. *)
+val check_digests_consistent : t -> t -> unit Or_error.t
 
 module Stable : sig
   module V1 : sig

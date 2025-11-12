@@ -24,8 +24,8 @@ module Make_with_length (Length : sig
     type t
 
     val bin_shape_t : Bin_shape.t
-    val bin_read_t : Bigstring.t -> pos_ref:int ref -> t
-    val bin_write_t : Bigstring.t -> pos:int -> t -> int
+    val bin_read_t : Bigstring.t @ local -> pos_ref:int ref @ local -> t
+    val bin_write_t : Bigstring.t @ local -> pos:int -> t -> int
     val bin_size_t : t -> int
   end) =
 struct

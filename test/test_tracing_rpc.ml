@@ -713,7 +713,9 @@ let%expect_test "connection closes before response received" =
   let result = Async_rpc_kernel.Rpc.Rpc.dispatch' regular conn "query" in
   [%expect
     {|
-    (Send (Query_v3 ((tag rpc) (version 1) (id 1) (metadata ()) (data query))))
+    (Send
+     (Query_v4
+      ((specifier (Tag_and_version rpc 1)) (id 1) (metadata ()) (data query))))
     (Tracing_event
      ((event (Sent Query)) (rpc ((name rpc) (version 1))) (id 1)
       (payload_bytes 1)))

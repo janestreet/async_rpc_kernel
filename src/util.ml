@@ -62,3 +62,7 @@ let bin_read_from_bigstring
     in
     Rpc_result.bin_io_exn ~location e
 ;;
+
+module For_testing = struct
+  let number_of_unique_flushed_waits_due_to_streaming_pushback = ref 0
+end

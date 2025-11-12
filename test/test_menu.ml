@@ -462,3 +462,111 @@ let%expect_test "highest_available_version works with dupes" =
      (result ((Error No_rpcs_with_this_name) (not-in-menu ()))))
     |}]
 ;;
+
+module%test [@name "are_digests_consistent"] _ = struct
+  module Menu = Async_rpc_kernel.Menu
+
+  let test_digest_of_description description : Rpc_shapes.Just_digests.t =
+    let digest =
+      description
+      |> [%sexp_of: Rpc.Description.t]
+      |> Sexp.to_string
+      |> Md5.digest_string
+      |> Bin_shape.Digest.of_md5
+    in
+    (* We don't particularly care what [Just_digests] variant, we rely on
+       [Strict_comparison]. *)
+    Rpc { query = digest; response = digest }
+  ;;
+
+  let test_rpcs : Rpc.Description.t list =
+    [ { name = "A"; version = 1 }
+    ; { name = "A"; version = 2 }
+    ; { name = "B"; version = 1 }
+    ]
+  ;;
+
+  let print_digest_consistency menu1 menu2 =
+    Menu.check_digests_consistent menu1 menu2 |> [%sexp_of: unit Or_error.t] |> print_s
+  ;;
+
+  let%expect_test "when there are missing digests" =
+    let menu_no_digest = Menu.of_supported_rpcs test_rpcs ~rpc_shapes:`Unknown in
+    let menu_with_unknowns =
+      test_rpcs
+      |> List.map ~f:(fun description -> description, Rpc_shapes.Just_digests.Unknown)
+      |> Menu.of_supported_rpcs_and_shapes
+    in
+    let menu_with_digests =
+      test_rpcs
+      |> List.map ~f:(fun description ->
+        description, test_digest_of_description description)
+      |> Menu.of_supported_rpcs_and_shapes
+    in
+    print_digest_consistency menu_with_digests menu_no_digest;
+    [%expect
+      {|
+      (Error
+       ("Menu missing digests"
+        (t1.digests
+         (((Rpc (query 01d4a9ebf695a5d65cfa71979dfd4175)
+            (response 01d4a9ebf695a5d65cfa71979dfd4175))
+           (Rpc (query f3515ad265bb51d29e1b42c6ae6d95a1)
+            (response f3515ad265bb51d29e1b42c6ae6d95a1))
+           (Rpc (query b0d6675d789df22552889e2cf9734133)
+            (response b0d6675d789df22552889e2cf9734133)))))
+        (t2.digests ())))
+      |}];
+    print_digest_consistency menu_with_digests menu_with_unknowns;
+    [%expect
+      {|
+      (Error
+       ("Menu contains [Unknown] digest" (description ((name A) (version 1)))
+        (t1_digest
+         (Rpc (query 01d4a9ebf695a5d65cfa71979dfd4175)
+          (response 01d4a9ebf695a5d65cfa71979dfd4175)))
+        (t2_digest Unknown)))
+      |}]
+  ;;
+
+  let%expect_test "when both menus contain digests" =
+    let assert_consistent menu1_list menu2_list =
+      Menu.check_digests_consistent
+        (Menu.of_supported_rpcs_and_shapes menu1_list)
+        (Menu.of_supported_rpcs_and_shapes menu2_list)
+      |> ok_exn
+    in
+    let menu_list =
+      test_rpcs
+      |> List.map ~f:(fun description ->
+        description, test_digest_of_description description)
+    in
+    (* Exact equality *)
+    assert_consistent menu_list menu_list;
+    (* Missing RPCs but consistent *)
+    assert_consistent menu_list (List.tl_exn menu_list);
+    assert_consistent (List.tl_exn menu_list) menu_list;
+    assert_consistent menu_list [];
+    (* Inconsistent digests *)
+    let menu_list_with_reversed_digests =
+      let descriptions, reversed_digests =
+        List.unzip menu_list |> Tuple2.map_snd ~f:List.rev
+      in
+      List.zip_exn descriptions reversed_digests
+    in
+    print_digest_consistency
+      (Menu.of_supported_rpcs_and_shapes menu_list)
+      (Menu.of_supported_rpcs_and_shapes menu_list_with_reversed_digests);
+    [%expect
+      {|
+      (Error
+       ("Found digest mismatch" (description ((name A) (version 1)))
+        (t1_digest
+         (Rpc (query 01d4a9ebf695a5d65cfa71979dfd4175)
+          (response 01d4a9ebf695a5d65cfa71979dfd4175)))
+        (t2_digest
+         (Rpc (query b0d6675d789df22552889e2cf9734133)
+          (response b0d6675d789df22552889e2cf9734133)))))
+      |}]
+  ;;
+end

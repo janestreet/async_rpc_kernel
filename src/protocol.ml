@@ -33,7 +33,7 @@ module Query_id = struct
 
   let globalize (local_ t) : t = t
   let bin_size_t__local (local_ t) = bin_size_t (globalize t)
-  let bin_write_t__local buf ~pos (local_ t) = bin_write_t buf ~pos (globalize t)
+  let bin_write_t__local (local_ buf) ~pos (local_ t) = bin_write_t buf ~pos (globalize t)
 end
 
 module Unused_query_id : sig
@@ -243,43 +243,30 @@ module Query = struct
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
+  end
 
-    let to_v1 { tag; version; id; metadata = (_ : Rpc_metadata.V2.t option); data }
-      : _ V1.t
-      =
-      { tag; version; id; data }
-    ;;
+  module V4 = struct
+    module Rpc_specifier = struct
+      type t =
+        | Tag_and_version of Rpc_tag.t * int
+        | Rank of int
+      [@@deriving bin_io ~localize, globalize, sexp_of]
+    end
 
-    let of_v1 ?metadata { V1.tag; version; id; data } =
-      { tag; version; id; metadata; data }
-    ;;
-
-    let to_v2 { tag; version; id; metadata; data } : _ V2.t =
-      { tag
-      ; version
-      ; id
-      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
-      ; data
+    type 'a needs_length =
+      { specifier : Rpc_specifier.t
+      ; id : Query_id.t
+      ; metadata : Rpc_metadata.V2.t option
+      ; data : 'a
       }
+    [@@deriving bin_io ~localize, globalize, sexp_of]
+
+    let%expect_test _ =
+      print_endline [%bin_digest: unit needs_length];
+      [%expect {| 779fa3aaff407a16d3e4444349604e54 |}]
     ;;
 
-    let of_v2 { V2.tag; version; id; metadata; data } =
-      { tag
-      ; version
-      ; id
-      ; metadata = Base.Option.map metadata ~f:Rpc_metadata.V2.of_v1
-      ; data
-      }
-    ;;
-
-    let of_v2__local (local_ { V2.tag; version; id; metadata; data }) = exclave_
-      { tag
-      ; version
-      ; id
-      ; metadata = Base.Option.map__local metadata ~f:Rpc_metadata.V2.of_v1__local
-      ; data
-      }
-    ;;
+    type 'a t = 'a needs_length [@@deriving bin_read]
   end
 
   module Validated = struct
@@ -299,6 +286,35 @@ module Query = struct
 
     [%%template
     [@@@alloc.default a @ m = (heap @ global, stack @ local)]
+
+    let of_v4 (v4_query : 'a V4.t) ~description : 'a t =
+      let { V4.specifier = _; id; metadata; data } = v4_query in
+      let { Description.name; version } = description in
+      { tag = Rpc_tag.of_string name; version; id; metadata; data }
+    ;;
+
+    let of_v4__local (local_ (v4_query : 'a V4.t)) ~(local_ tag) ~version : 'a t
+      = exclave_
+      let { V4.specifier = _; id; metadata; data } = v4_query in
+      { tag; version; id; metadata; data }
+    ;;
+
+    let to_v4 (t : 'a t @ m) ~(callee_menu : Menu.t option) : 'a V4.t @ m =
+      (let { tag; version; id; metadata; data } = t in
+       let rank =
+         match callee_menu with
+         | None -> None
+         | Some callee_menu ->
+           Menu.index__local callee_menu ~tag:(Rpc_tag.to_string_local tag) ~version
+       in
+       let specifier =
+         match rank with
+         | None -> V4.Rpc_specifier.Tag_and_version (tag, version)
+         | Some rank -> V4.Rpc_specifier.Rank rank
+       in
+       { specifier; id; metadata; data })
+      [@exclave_if_stack a]
+    ;;
 
     let of_v3 (v3_query : 'a V3.t @ m) : 'a t @ m =
       let { V3.tag; version; id; metadata; data } = v3_query in
@@ -439,11 +455,12 @@ module Message = struct
     | Query_v3 of 'a Query.V3.needs_length
     | Close_started
     | Close_reason_v2 of Close_reason.Protocol.Binable.t
+    | Query_v4 of 'a Query.V4.needs_length
   [@@deriving bin_io ~localize, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| 2f32dba228167d341e3ce0bba5fed65a |}]
+    [%expect {| e8e9e042f02e523140204a2b26159669 |}]
   ;;
 
   type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
@@ -468,7 +485,7 @@ module Message = struct
       print_endline [%string "%{variant.name}: %{variant.rank#Int}"];
       f variant.constructor |> print_bin_prot
     in
-    let query : unit Query.V3.needs_length =
+    let query : unit Query.Validated.t =
       { tag = Rpc_tag.of_string "tag"
       ; version = 0
       ; id = Query_id.of_int_exn 1
@@ -486,12 +503,28 @@ module Message = struct
     let user_close_reason = Core.Info.create_s [%message "User close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
-      ~query_v1:(print (fun c -> c (Query.V3.to_v1 query)))
+      ~query_v1:(print (fun c -> c (Query.Validated.to_v1 query)))
       ~response_v1:
         (print (fun c ->
            c ({ id = Query_id.of_int_exn 0; data = Ok () } : _ Response.V1.needs_length)))
-      ~query_v2:(print (fun c -> c (Query.V3.to_v2 query)))
-      ~query_v3:(print (fun c -> c query))
+      ~query_v2:(print (fun c -> c (Query.Validated.to_v2 query)))
+      ~query_v3:(print (fun c -> c (Query.Validated.to_v3 query)))
+      ~query_v4:(fun variant ->
+        print (fun c -> c (Query.Validated.to_v4 query ~callee_menu:None)) variant;
+        print
+          (fun c ->
+            c
+              (Query.Validated.to_v4
+                 query
+                 ~callee_menu:
+                   (Some
+                      (Menu.of_supported_rpcs
+                         ~rpc_shapes:`Unknown
+                         [ { Description.name = "not_the_intended_rpc"; version = 0 }
+                         ; { name = "not_the_intended_rpc"; version = 1 }
+                         ; { name = "tag"; version = 0 }
+                         ]))))
+          variant)
       ~metadata:(print (fun c -> c (Connection_metadata.V2.to_v1 metadata)))
       ~close_reason:(print (fun c -> c close_reason))
       ~close_reason_duplicated:(print (fun c -> c close_reason))
@@ -545,6 +578,12 @@ module Message = struct
       00000010  00 0c 43 6c 6f 73 65 20  72 65 61 73 6f 6e 01 03  |..Close reason..|
       00000020  00 11 55 73 65 72 20 63  6c 6f 73 65 20 72 65 61  |..User close rea|
       00000030  73 6f 6e                                          |son|
+      Query_v4: 12
+      00000000  0c 00 03 74 61 67 00 01  01 01 00 08 6d 65 74 61  |...tag......meta|
+      00000010  64 61 74 61 00                                    |data.|
+      Query_v4: 12
+      00000000  0c 01 02 01 01 01 00 08  6d 65 74 61 64 61 74 61  |........metadata|
+      00000010  00                                                |.|
       |}]
   ;;
 end
