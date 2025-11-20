@@ -192,6 +192,11 @@ module Implementations : sig
 
   val descriptions : _ t -> Description.t list
 
+  val descriptions_and_shapes
+    :  ?exclude_name:string
+    -> _ t
+    -> (Description.t * Rpc_shapes.Just_digests.t) list
+
   (** Low-level, untyped access to queries. Regular users should ignore this. *)
   module Expert : sig
     (** See [Rpc.Expert.Responder] for how to use this. *)

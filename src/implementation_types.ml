@@ -51,9 +51,9 @@ module rec Direct_stream_writer : sig
       type 'a direct_stream_writer = 'a t
 
       type 'a t =
-        { (* [components] is only tracked separately from [components_by_id] so we can iterate
-           over its elements more quickly than we could iterate over the values of
-           [components_by_id]. *)
+        { (* [components] is only tracked separately from [components_by_id] so we can
+             iterate over its elements more quickly than we could iterate over the values
+             of [components_by_id]. *)
           mutable components : 'a direct_stream_writer Bag.t
         ; components_by_id : 'a component Id.Table.t
         ; buffer : Bigstring.t ref

@@ -113,7 +113,8 @@ let version_menu_rpc_name = "__Versioned_rpc.Menu"
    they are rarely used. *)
 type t = Stable.V3.response =
   { descriptions : Description.t array
-      (* strictly sorted. One thing we don't do but might want is to make equal names phys_equal *)
+      (* strictly sorted. One thing we don't do but might want is to make equal names
+         phys_equal *)
   ; digests : Rpc_shapes.Just_digests.t array option
   (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
   }
@@ -247,7 +248,7 @@ let%template[@zero_alloc] highest_available_version t ~rpc_name ~from_sorted_arr
           if arr_index < 0
           then Error `Some_versions_but_none_match
           else search description_index arr_index (Array.get from_sorted_array arr_index)
-        | _ (* > 0 *) ->
+        | _ (*=> 0 *) ->
           let description_index = description_index - 1 in
           if description_index < lb_in_descriptions
           then Error `Some_versions_but_none_match
@@ -255,7 +256,7 @@ let%template[@zero_alloc] highest_available_version t ~rpc_name ~from_sorted_arr
       in
       let arr_index = Array.length from_sorted_array in
       (* We know there exists at least one element in the set since [from_set] is not
-           empty in this branch *)
+         empty in this branch *)
       search
         ub_in_descriptions
         arr_index
@@ -326,11 +327,9 @@ let of_v2_response (v2_response : Stable.V2.response) : t =
     { descriptions; digests = Some digests })
 ;;
 
-(* we want a sexp that is useful for debugging. We produce a sexp where the
-   entries look like:
-   [((name <rpc-name>)(kind <e.g. One_way>)(versions (1 2 3)))]
-   When one name has multiple shapes, it gets multiple entries (and the version lists
-   don't overlap). *)
+(* we want a sexp that is useful for debugging. We produce a sexp where the entries look
+   like: [((name <rpc-name>)(kind <e.g. One_way>)(versions (1 2 3)))] When one name has
+   multiple shapes, it gets multiple entries (and the version lists don't overlap). *)
 let sexp_of_t { descriptions; digests } =
   let with_digest =
     match digests with

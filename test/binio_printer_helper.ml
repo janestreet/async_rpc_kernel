@@ -70,7 +70,8 @@ module Row = struct
      then cells C, G, K, N, R will not affect widths of other cells, and cells F, and J
      will have the same widths as each other but possibly not the same width as Q. Cells
      A, D, H, L, O will have equal widths as will cells B, E, I, M, P. The difference
-     between {F, J} and {Q} is that they are separated by a row which ends on that column.
+     between [{F, J}] and [{Q}] is that they are separated by a row which ends on that
+     column.
 
      The second row above would have [{text=G; level=2; prefix = [(1, B); (0, A)]}].
   *)
@@ -135,7 +136,8 @@ let rec parse
     (match Hashtbl.find base_handlers uuid with
      | Some handler -> handler ~env args rows buf ~pos ~level ~prefix
      | None -> raise_s [%message "unknown uuid" uuid])
-  | Tuple contents -> parse_tuple ~env contents rows buf ~pos ~level ~prefix
+  | Tuple contents | Unboxed_tuple contents ->
+    parse_tuple ~env contents rows buf ~pos ~level ~prefix
   | Record fields ->
     List.iteri fields ~f:(fun i (name, shape) ->
       let prefix' = level, sprintf "%s=" name in

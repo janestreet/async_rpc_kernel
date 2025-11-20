@@ -44,8 +44,9 @@ module Protocol : sig
   (* For backwards compatiblity with older protocol versions. *)
   val info_of_t : t -> Info_with_local_bin_io.t
 
-  (* We use [Flexible_sexp] so the flexible serialization is not type-equal to [t]. The type
-     is exposed so that [dotnet_bin_prot] can see it and generate the correct F# type. *)
+  (* We use [Flexible_sexp] so the flexible serialization is not type-equal to [t]. The
+     type is exposed so that [dotnet_bin_prot] can see it and generate the correct F#
+     type. *)
   module Binable : sig
     type t [@@deriving bin_io ~localize, globalize, sexp_of]
   end

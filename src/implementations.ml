@@ -506,7 +506,7 @@ module Instance = struct
     let on_initialization_error result =
       (* [Direct_stream_writer] currently uses the existence of the writer in
          [t.open_streaming_responses] when deciding whether to send an [Eof]. On an
-         initialization error we don't send [Eof] so we [Hashtbl.find_and_remove].*)
+         initialization error we don't send [Eof] so we [Hashtbl.find_and_remove]. *)
       write_streaming_initial result `Final;
       match Hashtbl.find_and_remove t.open_streaming_responses id with
       | Some (Direct writer) -> Direct_stream_writer.close writer
@@ -827,10 +827,10 @@ module Instance = struct
            | Ok (Error error) ->
              write_response (lift_failure_result error ~rpc_kind:"rpc")
          in
-         (* In the common case that the implementation returns a value immediately, we will
-            write the response immediately as well (this is also why the above [try_with]
-            has [~run:`Now]).  This can be a big performance win for servers that get many
-            queries in a single Async cycle. *)
+         (* In the common case that the implementation returns a value immediately, we
+            will write the response immediately as well (this is also why the above
+            [try_with] has [~run:`Now]). This can be a big performance win for servers
+            that get many queries in a single Async cycle. *)
          (match Deferred.peek result with
           | None -> result >>> handle_result
           | Some result -> handle_result result));
@@ -1042,12 +1042,12 @@ module Instance = struct
            ; id = (query.id :> Int63.t)
            ; payload_bytes = message_bytes_for_tracing
            };
-         (* Note that there's some delay between when we receive a pipe RPC query and
-            when we put something in [open_streaming_responses] (we wait for
-            a user-supplied function to return). During this time, an abort message would
-            just be ignored. The dispatcher can't abort the query while this is
-            happening, though, since the interface doesn't expose the ID required to
-            abort the query until after a response has been returned. *)
+         (* Note that there's some delay between when we receive a pipe RPC query and when
+            we put something in [open_streaming_responses] (we wait for a user-supplied
+            function to return). During this time, an abort message would just be ignored.
+            The dispatcher can't abort the query while this is happening, though, since
+            the interface doesn't expose the ID required to abort the query until after a
+            response has been returned. *)
          Option.iter (Hashtbl.find t.open_streaming_responses query.id) ~f:(function
            | Pipe pipe_placeholder -> Set_once.iter pipe_placeholder ~f:Pipe.close_read
            | Direct writer -> Direct_stream_writer.close writer)

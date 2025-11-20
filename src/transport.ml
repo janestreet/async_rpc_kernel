@@ -56,8 +56,8 @@ module Writer = struct
   type 'a writer =
     { impl : (module S with type t = 'a)
     ; t : 'a
-        (* We cache the result of [stopped] because it is often the [Deferred.any] of several
-       other deferreds and we want [can_send] to be simple. *)
+        (* We cache the result of [stopped] because it is often the [Deferred.any] of
+           several other deferreds and we want [can_send] to be simple. *)
     ; stopped : unit Deferred.t
     }
 

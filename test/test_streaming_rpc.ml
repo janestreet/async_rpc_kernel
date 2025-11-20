@@ -527,10 +527,10 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
        this test to exercise every number of schedules between e.g. 1 and 20 and asserting
        that their behaviour is correct. We decided against it for two reasons:
        1. We think the test would be noisier that way and it would be harder to validate
-       that the test is actually exercising the difference in behaviour that we expect it
-       to be testing.
+          that the test is actually exercising the difference in behaviour that we expect
+          it to be testing.
        2. We think that this won't change frequently and shouldn't be a pain to adjust by
-       hand if it does. If that assumption turns out false, we should re-evaluate. *)
+          hand if it does. If that assumption turns out false, we should re-evaluate. *)
     let schedules_required_for_implementation_to_complete_before_exn = 5 in
     let schedules_required_for_successful_response_before_exn =
       schedules_required_for_implementation_to_complete_before_exn + 2

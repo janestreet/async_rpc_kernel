@@ -3,13 +3,13 @@ open! Async_kernel
 
 type 'a t =
   { header_prefix : string (* Bin_protted constant prefix of the message *)
-  ; (* Length of the user data part. We set this field when sending a message. This
-           relies on the fact that the message is serialized immediately (which is the
-           only acceptable semantics for the transport layer anyway, as it doesn't know if
-           the value is mutable or not).
+  ; (* Length of the user data part. We set this field when sending a message. This relies
+       on the fact that the message is serialized immediately (which is the only
+       acceptable semantics for the transport layer anyway, as it doesn't know if the
+       value is mutable or not).
 
-           [data_len] is passed to bin-prot writers by mutating [data_len] instead of by
-           passing an additional argument to avoid some allocation.
+       [data_len] is passed to bin-prot writers by mutating [data_len] instead of by
+       passing an additional argument to avoid some allocation.
     *)
     mutable data_len : Nat0.t
   ; bin_writer : 'a Bin_prot.Type_class.writer
@@ -59,8 +59,8 @@ let create (type a) protocol_writer id impl_menu_index description ~bin_writer :
 
 let bin_writer t = t.bin_writer
 
-(* This part of the message header is a constant, make it a literal to make the
-       writing code slightly faster. *)
+(* This part of the message header is a constant, make it a literal to make the writing
+   code slightly faster. *)
 let stream_response_data_header_len = 4
 let stream_response_data_header_as_int32 = 0x8a79l
 

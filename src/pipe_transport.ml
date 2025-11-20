@@ -65,9 +65,8 @@ module Pipe_reader (Data : DATA) = struct
         let data_len = Data.length data in
         if buff_len = 0 && data_len >= need
         then
-          (* We have enough data and buffer is empty.
-             This is the common case where every bin_prot message is sent in its own
-             websocket frame *)
+          (* We have enough data and buffer is empty. This is the common case where every
+             bin_prot message is sent in its own websocket frame *)
           process_data ~pos:0 ~data:(Data.to_bigstring data) ~length:data_len queue
         else (
           (* Slow path. We have to accumulate [Bigstring.t]s *)
@@ -94,9 +93,9 @@ module Pipe_reader (Data : DATA) = struct
           | Handler_result.Stop x ->
             let pos = pos + total_len in
             let length = length - total_len in
-            (* Make sure that all data we've read (and not "consumed") from the pipe
-               is kept in the buffer.
-               That is the remaining bits in [data] and all contents in [queue].
+            (* Make sure that all data we've read (and not "consumed") from the pipe is
+               kept in the buffer. That is the remaining bits in [data] and all contents
+               in [queue].
             *)
             set_buffer ~pos ~length ~data;
             Queue.iter queue ~f:(fun data -> Data.add_to_bigbuffer buffer data);
@@ -115,8 +114,8 @@ module Pipe_reader (Data : DATA) = struct
             assert (length >= 0);
             if length > 0
             then
-              (* Process the rest of the data.
-                 More than one bin_prot message was sent inside the websocket frame *)
+              (* Process the rest of the data. More than one bin_prot message was sent
+                 inside the websocket frame *)
               process_data ~pos ~data ~length queue
             else
               (* length = 0 *)
@@ -176,8 +175,8 @@ module Pipe_and_monitor = struct
   let create pipe = { pipe; monitor = Monitor.create (); bytes_written = Int63.zero }
 end
 
-(* We don't perform any buffering here.
-   A message is consider to be flushed as soon as it enters the pipe. *)
+(* We don't perform any buffering here. A message is consider to be flushed as soon as it
+   enters the pipe. *)
 module Pipe_writer (Data : DATA) = struct
   type t = Data.t Pipe_and_monitor.t [@@deriving sexp_of]
 

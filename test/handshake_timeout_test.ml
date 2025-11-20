@@ -25,8 +25,8 @@ let test ~client_handshake_timeout_s ~server_handshake_timeout_s =
         don't_wait_for
           (let%bind () =
              Pipe.transfer' reader writer ~f:(fun bigstring_q ->
-               (* This yield allows timeouts to fire, which is needed to cause the connections to
-                  be closed before negotiation is done *)
+               (* This yield allows timeouts to fire, which is needed to cause the
+                  connections to be closed before negotiation is done *)
                let%map () = Scheduler.yield () in
                Queue.iter bigstring_q ~f:(fun bigstring ->
                  match !shapes with

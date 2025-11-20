@@ -138,9 +138,9 @@ end
 
 module%test [@name "skewed heartbeat timeouts"] _ = struct
   (* We want to test connections where
-     * server has a much longer timeout than
-     * the client * client does sychronous work longer than their own timeout
-     * synchronous work is shorter than the server timeout
+   * server has a much longer timeout than
+   * the client * client does sychronous work longer than their own timeout
+   * synchronous work is shorter than the server timeout
   *)
 
   let client_heartbeat_timeout = Time_ns.Span.of_sec 15.

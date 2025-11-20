@@ -11,8 +11,8 @@ let print_payload_messages tap =
     [ [%bin_shape: Async_rpc_kernel_test.Test_helpers.Payload.t] ]
 ;;
 
-(* This exists only to help test ASYNC_RPC_FORCE_PROTOCOL_VERSION_NUMBER_UPPER_BOUND
-   in test_connection.ml in the parent directory *)
+(* This exists only to help test ASYNC_RPC_FORCE_PROTOCOL_VERSION_NUMBER_UPPER_BOUND in
+   test_connection.ml in the parent directory *)
 let () =
   Command.async
     ~summary:

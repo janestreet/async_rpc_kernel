@@ -53,8 +53,8 @@ module For_handshake = struct
          [@nontail]))
       else (
         (* We used to unconditionally send rpc shapes over the wire. It turns out that
-           nobody was using them so it's fine to break backwards compatibility and send some
-           garabage digest to save computation time while talking to older versions. *)
+           nobody was using them so it's fine to break backwards compatibility and send
+           some garabage digest to save computation time while talking to older versions. *)
         let garbage_digest = Rpc_shapes.Just_digests.Unknown in
         let menu =
           Option.bind menu ~f:(fun menu ->
@@ -136,7 +136,7 @@ module Query = struct
       if use_v4
       then
         (* Check if we can optimize by sending the rank of the RPC rather than the full
-         name and index *)
+           name and index *)
         Query_v4 (Protocol.Query.Validated.to_v4 query ~callee_menu:peer_menu)
       else if Version_dependent_feature.is_supported Query_metadata_v2 ~version
       then Query_v3 (Protocol.Query.Validated.to_v3 query)
@@ -178,8 +178,8 @@ module Response = struct
         let error_implemented_in_protocol_version =
           Rpc_error.implemented_in_protocol_version rpc_error
         in
-        (* We added [Unknown] in v3 to act as a catchall for future protocol errors. Before
-        v3 we used [Uncaught_exn] as the catchall. *)
+        (* We added [Unknown] in v3 to act as a catchall for future protocol errors.
+           Before v3 we used [Uncaught_exn] as the catchall. *)
         if error_implemented_in_protocol_version <= negotiated_protocol_version
         then data
         else (
