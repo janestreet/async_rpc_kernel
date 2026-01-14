@@ -29,7 +29,7 @@ module Heartbeat_config = struct
     { timeout : Time_ns.Span.t
     ; send_every : Time_ns.Span.t
     }
-  [@@deriving sexp, bin_io, fields ~getters]
+  [@@deriving sexp, bin_io ~localize, fields ~getters, compare ~localize]
 
   let%expect_test _ =
     print_endline [%bin_digest: t];
@@ -738,8 +738,8 @@ let cleanup t ~reason exn =
       | exn -> Uncaught_exn (Exn.sexp_of_t exn)
     in
     (* clean up open streaming responses *)
-    (* an unfortunate hack; ok because the response handler will have nothing
-       to read following a response where [data] is an error *)
+    (* an unfortunate hack; ok because the response handler will have nothing to read
+       following a response where [data] is an error *)
     let dummy_buffer = Bigstring.create 1 in
     let dummy_ref = ref 0 in
     Hashtbl.iteri
@@ -1168,10 +1168,10 @@ let run_after_handshake t ~implementations ~menu ~connection_state ~writer_monit
 
 let read_message_before_heartbeating t ~timeout ~reader ~step =
   (* If we use [max_connections] in the server, then this read may just hang until the
-      server starts accepting new connections (which could be never).  That is why a
-      timeout is used *)
-  (* This also may hang if we handshake, but the connection dies before we receive
-      the peer's connection metadata since this is before we start heartbeating. *)
+     server starts accepting new connections (which could be never). That is why a timeout
+     is used *)
+  (* This also may hang if we handshake, but the connection dies before we receive the
+     peer's connection metadata since this is before we start heartbeating. *)
   let result =
     Monitor.try_with_local ~rest:`Log (fun () ->
       Reader.read_one_message_bin_prot t.reader reader)
@@ -1449,9 +1449,9 @@ let create
   in
   let tracing_events =
     Bus.create_exn
-      Arity1_local
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let close_started = Ivar.create () in
   let t =

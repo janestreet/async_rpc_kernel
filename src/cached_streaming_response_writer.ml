@@ -89,12 +89,12 @@ let bin_write_string_no_length buf ~pos str =
 ;;
 
 (* The two following functions are used by the 3 variants exposed by this module. They
-   serialize a [Response { id; data = Ok (`Ok data_len) }] value, taking care of
-   writing the [Nat0.t] length prefix where appropriate.
+   serialize a [Response { id; data = Ok (`Ok data_len) }] value, taking care of writing
+   the [Nat0.t] length prefix where appropriate.
 
    Bear in mind that there are two levels of length prefixes for stream response data
-   message: one for the user data (under the `Ok, before the actual data), and one for
-   the response data (under the .data field, after the Ok and before the `Ok).
+   message: one for the user data (under the `Ok, before the actual data), and one for the
+   response data (under the .data field, after the Ok and before the `Ok).
 
    When eventually serialized, we get a sequence of bytes that can be broken down as:
    {v

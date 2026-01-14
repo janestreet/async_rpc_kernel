@@ -9,7 +9,7 @@ module type S = sig
   module Close_reason = Close_reason
 
   module Heartbeat_config : sig
-    type t [@@deriving sexp, bin_io]
+    type t [@@deriving sexp, bin_io ~localize, compare ~localize]
 
     (** Each side of the connection has its own heartbeat config. It sends a heartbeat
         every [send_every]. If it doesn't receive any messages for [timeout], whether it's

@@ -14,6 +14,7 @@ module How_to_recognize_errors = How_to_recognize_errors
 let ( >>=~ ) = Result.( >>= )
 let ( >>|~ ) = Result.( >>| )
 let and_digest shapes = shapes, Rpc_shapes.eval_to_digest shapes
+let default_max_message_size = 1024 * 1024 * 1024
 
 let message_too_big_message message_too_big ~connection =
   [%sexp

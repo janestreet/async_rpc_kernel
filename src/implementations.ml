@@ -254,7 +254,7 @@ module Instance = struct
     ;;
 
     let close ?(result = Ok `Eof) t =
-      if not (Ivar.is_full t.closed)
+      if not (is_closed t)
       then (
         Ivar.fill_exn t.closed ();
         let groups = t.groups in
@@ -268,17 +268,27 @@ module Instance = struct
               Hashtbl.remove group.components_by_id t.id;
               Not_finished);
         match t.state with
-        | Not_started q ->
-          Queue.iter q ~f:(function
-            | Normal _ | Expert_string (_ : string) -> ()
-            | Expert_schedule_bigstring
-                { buf = (_ : Bigstring.t); pos = (_ : int); len = (_ : int); done_ } ->
-              Ivar.fill_if_empty done_ ())
+        | Not_started _ -> ()
         | Started ->
           (* If we've started then we'll clean up the [open_streaming_responses]. If we
              haven't started and [close] is called earlier than [start], [t.closed] will
              be full which will induce a [streaming_eof] in [start]. *)
           t.cleanup_and_write_streaming_eof result)
+    ;;
+
+    (* Handles initialization errors where [start] will never be called. It closes the
+       writer and marks any pending [Expert.schedule_write] buffers as done so callers
+       don't end up waiting forever for the buffers to be returned. *)
+    let close_and_abandon_queued_writes t =
+      close t;
+      match t.state with
+      | Not_started q ->
+        Queue.iter q ~f:(function
+          | Normal _ | Expert_string (_ : string) -> ()
+          | Expert_schedule_bigstring
+              { buf = (_ : Bigstring.t); pos = (_ : int); len = (_ : int); done_ } ->
+            Ivar.fill_if_empty done_ ())
+      | Started -> ()
     ;;
 
     let write_without_pushback t x =
@@ -339,7 +349,13 @@ module Instance = struct
           | Expert_string x -> write_message_string t x
           | Expert_schedule_bigstring { buf; pos; len; done_ } ->
             (match schedule_write_message_expert t ~buf ~pos ~len with
-             | `Flushed { global = d } -> Eager_deferred.upon d (Ivar.fill_exn done_)
+             | `Flushed { global = d } ->
+               (* Fill [done_] when either the flush completes or the DSW is closed. This
+                  ensures the buffer is marked safe to reuse even if the connection is
+                  closed before the transport flushes. *)
+               Eager_deferred.upon
+                 (Deferred.any_unit [ d; closed t ])
+                 (Ivar.fill_exn done_)
              | `Closed -> Ivar.fill_exn done_ ()));
         Ivar.fill_exn t.started ();
         if Ivar.is_full t.closed then t.cleanup_and_write_streaming_eof (Ok `Eof)
@@ -509,7 +525,8 @@ module Instance = struct
          initialization error we don't send [Eof] so we [Hashtbl.find_and_remove]. *)
       write_streaming_initial result `Final;
       match Hashtbl.find_and_remove t.open_streaming_responses id with
-      | Some (Direct writer) -> Direct_stream_writer.close writer
+      | Some (Direct writer) ->
+        Direct_stream_writer.close_and_abandon_queued_writes writer
       | Some (Pipe pipe_placeholder) ->
         Set_once.get pipe_placeholder |> Option.iter ~f:Pipe.close_read
       | None -> ()
@@ -1304,7 +1321,8 @@ let instantiate
     }
 ;;
 
-exception Duplicate_implementations of Description.t list [@@deriving sexp]
+exception Duplicate_implementations of Description.t list
+[@@deriving sexp ~nonportable__magic_unsafe_in_parallel_programs]
 
 let create_exn ~implementations ~on_unknown_rpc ~on_exception =
   match create ~implementations ~on_unknown_rpc ~on_exception with

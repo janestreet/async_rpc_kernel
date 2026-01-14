@@ -35,7 +35,9 @@ module Protocol = struct
     }
   [@@deriving sexp_of, compare]
 
-  let create ?debug_info ?user_reason () ~kind = { debug_info; user_reason; kind }
+  let create ?(kind = Kind.Unspecified) ?debug_info ?user_reason () =
+    { debug_info; user_reason; kind }
+  ;;
 
   module Binable = struct
     type t =

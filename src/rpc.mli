@@ -240,6 +240,12 @@ module Implementations : sig
 end
 
 module Transport = Transport
+
+(** Specifies the default maximum message size that most Async_rpc transports support.
+    This library itself makes no use of this value, but it allows platform-specific
+    transports to coordinate on using the same value. *)
+val default_max_message_size : int
+
 module Connection : Connection_intf.S with type t = Connection.t
 module How_to_recognize_errors = How_to_recognize_errors
 

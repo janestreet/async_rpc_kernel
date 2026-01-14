@@ -123,9 +123,9 @@ type t = Stable.V3.response =
 let supported_rpcs (t : t) = Array.to_list t.descriptions
 
 (* Returns inclusive (lower, upper) bounds for the interval of indexes which corresponds
-   to rpcs with this name less than or equal to this version. If no such rpcs exist:
-   Error `No_versions if rpcs exist with this name but larger versions
-   Error `No_rpcs if no rpcs exist with this name
+   to rpcs with this name less than or equal to this version. If no such rpcs exist: Error
+   `No_versions if rpcs exist with this name but larger versions Error `No_rpcs if no rpcs
+   exist with this name
 *)
 let%template[@zero_alloc] versions_range t ~rpc_name ~(local_ max_version) = exclave_
   let max_version = (Option.value [@mode local]) max_version ~default:Int.max_value in
@@ -143,7 +143,9 @@ let%template[@zero_alloc] versions_range t ~rpc_name ~(local_ max_version) = exc
        (Array.binary_search_segmented [@zero_alloc assume])
          t.descriptions
          ~segment_of:(fun d ->
-           if [%compare_local: Description.t] d { name = rpc_name; version = max_version }
+           if ([%compare: Description.t] [@mode local])
+                d
+                { name = rpc_name; version = max_version }
               <= 0
            then `Left
            else `Right)
@@ -168,20 +170,22 @@ let get t index = exclave_
   else Some (Modes.Global.wrap t.descriptions.(index))
 ;;
 
-let index__local t ~(local_ tag) ~(local_ version) = exclave_
+let%template index__local t ~(local_ tag) ~(local_ version) = exclave_
   let reference_tag = tag in
   let reference_version = version in
   match
     (Array.binary_search_segmented [@zero_alloc assume])
-      (* We can assume that binary_search_segmented does not alloc because the [segment_of]
-       parameter to it is zero_alloc. Additionally, microbenchmarks show that the change
-       that provoked this (invoking RPCs by menu rank) did not introduce an alloc in the
-       dispatch path. *)
+      (* We can assume that binary_search_segmented does not alloc because the
+         [segment_of] parameter to it is zero_alloc. Additionally, microbenchmarks show
+         that the change that provoked this (invoking RPCs by menu rank) did not introduce
+         an alloc in the dispatch path. *)
       t.descriptions
       ~segment_of:(fun [@zero_alloc] d ->
         let { Description.name; version } = d in
         let cmp =
-          [%compare_local: string * int] (name, version) (reference_tag, reference_version)
+          ([%compare: string * int] [@mode local])
+            (name, version)
+            (reference_tag, reference_version)
         in
         if cmp <= 0 then `Left else `Right)
       `Last_on_left
@@ -189,8 +193,8 @@ let index__local t ~(local_ tag) ~(local_ version) = exclave_
   | None -> None
   | Some i ->
     let { Description.name; version } = t.descriptions.(i) in
-    if [%compare_local.equal: string] name reference_tag
-       && [%compare_local.equal: int] version reference_version
+    if ([%compare.equal: string] [@mode local]) name reference_tag
+       && ([%compare.equal: int] [@mode local]) version reference_version
     then Some i
     else None
 ;;

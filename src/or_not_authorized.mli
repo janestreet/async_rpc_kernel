@@ -4,6 +4,7 @@ open Async_kernel
 type 'a t =
   | Authorized of 'a
   | Not_authorized of Error.t
+[@@deriving sexp_of]
 
 val lift_deferred : 'a Deferred.t t -> 'a t Deferred.t
 val of_or_error : 'a Or_error.t -> 'a t
