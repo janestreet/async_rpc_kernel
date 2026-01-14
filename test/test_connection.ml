@@ -239,8 +239,8 @@ let%expect_test "forced earlier version simple RPC dispatch" =
       "bin/test_forced_protocol_version.exe"
       []
   in
-  (* We expect to see [Query_v3] in the output instead of later versions since we
-     limited the protocol version to v10 *)
+  (* We expect to see [Query_v3] in the output instead of later versions since we limited
+     the protocol version to v10 *)
   [%expect
     {|
     ======================== header ========================
@@ -1991,9 +1991,8 @@ let%expect_test "regression test: closing a connection before [connection_state]
       ()
   in
   let connection_weak_pointer = Weak_pointer.create () in
-  (* We try to ensure that [connection] doesn't leave the scope of this
-     function except for [connection_weak_pointer], so that we can ensure it gets GC'ed
-     with a Gc.major. *)
+  (* We try to ensure that [connection] doesn't leave the scope of this function except
+     for [connection_weak_pointer], so that we can ensure it gets GC'ed with a Gc.major. *)
   let connect_and_set_weak_pointer ~when_to_close_connection =
     let connection_state connection =
       let close () = Rpc.Connection.close connection |> don't_wait_for in
@@ -2049,10 +2048,10 @@ let%expect_test "regression test: writer closing between handshake and metadata 
       ~connection_state:(fun (_ : Rpc.Connection.t) -> ())
       transport_b
   in
-  (* At this point, conn_a and conn_b will have synchronously written the headers to
-     the pipe, and are binding on seeing the message from the other. If we close
-     conn_a's writer here, then both will successfully negotiate, but conn_a will fail
-     to write metadata and result in an error *)
+  (* At this point, conn_a and conn_b will have synchronously written the headers to the
+     pipe, and are binding on seeing the message from the other. If we close conn_a's
+     writer here, then both will successfully negotiate, but conn_a will fail to write
+     metadata and result in an error *)
   don't_wait_for (Rpc.Transport.Writer.close transport_a.writer);
   let wait_and_print_result conn =
     let%map conn in

@@ -40,7 +40,8 @@ end
 include T
 include Sexpable.To_stringable (T)
 
-exception Handshake_error of (t * Info.t) [@@deriving sexp]
+exception Handshake_error of (t * Info.t)
+[@@deriving sexp ~nonportable__magic_unsafe_in_parallel_programs]
 
 let to_exn ~connection_description t = Handshake_error (t, connection_description)
 let to_error ~connection_description t = to_exn ~connection_description t |> Error.of_exn

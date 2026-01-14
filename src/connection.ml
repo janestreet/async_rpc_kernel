@@ -29,7 +29,7 @@ module Heartbeat_config = struct
     { timeout : Time_ns.Span.t
     ; send_every : Time_ns.Span.t
     }
-  [@@deriving sexp, bin_io, fields ~getters]
+  [@@deriving sexp, bin_io ~localize, fields ~getters, compare ~localize]
 
   let%expect_test _ =
     print_endline [%bin_digest: t];
@@ -143,27 +143,28 @@ type t =
   ; close_started : Close_reason.t Ivar.t
   ; close_started_info : Info.t Deferred.t
   ; close_finished : unit Ivar.t
-      (* There's a circular dependency between connections and their implementation instances
-     (the latter depends on the connection state, which is given access to the connection
-     when it is created). *)
+      (* There's a circular dependency between connections and their implementation
+         instances (the latter depends on the connection state, which is given access to
+         the connection when it is created). *)
   ; implementations_instance : Implementations.Instance.t Set_once.t
   ; time_source : Synchronous_time_source.t
   ; heartbeat_event : Synchronous_time_source.Event.t Set_once.t
-      (* Variant is decided once the protocol version negotiation is completed -- then, either
-     sending the id is unsupported, or the id is requested and is on its way or received
+      (* Variant is decided once the protocol version negotiation is completed -- then,
+         either sending the id is unsupported, or the id is requested and is on its way or
+         received
       *)
   ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
   ; no_open_queries_event : (unit, read_write) Bvar.t
       (* When closing a connection, there is the option to wait for open queries before
-         completing the close. This bvar is filled each time the number of open queries
-         is 0 on either the connection or implementation side, so we can be notified and
+         completing the close. This bvar is filled each time the number of open queries is
+         0 on either the connection or implementation side, so we can be notified and
          check if there are still any open queries during the closing process. *)
   ; metadata_for_dispatch :
       (Description.t -> query_id:Int63.t -> Rpc_metadata.V2.Payload.t option)
         Rpc_metadata.V2.Key.Table.t
   ; peer_metadata : Peer_metadata.t Set_once.t
       (* responses to queries are written by the implementations instance. Other events
-     are written by this module. *)
+         are written by this module. *)
   ; metadata_on_receive :
       (Description.t
        -> query_id:P.Query_id.t
@@ -678,7 +679,7 @@ let wait_for_open_queries ~instance ~timeout t =
     then
       timeout
       (* We still need to check for open queries since the bvar could be broadcasted from
-       either the [Connection] or the [Implementation]. *)
+         either the [Connection] or the [Implementation]. *)
     else if Hashtbl.is_empty t.open_queries
             && Implementations.Instance.open_queries instance = 0
     then return ()
@@ -732,8 +733,8 @@ let cleanup t ~reason exn =
       | exn -> Uncaught_exn (Exn.sexp_of_t exn)
     in
     (* clean up open streaming responses *)
-    (* an unfortunate hack; ok because the response handler will have nothing
-       to read following a response where [data] is an error *)
+    (* an unfortunate hack; ok because the response handler will have nothing to read
+       following a response where [data] is an error *)
     let dummy_buffer = Bigstring.create 1 in
     let dummy_ref = ref 0 in
     Hashtbl.iteri
@@ -770,9 +771,8 @@ let[@inline] handle_query
   if is_closing t
   then Transport_intf.Handler_result.Continue
   else (
-    (* This [Set_once.get_exn] is safe since [handle_msg] is only called in
-       [on_message], which is called after the corresponding [set_exn] in
-       [run_connection]. *)
+    (* This [Set_once.get_exn] is safe since [handle_msg] is only called in [on_message],
+       which is called after the corresponding [set_exn] in [run_connection]. *)
     let instance = Set_once.get_exn t.implementations_instance in
     Implementations.Instance.handle_query
       instance
@@ -1163,10 +1163,10 @@ let run_after_handshake t ~implementations ~menu ~connection_state ~writer_monit
 
 let read_message_before_heartbeating t ~timeout ~reader ~step =
   (* If we use [max_connections] in the server, then this read may just hang until the
-      server starts accepting new connections (which could be never).  That is why a
-      timeout is used *)
-  (* This also may hang if we handshake, but the connection dies before we receive
-      the peer's connection metadata since this is before we start heartbeating. *)
+     server starts accepting new connections (which could be never). That is why a timeout
+     is used *)
+  (* This also may hang if we handshake, but the connection dies before we receive the
+     peer's connection metadata since this is before we start heartbeating. *)
   let result =
     Monitor.try_with_local ~rest:`Log (fun () ->
       Reader.read_one_message_bin_prot t.reader reader)
@@ -1184,15 +1184,14 @@ let read_message_before_heartbeating t ~timeout ~reader ~step =
          %{time_ns_to_microsecond_string handshake_started_at}, now: \
          %{time_ns_to_microsecond_string now}."]
     in
-    (* There's a pending read, the reader is basically useless now, so we clean it
-        up. *)
+    (* There's a pending read, the reader is basically useless now, so we clean it up. *)
     don't_wait_for
       (close
          t
          ~reason:
            ((* A handshake timeout could be a result of both the local and remote but
-                we're detecting it on the local side. This is similar to a heartbeat
-                timeout close reason. *)
+               we're detecting it on the local side. This is similar to a heartbeat
+               timeout close reason. *)
               Private.Close_reason.By_local
               { reason =
                   Close_reason.Protocol.create
@@ -1241,8 +1240,8 @@ let set_peer_metadata_and_validate t metadata ~validate_connection =
               { reason =
                   Close_reason.Protocol.create
                     ~kind:Connection_validation_failed
-                      (* [Error.to_info] is the identity function, so we are not
-                          modifying the user error in any way *)
+                      (* [Error.to_info] is the identity function, so we are not modifying
+                         the user error in any way *)
                     ~user_reason:(Error.to_info error)
                     ()
               ; send_reason_to_peer = true
@@ -1410,7 +1409,7 @@ let create
     with
     | Some (_ : _ Implementation.t) ->
       (* 1. There was a custom menu rpc implemented. We cannot include a menu in the
-         metadata. *)
+            metadata. *)
       None, implementations
     | None ->
       (* 2. There is no menu so we are free to send a menu containing all of the
@@ -1445,9 +1444,9 @@ let create
   in
   let tracing_events =
     Bus.create_exn
-      Arity1_local
       ~on_subscription_after_first_write:Allow
       ~on_callback_raise:Error.raise
+      ()
   in
   let close_started = Ivar.create () in
   let t =
@@ -1471,11 +1470,11 @@ let create
     ; metadata_for_dispatch = Rpc_metadata.V2.Key.Table.create ()
     ; peer_metadata = Set_once.create ()
     ; metadata_on_receive =
-        (* This default hook implements the legacy query metadata behavior of setting
-           the async execution context. Because [set_metadata_hooks] only checks
+        (* This default hook implements the legacy query metadata behavior of setting the
+           async execution context. Because [set_metadata_hooks] only checks
            [metadata_for_dispatch] to determine if hooks have already been set for a
-           particular key, this entry will still allow users to set their own custom
-           hook for this key. *)
+           particular key, this entry will still allow users to set their own custom hook
+           for this key. *)
         Rpc_metadata.V2.Key.Table.of_alist_exn
           [ (( Rpc_metadata.V2.Key.default_for_legacy
              , fun (_ : Description.t) ~query_id:(_ : P.Query_id.t) metadata ctx ->
@@ -1490,9 +1489,9 @@ let create
     ; heartbeat_timeout_override =
         heartbeat_timeout_override_from_environment
         (* The benefit of holding the override in [t] is that if the user programmatically
-     increases the heartbeat timeout via [reset_heartbeat_timeout] and this exceeds both
-     the previous heartbeat timeout and the environment override, then we'll use the new
-     value *)
+           increases the heartbeat timeout via [reset_heartbeat_timeout] and this exceeds
+           both the previous heartbeat timeout and the environment override, then we'll
+           use the new value *)
     ; heartbeat_timeout_style
     ; sent_heartbeats_without_receiving_any = 0
     }

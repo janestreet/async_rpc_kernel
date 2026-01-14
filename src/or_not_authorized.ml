@@ -3,6 +3,7 @@ open! Core
 type 'a t =
   | Authorized of 'a
   | Not_authorized of Error.t
+[@@deriving sexp_of]
 
 let of_or_error = function
   | Ok a -> Authorized a

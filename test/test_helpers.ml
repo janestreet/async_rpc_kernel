@@ -123,8 +123,8 @@ module Tap = struct
 
   let print_header t =
     t (fun buf ~pos ~len ->
-      (* This is mostly mirrored off of {!print_messages}, just unrolled to only print
-         the handshake header and connection metadata (if it exists) *)
+      (* This is mostly mirrored off of {!print_messages}, just unrolled to only print the
+         handshake header and connection metadata (if it exists) *)
       let header_len =
         Async_rpc_kernel.Async_rpc_kernel_private.Transport.Header.length
         + Bigstring.get_int64_le_exn buf ~pos
@@ -220,7 +220,6 @@ let reader_writer_tap () =
      pipes and implement our own tee like thing to make a copy of the data we copy from
      one to the next.
      {v
-
      writer1 ---UNIX--> reader2 ---OCAML---> writer3 ---UNIX--> reader4
        :                             |                             :
        :                             V                             :

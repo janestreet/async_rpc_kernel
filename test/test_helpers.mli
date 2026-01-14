@@ -58,8 +58,8 @@ val with_rpc_server_connection
         -> 'a Deferred.t)
   -> 'a Deferred.t
 
-(* [?server_heartbeat_foo] are after the labeled arguments since they default to the
-   value of [heartbeat_foo]. *)
+(* [?server_heartbeat_foo] are after the labeled arguments since they default to the value
+   of [heartbeat_foo]. *)
 val setup_server_and_client_connection
   :  heartbeat_timeout:Time_ns.Span.t
   -> heartbeat_every:Time_ns.Span.t

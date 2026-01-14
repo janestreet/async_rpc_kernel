@@ -113,7 +113,8 @@ let version_menu_rpc_name = "__Versioned_rpc.Menu"
    they are rarely used. *)
 type t = Stable.V3.response =
   { descriptions : Description.t array
-      (* strictly sorted. One thing we don't do but might want is to make equal names phys_equal *)
+      (* strictly sorted. One thing we don't do but might want is to make equal names
+         phys_equal *)
   ; digests : Rpc_shapes.Just_digests.t array option
   (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
   }
@@ -122,9 +123,9 @@ type t = Stable.V3.response =
 let supported_rpcs (t : t) = Array.to_list t.descriptions
 
 (* Returns inclusive (lower, upper) bounds for the interval of indexes which corresponds
-   to rpcs with this name less than or equal to this version. If no such rpcs exist:
-   Error `No_versions if rpcs exist with this name but larger versions
-   Error `No_rpcs if no rpcs exist with this name
+   to rpcs with this name less than or equal to this version. If no such rpcs exist: Error
+   `No_versions if rpcs exist with this name but larger versions Error `No_rpcs if no rpcs
+   exist with this name
 *)
 let%template[@zero_alloc] versions_range t ~rpc_name ~max_version =
   let max_version = (Option.value [@mode local]) max_version ~default:Int.max_value in
@@ -142,7 +143,9 @@ let%template[@zero_alloc] versions_range t ~rpc_name ~max_version =
        (Array.binary_search_segmented [@zero_alloc assume])
          t.descriptions
          ~segment_of:(fun d ->
-           if [%compare_local: Description.t] d { name = rpc_name; version = max_version }
+           if ([%compare: Description.t] [@mode local])
+                d
+                { name = rpc_name; version = max_version }
               <= 0
            then `Left
            else `Right)
@@ -167,20 +170,22 @@ let get t index =
   else Some (Modes.Global.wrap t.descriptions.(index))
 ;;
 
-let index__local t ~tag ~version =
+let%template index__local t ~tag ~version =
   let reference_tag = tag in
   let reference_version = version in
   match
     (Array.binary_search_segmented [@zero_alloc assume])
-      (* We can assume that binary_search_segmented does not alloc because the [segment_of]
-       parameter to it is zero_alloc. Additionally, microbenchmarks show that the change
-       that provoked this (invoking RPCs by menu rank) did not introduce an alloc in the
-       dispatch path. *)
+      (* We can assume that binary_search_segmented does not alloc because the
+         [segment_of] parameter to it is zero_alloc. Additionally, microbenchmarks show
+         that the change that provoked this (invoking RPCs by menu rank) did not introduce
+         an alloc in the dispatch path. *)
       t.descriptions
       ~segment_of:(fun [@zero_alloc] d ->
         let { Description.name; version } = d in
         let cmp =
-          [%compare_local: string * int] (name, version) (reference_tag, reference_version)
+          ([%compare: string * int] [@mode local])
+            (name, version)
+            (reference_tag, reference_version)
         in
         if cmp <= 0 then `Left else `Right)
       `Last_on_left
@@ -188,8 +193,8 @@ let index__local t ~tag ~version =
   | None -> None
   | Some i ->
     let { Description.name; version } = t.descriptions.(i) in
-    if [%compare_local.equal: string] name reference_tag
-       && [%compare_local.equal: int] version reference_version
+    if ([%compare.equal: string] [@mode local]) name reference_tag
+       && ([%compare.equal: int] [@mode local]) version reference_version
     then Some i
     else None
 ;;
@@ -246,7 +251,7 @@ let%template[@zero_alloc] highest_available_version t ~rpc_name ~from_sorted_arr
           if arr_index < 0
           then Error `Some_versions_but_none_match
           else search description_index arr_index (Array.get from_sorted_array arr_index)
-        | _ (* > 0 *) ->
+        | _ (*=> 0 *) ->
           let description_index = description_index - 1 in
           if description_index < lb_in_descriptions
           then Error `Some_versions_but_none_match
@@ -254,7 +259,7 @@ let%template[@zero_alloc] highest_available_version t ~rpc_name ~from_sorted_arr
       in
       let arr_index = Array.length from_sorted_array in
       (* We know there exists at least one element in the set since [from_set] is not
-           empty in this branch *)
+         empty in this branch *)
       search
         ub_in_descriptions
         arr_index
@@ -325,11 +330,9 @@ let of_v2_response (v2_response : Stable.V2.response) : t =
     { descriptions; digests = Some digests })
 ;;
 
-(* we want a sexp that is useful for debugging. We produce a sexp where the
-   entries look like:
-   [((name <rpc-name>)(kind <e.g. One_way>)(versions (1 2 3)))]
-   When one name has multiple shapes, it gets multiple entries (and the version lists
-   don't overlap). *)
+(* we want a sexp that is useful for debugging. We produce a sexp where the entries look
+   like: [((name <rpc-name>)(kind <e.g. One_way>)(versions (1 2 3)))] When one name has
+   multiple shapes, it gets multiple entries (and the version lists don't overlap). *)
 let sexp_of_t { descriptions; digests } =
   let with_digest =
     match digests with

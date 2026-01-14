@@ -3,13 +3,12 @@ open Async_rpc.Rpc
 
 (* The test in this module is pretty silly;
 
-   It mainly ensures that we aren't minting a new type-id every time that
-   we call the type_id getter-functions.  If the functions were implemented
-   incorrectly, [same_witness_exn] would crash.
+   It mainly ensures that we aren't minting a new type-id every time that we call the
+   type_id getter-functions. If the functions were implemented incorrectly,
+   [same_witness_exn] would crash.
 
-   Our type-ids also have been given names, which can be helpful for
-   debugging, so the test prints out the names that have been given to
-   these ids. *)
+   Our type-ids also have been given names, which can be helpful for debugging, so the
+   test prints out the names that have been given to these ids. *)
 
 let test_type_id_similarity t ~f =
   let T = Type_equal.Id.same_witness_exn (f t) (f t) in

@@ -420,8 +420,7 @@ module%bench [@name "query metadata"] _ = struct
     in
     let buf_len =
       payload_sizes_bytes + 64
-      (* 64 bytes should be enough for the rest of
-         the binprotted query *)
+      (* 64 bytes should be enough for the rest of the binprotted query *)
     in
     bench_helper query ~buf_len
   ;;

@@ -407,8 +407,8 @@ module%test [@name "multi-key tests"] _ = struct
   ;;
 
   let%expect_test "hook with metadata payload too large (>1 KiB)" =
-    (* The default [max_metadata_size_per_key] when creating a [Connection.t] is 1 KiB. This
-       test creates a query metadata value larger than the limit the [truncate]
+    (* The default [max_metadata_size_per_key] when creating a [Connection.t] is 1 KiB.
+       This test creates a query metadata value larger than the limit the [truncate]
        function. We expect only the [metadata_key_1] entry to be truncated to bring the
        metadata payload size below the limit. *)
     let metadata_with_context =
@@ -421,8 +421,8 @@ module%test [@name "multi-key tests"] _ = struct
         ~implementations:
           (implementations_with_multiple_metadata
              ~payload_callback:(fun ~payload_1 ~payload_2 ->
-               (* Here, we expect the metadata entry for [metadata_key_1] to be
-                  truncated to 1 KiB, while the other metadata fields are preserved.*)
+               (* Here, we expect the metadata entry for [metadata_key_1] to be truncated
+                  to 1 KiB, while the other metadata fields are preserved. *)
                [%test_result: int]
                  (Option.value_exn payload_1 |> String.length)
                  ~expect:1024;
@@ -448,8 +448,8 @@ module%test [@name "multi-key tests"] _ = struct
   ;;
 
   let%expect_test "dispatch with metadata payload too large (>1 KiB)" =
-    (* The default [max_metadata_size_per_key] when creating a [Connection.t] is 1 KiB. This
-       test creates a query metadata value larger than the limit the [truncate]
+    (* The default [max_metadata_size_per_key] when creating a [Connection.t] is 1 KiB.
+       This test creates a query metadata value larger than the limit the [truncate]
        function. We expect only the [metadata_key_1] entry to be truncated to bring the
        metadata payload size below the limit. *)
     let metadata_with_context =
@@ -468,8 +468,8 @@ module%test [@name "multi-key tests"] _ = struct
         ~implementations:
           (implementations_with_multiple_metadata
              ~payload_callback:(fun ~payload_1 ~payload_2 ->
-               (* Here, we expect the metadata entry for [metadata_key_1] to be
-                  truncated to 1 KiB, while the other metadata fields are preserved.*)
+               (* Here, we expect the metadata entry for [metadata_key_1] to be truncated
+                  to 1 KiB, while the other metadata fields are preserved. *)
                [%test_result: int]
                  (Option.value_exn payload_1 |> String.length)
                  ~expect:1024;

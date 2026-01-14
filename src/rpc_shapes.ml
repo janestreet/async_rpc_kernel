@@ -44,7 +44,7 @@ module Stable = struct
       module V1 = struct
         type t = Bin_shape.Digest.t [@@deriving compare ~localize, globalize, sexp]
 
-        let%template[@mode local] equal t1 t2 = [%compare_local.equal: t] t1 t2
+        let%template[@mode local] equal t1 t2 = ([%compare.equal: t] [@mode local]) t1 t2
         let hash_fold_t s t = Core.Md5.hash_fold_t s (Bin_shape.Digest.to_md5 t)
 
         include

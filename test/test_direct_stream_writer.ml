@@ -22,7 +22,7 @@ let rpc_with_pushback =
     ~version:1
     ~bin_query:[%bin_type_class: unit]
     ~bin_response:[%bin_type_class: Bigstring.Stable.V1.t]
-    ~bin_error:[%bin_type_class: Nothing.t]
+    ~bin_error:[%bin_type_class: Error.Stable.V2.t]
     ~client_pushes_back:()
     ()
 ;;
@@ -62,8 +62,8 @@ let with_server_and_client group ~rpc ~f =
     Rpc.Pipe_rpc.Direct_stream_writer.Group.add_exn group writer)
 ;;
 
-let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes determined \
-                 if the connection is closed"
+let%expect_test "[Direct_stream_writer.Expert.schedule_write] becomes determined if the \
+                 connection is closed"
   =
   let saved_writer = ref None in
   let scheduled_response = Ivar.create () in
@@ -100,7 +100,7 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
       let%bind () = Rpc.Pipe_rpc.Direct_stream_writer.closed writer in
       let%bind scheduled_response = Ivar.read scheduled_response in
       print_s ([%sexp_of: unit Deferred.t option] scheduled_response);
-      [%expect {| (Empty) |}];
+      [%expect {| ((Full ())) |}];
       let%bind reason = Rpc.Pipe_rpc.close_reason metadata in
       print_s ([%sexp_of: Rpc.Pipe_close_reason.t] reason);
       [%expect
@@ -113,10 +113,9 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] never becomes dete
       return ())
 ;;
 
-let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped before \
+let%expect_test "[Direct_stream_writer.Expert.schedule_write] works if stopped before \
                  the implementation completes"
   =
-  Dynamic.set_root Backtrace.elide true;
   let%map () =
     with_server_and_client'
       ~rpc:rpc_with_pushback
@@ -134,25 +133,75 @@ let%expect_test "[Direct_stream_writer.Expert.schedule_write] raises if stopped 
         in
         Rpc.Pipe_rpc.Direct_stream_writer.close writer)
       ~f:(fun (_ : (Socket.Address.Inet.t, int) Tcp.Server.t) connection ->
-        let%bind (_ : Bigstring.t Pipe.Reader.t), (_ : Rpc.Pipe_rpc.Metadata.t) =
+        let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
           Rpc.Pipe_rpc.dispatch_exn rpc_with_pushback connection ()
         in
-        let%bind () =
-          Rpc.Connection.close_reason connection ~on_close:`finished
-          >>| [%sexp_of: Info.t]
-          >>| print_s
-        in
-        [%expect
-          {|
-          (("Connection closed by remote side:"
-            ("exn raised in RPC connection loop"
-             (monitor.ml.Error ("Ivar.fill_exn called on full ivar" (t (Full _)))
-              ("<backtrace elided in test>" "Caught by monitor RPC connection loop"))))
-           (connection_description ("Client connected via TCP" 0.0.0.0:PORT)))
-          |}];
+        let%bind result = Pipe.read pipe in
+        (match result with
+         | `Eof -> raise_s [%sexp "Got EOF unexpectedly"]
+         | `Ok data ->
+           print_endline [%string "Got response of size %{Bigstring.length data#Int}"]);
+        let%bind result = Pipe.read pipe in
+        (match result with
+         | `Ok _ -> raise_s [%sexp "Got more data unexpectedly"]
+         | `Eof -> print_endline "Got EOF as expected");
         return ())
   in
-  Dynamic.set_root Backtrace.elide false
+  ();
+  [%expect
+    {|
+    Got response of size 1000
+    Got EOF as expected
+    |}]
+;;
+
+let%expect_test "[Expert.schedule_write] done_ ivar filled on init error" =
+  let flushed = ref None in
+  let implementation =
+    Rpc.Pipe_rpc.implement_direct rpc_with_pushback (fun () () writer ->
+      let buf = Bigstring.create 100 in
+      (match
+         Rpc.Pipe_rpc.Direct_stream_writer.Expert.schedule_write
+           writer
+           ~buf
+           ~pos:0
+           ~len:100
+       with
+       | `Closed -> raise_s [%sexp "writer is closed"]
+       | `Flushed { global = d } -> flushed := Some d);
+      Deferred.Or_error.error_string "init error")
+  in
+  let implementations =
+    Rpc.Implementations.create_exn
+      ~implementations:[ implementation ]
+      ~on_unknown_rpc:`Raise
+      ~on_exception:Log_on_background_exn
+  in
+  let%bind server =
+    Rpc.Connection.serve
+      ~implementations
+      ~initial_connection_state:(fun (_ : [< Socket.Address.t ]) (_ : Rpc.Connection.t) ->
+        ())
+      ~where_to_listen:Tcp.Where_to_listen.of_port_chosen_by_os
+      ()
+  in
+  let%bind () =
+    Rpc.Connection.with_client
+      (Tcp.Where_to_connect.of_inet_address (Tcp.Server.listening_on_address server))
+      (fun connection -> Rpc.Pipe_rpc.dispatch rpc_with_pushback connection () >>| ok_exn)
+    >>| Or_error.of_exn_result
+    >>| ok_exn
+    >>| Or_error.iter_error ~f:(fun error -> print_s [%sexp (error : Error.t)])
+  in
+  [%expect {| "init error" |}];
+  let () =
+    match !flushed with
+    | None -> raise_s [%message "[flushed] was not filled"]
+    | Some d ->
+      (* This would fail if the done_ ivar wasn't filled on init error *)
+      Expect_test_helpers_core.require (Deferred.is_determined d)
+  in
+  Tcp.Server.close server
 ;;
 
 let%expect_test "[Direct_stream_writer.Group]: [send_last_value_on_add] sends values \
