@@ -67,11 +67,13 @@ end
 let connection_pair_of_transports ~client_transport ~server_transport =
   let%map client_conn =
     Async_rpc_kernel.Rpc.Connection.create
+      ~heartbeat_config:Async_rpc_kernel.Rpc.Connection.Heartbeat_config.never_heartbeat
       ~connection_state:(fun _ -> ())
       client_transport
     >>| Result.ok_exn
   and server_conn =
     Async_rpc_kernel.Rpc.Connection.create
+      ~heartbeat_config:Async_rpc_kernel.Rpc.Connection.Heartbeat_config.never_heartbeat
       ~implementations:
         (Rpc.Implementations.create_exn
            ~implementations
@@ -87,27 +89,6 @@ let connection_pair_of_transports ~client_transport ~server_transport =
 let create_connection_pair_with_pipe_transport () =
   let client_transport, server_transport =
     Async_rpc_kernel.Pipe_transport.(create_pair Kind.string)
-  in
-  connection_pair_of_transports ~client_transport ~server_transport
-;;
-
-let create_connection_pair_with_async_transport () =
-  let max_message_size = 16 lsl 20 in
-  let%bind `Reader client_reader_fd, `Writer server_writer_fd =
-    Unix.pipe (Info.of_string "client->server")
-  in
-  let%bind `Reader server_reader_fd, `Writer client_writer_fd =
-    Unix.pipe (Info.of_string "server->client")
-  in
-  let client_reader = Reader.create client_reader_fd in
-  let client_writer = Writer.create client_writer_fd in
-  let server_reader = Reader.create server_reader_fd in
-  let server_writer = Writer.create server_writer_fd in
-  let client_transport =
-    Rpc.Transport.of_reader_writer ~max_message_size client_reader client_writer
-  in
-  let server_transport =
-    Rpc.Transport.of_reader_writer ~max_message_size server_reader server_writer
   in
   connection_pair_of_transports ~client_transport ~server_transport
 ;;
