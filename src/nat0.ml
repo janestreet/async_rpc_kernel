@@ -31,7 +31,11 @@ module Option = struct
 
     let to_int_exn (t : t) = (t :> int)
     let of_int_exn = of_int_exn
-    let sexp_of_t t = to_int_exn t |> [%sexp_of: int]
+
+    let%template[@alloc a = (heap, stack)] sexp_of_t t =
+      (to_int_exn t |> ([%sexp_of: int] [@alloc a])) [@exclave_if_stack a]
+    ;;
+
     let t_of_sexp s = [%of_sexp: int] s |> of_int_exn
     let bin_shape_uuid = Bin_shape.Uuid.of_string "9d113bde-ad07-11ef-bec1-aa19661992c4"
   end

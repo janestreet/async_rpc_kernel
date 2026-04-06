@@ -6,13 +6,13 @@ bug-reports: "https://github.com/janestreet/async_rpc_kernel/issues"
 dev-repo: "git+https://github.com/janestreet/async_rpc_kernel.git"
 doc: "https://ocaml.janestreet.com/ocaml-core/latest/doc/async_rpc_kernel/index.html"
 license: "MIT"
+x-maintenance-intent: ["(latest)"]
 build: [
   ["dune" "build" "-p" name "-j" jobs]
 ]
 depends: [
   "ocaml" {>= "5.1.0"}
   "async_kernel"
-  "base"
   "bin_prot"
   "core"
   "core_extended"

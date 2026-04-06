@@ -100,7 +100,7 @@ module Make_benches (C : Config) = struct
       fun () ->
         Thread_safe.block_on_async_exn (fun () ->
           match%bind Rpc.Pipe_rpc.dispatch Bench_rpc_implementations.pipe_rpc conn 1 with
-          | Error _ -> failwith "Dispatch failed"
+          | Error e -> raise_s [%message "Dispatch failed" (e : Error.t)]
           | Ok (Error ()) -> failwith "RPC error"
           | Ok (Ok (reader, _metadata)) ->
             let%bind value = Pipe.read reader in
@@ -120,7 +120,7 @@ module Make_benches (C : Config) = struct
           match%bind
             Rpc.Pipe_rpc.dispatch Bench_rpc_implementations.pipe_rpc conn num_updates
           with
-          | Error _ -> failwith "Dispatch failed"
+          | Error e -> raise_s [%message "Dispatch failed" (e : Error.t)]
           | Ok (Error ()) -> failwith "RPC error"
           | Ok (Ok (reader, _metadata)) ->
             let%bind values = Pipe.to_list reader in

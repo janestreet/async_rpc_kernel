@@ -14,4 +14,3 @@ module Connection_pair : sig
 end
 
 val create_connection_pair_with_pipe_transport : unit -> Connection_pair.t Deferred.t
-val create_connection_pair_with_async_transport : unit -> Connection_pair.t Deferred.t

@@ -2,9 +2,8 @@
  (name async_rpc_kernel_test)
  (preprocess
   (pps ppx_jane))
- (libraries async async_kernel async.async_rpc async_rpc_kernel
-   bin_prot.shape core_kernel.bus core core_unix async_kernel.eager_deferred
-   expect_test_helpers_async expect_test_helpers_core
-   patdiff.expect_test_patdiff ocaml-compiler-libs.common
-   pipe_with_writer_error protocol_version_header vec
+ (libraries async async.async_rpc async_rpc_kernel bin_prot.shape
+   core_kernel.bus core async_kernel.eager_deferred expect_test_helpers_async
+   expect_test_helpers_core patdiff.expect_test_patdiff
+   ocaml-compiler-libs.common pipe_with_writer_error vec
    core_kernel.weak_pointer))
