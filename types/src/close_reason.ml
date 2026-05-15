@@ -5,7 +5,7 @@ module Closer = struct
     | By_unknown
     | By_local
     | By_remote
-  [@@deriving sexp_of]
+  [@@deriving sexp_of ~portable]
 end
 
 module Protocol = struct
@@ -16,11 +16,12 @@ module Protocol = struct
         | Unspecified
         | Connection_limit_reached
         | Connection_validation_failed
-      [@@deriving sexp, compare, variants, globalize]
+      [@@deriving sexp ~portable, compare, variants, globalize]
     end
 
     include T
-    include Flexible_sexp.Variant.Stable.Make.V1 (T) ()
+
+    [%%template include Flexible_sexp.Variant.Stable.Make.V1 [@mode portable] (T) ()]
 
     let%expect_test "Kind is stable unless a new variant is added" =
       print_endline [%bin_digest: t];
@@ -33,7 +34,7 @@ module Protocol = struct
     ; debug_info : Info_with_local_bin_io.t option
     ; user_reason : Info_with_local_bin_io.t option
     }
-  [@@deriving sexp_of, compare]
+  [@@deriving sexp_of ~portable, compare]
 
   let create ?(kind = Kind.Unspecified) ?debug_info ?user_reason () =
     { debug_info; user_reason; kind }
@@ -45,17 +46,17 @@ module Protocol = struct
       ; debug_info : Info_with_local_bin_io.t option
       ; user_reason : Info_with_local_bin_io.t option
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of ~portable]
   end
 
   let info_of_t t =
     let { kind; debug_info; user_reason } = t in
     let body_info =
       match debug_info, user_reason with
-      | None, None -> Info.of_string ""
+      | None, None -> Info.Portable.of_string ""
       | Some info, None | None, Some info -> info
       | Some debug_info, Some user_reason ->
-        Info.create_s
+        Info.Portable.create_s
           [%message
             ""
               (debug_info : Info_with_local_bin_io.t)
@@ -64,11 +65,11 @@ module Protocol = struct
     match kind with
     | Unspecified -> body_info
     | kind ->
-      Info.create_s
+      Info.Portable.create_s
         [%message "" ~_:(kind : Kind.t) ~_:(body_info : Info_with_local_bin_io.t)]
   ;;
 
-  let sexp_of_t t = Info.sexp_of_t (info_of_t t)
+  let sexp_of_t t = Info.Portable.sexp_of_t (info_of_t t)
 
   let binable_of_t ({ kind; debug_info; user_reason } : t) : Binable.t =
     { kind = Kind.sexp_of_t kind; debug_info; user_reason }
@@ -82,25 +83,25 @@ end
 type t =
   { closer : Closer.t
   ; reason : Protocol.t
-  ; connection_description : Info.t
+  ; connection_description : Info.Portable.t
   }
 
 let aux_info closer reason =
   let info = Protocol.info_of_t reason in
   match closer with
   | Closer.By_unknown -> info
-  | By_local -> Info.tag info ~tag:"Connection closed by local side:"
-  | By_remote -> Info.tag info ~tag:"Connection closed by remote side:"
+  | By_local -> Info.Portable.tag info ~tag:"Connection closed by local side:"
+  | By_remote -> Info.Portable.tag info ~tag:"Connection closed by remote side:"
 ;;
 
 let info_of_t { closer; reason; connection_description } =
-  Info.of_list
+  Info.Portable.of_list
     [ aux_info closer reason
-    ; Info.tag connection_description ~tag:"connection_description"
+    ; Info.Portable.tag connection_description ~tag:"connection_description"
     ]
 ;;
 
-let sexp_of_t t = Info.sexp_of_t (info_of_t t)
+let sexp_of_t t = Info.Portable.sexp_of_t (info_of_t t)
 
 module For_testing = struct
   module Kind_with_extra_variant = struct
@@ -118,8 +119,8 @@ let%expect_test "kind serializes flexibly" =
   let kind = For_testing.Kind_with_extra_variant.sexp_of_t Extra_variant in
   let binable =
     { Protocol.Binable.kind
-    ; debug_info = Some (Info.of_string "debug info")
-    ; user_reason = Some (Info.of_string "user reason")
+    ; debug_info = Some (Info.Portable.of_string "debug info")
+    ; user_reason = Some (Info.Portable.of_string "user reason")
     }
   in
   let deserialized_close_reason : Protocol.t = Protocol.t_of_binable binable in

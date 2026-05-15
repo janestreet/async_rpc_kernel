@@ -1,4 +1,5 @@
 open Core
+open! Import
 
 type _ t =
   | Only_on_exn : _ t
@@ -64,3 +65,7 @@ module Private = struct
     | Custom _ -> Is_error (unstage (as_function errors))
   ;;
 end
+
+let is_error (type r) (t : r t) (response : r) : bool =
+  unstage (Private.as_function t) response
+;;

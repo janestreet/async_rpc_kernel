@@ -1,4 +1,5 @@
 open! Core
+open! Import
 
 type t =
   { negotiated_protocol_version : int Set_once.t

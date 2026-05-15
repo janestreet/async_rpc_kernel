@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 open Protocol
 
 (** The types of the [Implementation] and [Implementations] modules, which have a

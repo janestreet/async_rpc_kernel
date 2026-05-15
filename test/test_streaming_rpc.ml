@@ -503,7 +503,9 @@ module%test [@name "[leave_open_on_exception]"] _ = struct
             schedules
         with
         | Ok (Ok pipe_with_writer_error) ->
-          let peek_result = Pipe_with_writer_error.peek pipe_with_writer_error in
+          let peek_result =
+            Pipe_with_writer_error.Early_error_bug.peek pipe_with_writer_error
+          in
           print_s
             [%message
               "Dispatch succeeded" (peek_result : (string option, Error.t) result)]

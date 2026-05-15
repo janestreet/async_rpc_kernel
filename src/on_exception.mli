@@ -1,5 +1,6 @@
 open! Core
 open! Async_kernel
+open! Import
 
 module Exception_type : sig
   type t =
@@ -33,6 +34,9 @@ type t =
       monitor and shut down the connection, but will not propagate further. If you'd like
       the connection to propagate elsewhere, you should use [Monitor.send_exn] with a
       different monitor. *)
+  | Log
+  (** Logs the exception regardless of whether it was raised before or after the
+      implementation returned. *)
   | Log_on_background_exn
   (** Logs the exception if it was raised after the implementation returned. *)
   | Close_connection

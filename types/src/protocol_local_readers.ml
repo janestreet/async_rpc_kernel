@@ -328,8 +328,8 @@ module Message = struct
     | Response_v1 of 'a Response.V1.needs_length
     | Query_v2 of 'a Query.V2.needs_length
     | Metadata of Connection_metadata.V1.t
-    | Close_reason of Info.t
-    | Close_reason_duplicated of Info.t
+    | Close_reason of Info.Portable.t
+    | Close_reason_duplicated of Info.Portable.t
     | Metadata_v2 of Connection_metadata.V2.t
     | Response_v2 of 'a Response.V2.needs_length
     | Query_v3 of 'a Query.V3.needs_length
@@ -354,11 +354,11 @@ module Message = struct
       let metadata = Connection_metadata.V1.bin_read_t__local buf ~pos_ref in
       Metadata metadata
     | 5 ->
-      let close_reason = Info.bin_read_t buf ~pos_ref in
-      Close_reason ([%globalize: Core.Info.t] close_reason)
+      let close_reason = Info.Portable.bin_read_t buf ~pos_ref in
+      Close_reason ([%globalize: Core.Info.Portable.t] close_reason)
     | 6 ->
-      let close_reason = Info.bin_read_t buf ~pos_ref in
-      Close_reason_duplicated ([%globalize: Core.Info.t] close_reason)
+      let close_reason = Info.Portable.bin_read_t buf ~pos_ref in
+      Close_reason_duplicated ([%globalize: Core.Info.Portable.t] close_reason)
     | 7 ->
       let metadata = Connection_metadata.V2.bin_read_t__local buf ~pos_ref in
       Metadata_v2 metadata

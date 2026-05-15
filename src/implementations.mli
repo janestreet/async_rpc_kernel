@@ -2,6 +2,7 @@
 
 open! Core
 open! Async_kernel
+open! Import
 open Protocol
 
 type 'a t
@@ -91,7 +92,7 @@ end
 val instantiate
   :  'a t
   -> menu:Menu.t option
-  -> connection_description:Info.t
+  -> connection_description:Info.Portable.t
   -> connection_close_started:Close_reason.t Deferred.t
   -> connection_state:'a
   -> writer:Protocol_writer.t

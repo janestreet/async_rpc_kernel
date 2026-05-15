@@ -1,5 +1,6 @@
 open! Core
 open! Async_kernel
+open! Import
 
 type 'a t =
   { header_prefix : string (* Bin_protted constant prefix of the message *)

@@ -61,29 +61,31 @@ let dispatch_expert ~client ~payload =
 
 let connection_test_id ~client ~server ~s_to_c ~c_to_s =
   print_headers ~s_to_c ~c_to_s;
-  let%bind server_id_from_client = Rpc.Connection.peer_identification client in
-  let%map client_id_from_server = Rpc.Connection.peer_identification server in
+  let server_id_from_client = Rpc.Connection.peer_identification client in
+  let client_id_from_server = Rpc.Connection.peer_identification server in
   print_payload_messages_bidirectional ~s_to_c ~c_to_s;
   print_s
     [%message
       (server_id_from_client : Bigstring.t option)
-        (client_id_from_server : Bigstring.t option)]
+        (client_id_from_server : Bigstring.t option)];
+  return ()
 ;;
 
 let connection_test_menu ~client ~server ~s_to_c:_ ~c_to_s:_ =
-  let%bind client_menu = Rpc.Connection.peer_menu server >>| ok_exn in
-  let%map server_menu = Rpc.Connection.peer_menu client >>| ok_exn in
-  match client_menu, server_menu with
-  | None, None -> print_s [%message "No menus received"]
-  | Some client_menu, Some server_menu ->
-    print_s [%message (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t)];
-    print_s [%message (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t)]
-  | _ ->
-    raise_s
-      [%message
-        "Only one of the client or server menu was received"
-          (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)
-          (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)]
+  let client_menu = Rpc.Connection.peer_menu server in
+  let server_menu = Rpc.Connection.peer_menu client in
+  (match client_menu, server_menu with
+   | None, None -> print_s [%message "No menus received"]
+   | Some client_menu, Some server_menu ->
+     print_s [%message (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t)];
+     print_s [%message (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t)]
+   | _ ->
+     raise_s
+       [%message
+         "Only one of the client or server menu was received"
+           (client_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)
+           (server_menu : Async_rpc_kernel.Menu.With_digests_in_sexp.t option)]);
+  return ()
 ;;
 
 let connection_test ?provide_rpc_shapes () ~server_header ~client_header ~f
@@ -821,10 +823,12 @@ let%expect_test "V3 identification string addition" =
 let%expect_test "V4 close reason addition" =
   let connection_test_with_close ~client ~server ~s_to_c ~c_to_s =
     print_headers ~s_to_c ~c_to_s;
-    let%bind server_id_from_client = Rpc.Connection.peer_identification client in
-    let%bind client_id_from_server = Rpc.Connection.peer_identification server in
+    let server_id_from_client = Rpc.Connection.peer_identification client in
+    let client_id_from_server = Rpc.Connection.peer_identification server in
     let%map () =
-      Rpc.Connection.close client ~reason:(Info.create_s [%message "test reason"])
+      Rpc.Connection.close
+        client
+        ~reason:(Info.Portable.create_s [%message "test reason"])
     in
     print_payload_messages_bidirectional ~s_to_c ~c_to_s;
     print_s
@@ -981,12 +985,12 @@ let%expect_test "V4 close reason addition" =
 let%expect_test "V9 close started addition" =
   let connection_test_with_close ~client ~server ~s_to_c ~c_to_s =
     print_headers ~s_to_c ~c_to_s;
-    let%bind server_id_from_client = Rpc.Connection.peer_identification client in
-    let%bind client_id_from_server = Rpc.Connection.peer_identification server in
+    let server_id_from_client = Rpc.Connection.peer_identification client in
+    let client_id_from_server = Rpc.Connection.peer_identification server in
     let%map () =
       Rpc.Connection.close
         client
-        ~reason:(Info.create_s [%message "test reason"])
+        ~reason:(Info.Portable.create_s [%message "test reason"])
         ~wait_for_open_queries_timeout:(Time_ns.Span.of_sec 0.0)
     in
     print_payload_messages_bidirectional ~s_to_c ~c_to_s;
@@ -2077,10 +2081,12 @@ let%expect_test "regression test: writer closing between handshake and metadata 
 let%expect_test "V10 Close_reason_v2 addition" =
   let connection_test_with_close ~client ~server ~s_to_c ~c_to_s =
     print_headers ~s_to_c ~c_to_s;
-    let%bind server_id_from_client = Rpc.Connection.peer_identification client in
-    let%bind client_id_from_server = Rpc.Connection.peer_identification server in
+    let server_id_from_client = Rpc.Connection.peer_identification client in
+    let client_id_from_server = Rpc.Connection.peer_identification server in
     let%map () =
-      Rpc.Connection.close client ~reason:(Info.create_s [%message "test reason"])
+      Rpc.Connection.close
+        client
+        ~reason:(Info.Portable.create_s [%message "test reason"])
     in
     print_payload_messages_bidirectional ~s_to_c ~c_to_s;
     print_s

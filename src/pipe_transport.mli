@@ -1,5 +1,6 @@
 open! Core
 open Async_kernel
+open! Import
 
 module Kind : sig
   type 'a t

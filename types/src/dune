@@ -1,0 +1,7 @@
+(library
+ (name async_rpc_kernel_types)
+ (public_name async_rpc_kernel.types)
+ (preprocess
+  (pps ppx_jane -require-template-extension))
+ (libraries bin_prot.shape core flexible_sexp core_extended.immediate_kernel
+   protocol_version_header sexplib))

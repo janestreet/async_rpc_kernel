@@ -34,7 +34,7 @@ module Stable = struct
     end
 
     include T
-    include Comparable.V1.Make (T)
+    include Comparable.V1.With_stable_witness.Make (T)
   end
 end
 

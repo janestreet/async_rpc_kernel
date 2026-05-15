@@ -29,7 +29,7 @@ module%test [@name "Proxy Server"] _ = struct
       ~on_unknown_rpc:
         (`Expert
           (fun to_ ~rpc_tag ~version ~metadata:_ responder query ~pos ~len ->
-            let%bind peer_identification = Rpc.Connection.peer_identification to_ in
+            let peer_identification = Rpc.Connection.peer_identification to_ in
             print_s
               [%message
                 "Proxying rpc"

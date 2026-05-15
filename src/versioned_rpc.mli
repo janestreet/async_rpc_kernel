@@ -56,6 +56,7 @@
 
 open! Core
 open! Async_kernel
+open! Import
 open Rpc
 
 (** Over-the-network discovery of rpc names and versions supported by a callee.

@@ -365,6 +365,7 @@ let with_rpc_server_connection
 let establish_connection
   ?(heartbeat_timeout_style =
     Async_rpc_kernel.Rpc.Connection.Heartbeat_timeout_style.Time_between_heartbeats_legacy)
+  ?implementations
   transport
   time_source
   description
@@ -377,6 +378,7 @@ let establish_connection
   (* Prints Time_ns in UTC *)
   let conn =
     Async_rpc_kernel.Rpc.Connection.create
+      ?implementations
       ~connection_state:(fun _ -> ())
       ~heartbeat_config:
         (Async_rpc_kernel.Rpc.Connection.Heartbeat_config.create
@@ -398,8 +400,8 @@ let establish_connection
              [%message
                "connection closed"
                  ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-                 (description : Info.t)
-                 (reason : Info.t)])
+                 (description : Info.Portable.t)
+                 (reason : Info.Portable.t)])
     in
     let () =
       Async_rpc_kernel.Rpc.Connection.add_heartbeat_callback conn (fun () ->
@@ -408,7 +410,7 @@ let establish_connection
              [%message
                "received heartbeat"
                  ~now:(Synchronous_time_source.now time_source : Time_ns.t)
-                 (description : Info.t)]))
+                 (description : Info.Portable.t)]))
     in
     ());
   conn >>| Result.ok_exn
@@ -421,6 +423,8 @@ let setup_server_and_client_connection
   ?(server_heartbeat_timeout = heartbeat_timeout)
   ?(server_heartbeat_every = heartbeat_every)
   ?(server_heartbeat_timeout_style = heartbeat_timeout_style)
+  ?server_implementations
+  ?client_implementations
   ()
   =
   let server_time_source = Synchronous_time_source.create ~now:Time_ns.epoch () in
@@ -430,18 +434,20 @@ let setup_server_and_client_connection
   in
   let server_conn =
     establish_connection
+      ?implementations:server_implementations
       server_transport
       (Synchronous_time_source.read_only server_time_source)
-      (Info.of_string "server")
+      (Info.Portable.of_string "server")
       ~heartbeat_timeout:server_heartbeat_timeout
       ~heartbeat_every:server_heartbeat_every
       ~heartbeat_timeout_style:server_heartbeat_timeout_style
   in
   let client_conn =
     establish_connection
+      ?implementations:client_implementations
       client_transport
       (Synchronous_time_source.read_only client_time_source)
-      (Info.of_string "client")
+      (Info.Portable.of_string "client")
       ~heartbeat_timeout
       ~heartbeat_every
       ~heartbeat_timeout_style

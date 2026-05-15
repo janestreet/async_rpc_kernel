@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 
 module Error_mode : sig
   type _ t =

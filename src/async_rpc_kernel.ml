@@ -1,14 +1,14 @@
 module Rpc = Rpc
 module Versioned_rpc = Versioned_rpc
-module Menu = Menu
+module Menu = Async_rpc_kernel_types.Menu
 module Persistent_connection = Persistent_connection
 module Pipe_transport = Pipe_transport
 module Rpc_error = Rpc_error
 module Rpc_result = Rpc_result
-module Rpc_shapes = Rpc_shapes
-module Tracing_event = Tracing_event
+module Rpc_shapes = Async_rpc_kernel_types.Rpc_shapes
+module Tracing_event = Async_rpc_kernel_types.Tracing_event
 module Or_not_authorized = Or_not_authorized
-module Close_reason = Close_reason
+module Close_reason = Async_rpc_kernel_types.Close_reason
 
 open struct
   module Rpc_metadata_private = Rpc_metadata
@@ -28,13 +28,13 @@ module Async_rpc_kernel_private = struct
   module Connection : Connection_intf.S_private with type t = Rpc.Connection.t =
     Connection
 
-  module Handshake_error = Handshake_error
-  module Header = Header
-  module Protocol = Protocol
-  module Protocol_local_readers = Protocol_local_readers
+  module Handshake_error = Async_rpc_kernel_types.Handshake_error
+  module Header = Async_rpc_kernel_types.Header
+  module Protocol = Async_rpc_kernel_types.Protocol
+  module Protocol_local_readers = Async_rpc_kernel_types.Protocol_local_readers
   module Transport = Transport
   module Util = Util
-  module Version_dependent_feature = Version_dependent_feature
+  module Version_dependent_feature = Async_rpc_kernel_types.Version_dependent_feature
   module Writer_with_length = Writer_with_length
 
   let default_handshake_timeout = Connection.default_handshake_timeout

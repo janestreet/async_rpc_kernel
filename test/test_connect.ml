@@ -47,7 +47,7 @@ let%expect_test "close immediately after handshake (with close message sent)" =
   Mock_peer.write_message
     t
     Protocol.Message.bin_writer_nat0_t
-    (Protocol.Message.Close_reason (Info.create_s [%message "immediate close"]));
+    (Protocol.Message.Close_reason (Info.Portable.create_s [%message "immediate close"]));
   let%map () =
     match%bind Mock_peer.connect t with
     | Ok conn -> Rpc.Connection.close_finished conn

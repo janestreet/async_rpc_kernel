@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 module Time_ns = Core_private.Time_ns_alternate_sexp
 module P = Protocol
 module Reader = Transport.Reader
@@ -9,8 +10,7 @@ module Close_reason = Close_reason
 module Peer_metadata = struct
   type t =
     | Unsupported
-    | Expected of
-        (Protocol.Connection_metadata.V2.t, [ `Connection_closed ]) Result.t Ivar.t
+    | Metadata of Protocol.Connection_metadata.V2.t
   [@@deriving sexp_of]
 end
 
@@ -131,17 +131,17 @@ module Private = struct
 end
 
 type t =
-  { description : Info.t
+  { description : Info.Portable.t
   ; heartbeat_config : Heartbeat_config.Runtime.t
   ; mutable heartbeat_callbacks : (unit -> unit) array
-  ; mutable last_seen_alive : Time_ns.t
+  ; last_seen_alive : Time_ns.t Atomic.t
   ; max_metadata_size_per_key : Byte_units.t
   ; reader : Reader.t
   ; writer : Protocol_writer.t
   ; open_queries :
       (P.Query_id.t, Description.t * (Response_handler.t[@sexp.opaque])) Hashtbl.t
   ; close_started : Close_reason.t Ivar.t
-  ; close_started_info : Info.t Deferred.t
+  ; close_started_info : Info.Portable.t Deferred.t
   ; close_finished : unit Ivar.t
       (* There's a circular dependency between connections and their implementation
          instances (the latter depends on the connection state, which is given access to
@@ -179,16 +179,18 @@ type t =
   ; reader_drain_timeout : Time_ns.Span.t
   ; heartbeat_timeout_override : Time_ns.Span.t option
   ; heartbeat_timeout_style : Heartbeat_timeout_style.t
-  ; mutable sent_heartbeats_without_receiving_any : int
+  ; mutable sent_heartbeats_without_receiving_any_messages : int
   }
 [@@deriving sexp_of]
 
 let sexp_of_t_hum_writer t =
   [%sexp
-    { description : Info.t = t.description; writer : Protocol_writer.writer = t.writer }]
+    { description : Info.Portable.t = t.description
+    ; writer : Protocol_writer.writer = t.writer
+    }]
 ;;
 
-let description t = t.description
+let description t = Info.of_portable t.description
 let is_closing t = Ivar.is_full t.close_started
 
 let is_closed t =
@@ -203,45 +205,17 @@ let is_closed t =
   is_closing t || Ivar.is_full t.received_close_started
 ;;
 
-let map_metadata t ~kind_of_metadata ~f =
+let bind_peer_metadata_option t ~f =
   match Set_once.get t.peer_metadata with
-  | Some Unsupported -> f (Error `Unsupported)
-  | None -> f (Error `No_handshake)
-  | Some (Expected result) ->
-    (match%bind.Eager_deferred Ivar.read result with
-     | Ok md -> f (Ok md)
-     | Error `Connection_closed ->
-       f
-         (Error
-            (`Closed
-              [%lazy_message
-                "Connection closed before we could get peer metadata"
-                  ~trying_to_get:kind_of_metadata
-                  ~connection_description:(t.description : Info.t)
-                  ~close_reason:(Deferred.peek t.close_started_info : Info.t option)])))
+  | None | Some Unsupported -> None
+  | Some (Metadata md) -> f md
 ;;
 
 let peer_identification t =
-  map_metadata t ~kind_of_metadata:"peer_identification" ~f:(function
-    | Ok metadata -> return metadata.identification
-    | Error `Unsupported | Error `No_handshake | Error (`Closed (_ : Sexp.t lazy_t)) ->
-      return None)
+  bind_peer_metadata_option t ~f:P.Connection_metadata.V2.identification
 ;;
 
-let peer_menu t =
-  map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
-    | Ok metadata -> return (Ok metadata.menu)
-    | Error `Unsupported | Error `No_handshake -> return (Ok None)
-    | Error (`Closed info) -> return (Error (Error.of_lazy_sexp info)))
-;;
-
-let peer_menu' t =
-  map_metadata t ~kind_of_metadata:"peer_menu" ~f:(function
-    | Ok metadata -> return (Ok metadata.menu)
-    | Error `Unsupported | Error `No_handshake -> return (Ok None)
-    | Error (`Closed (_ : Sexp.t lazy_t)) -> return (Error Rpc_error.Connection_closed))
-;;
-
+let peer_menu t = bind_peer_metadata_option t ~f:P.Connection_metadata.V2.menu
 let my_menu t = t.my_menu
 
 let writer t =
@@ -368,19 +342,6 @@ let send_query_with_registered_response_handler
   result
 ;;
 
-let peer_menu_of_connection t =
-  match Set_once.get t.peer_metadata with
-  | Some (Peer_metadata.Expected ivar) ->
-    (* This peek should always give back a [Some] since the peer metadata is now filled
-       during the handshake *)
-    (match Ivar.peek ivar with
-     | Some (Ok metadata) -> metadata.menu
-     | Some (Error `Connection_closed) -> None
-     | None -> None)
-  | Some Peer_metadata.Unsupported -> None
-  | None -> None
-;;
-
 let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.Validated.t) =
   match writer t with
   | Error `Closed -> Error Dispatch_error.Closed
@@ -403,11 +364,7 @@ let dispatch t ~kind ~response_handler ~bin_writer_query ~(query : _ P.Query.Val
       ~response_handler
       ~kind
       ~send_query:(fun query ->
-        Protocol_writer.Query.send
-          writer
-          query
-          ~bin_writer_query
-          ~peer_menu:(peer_menu_of_connection t))
+        Protocol_writer.Query.send writer query ~bin_writer_query ~peer_menu:(peer_menu t))
     [@nontail]
 ;;
 
@@ -442,7 +399,7 @@ let make_dispatch_bigstring
           ~pos
           ~len
           ~send_bin_prot_and_bigstring:do_send
-          ~peer_menu:(peer_menu_of_connection t))
+          ~peer_menu:(peer_menu t))
     [@nontail]
 ;;
 
@@ -608,10 +565,10 @@ let add_heartbeat_callback t f =
 
 let reset_heartbeat_timeout t timeout =
   t.heartbeat_config.timeout <- timeout;
-  t.last_seen_alive <- Synchronous_time_source.now t.time_source
+  Atomic.set t.last_seen_alive (Synchronous_time_source.now t.time_source)
 ;;
 
-let last_seen_alive t = t.last_seen_alive
+let last_seen_alive t = Atomic.get t.last_seen_alive
 
 let abort_heartbeating t =
   Option.iter (Set_once.get t.heartbeat_event) ~f:(fun event ->
@@ -751,13 +708,14 @@ let cleanup t ~reason exn =
 
 let set_peer_metadata t connection_metadata =
   match Set_once.get t.peer_metadata with
-  | None | Some Unsupported ->
+  | Some Unsupported ->
     raise_s
       [%message
-        "Inconsistent state: receiving a metadata message is unsupported, but a metadata \
-         message was received"]
-  | Some (Expected ivar) ->
-    if Ivar.is_empty t.close_started then Ivar.fill_exn ivar (Ok connection_metadata)
+        "BUG: Inconsistent state, receiving a metadata message is unsupported, but a \
+         metadata message was received"]
+  | Some (Metadata _) ->
+    raise_s [%message "BUG: Inconsistent state, received peer metadata twice"]
+  | None -> Set_once.set_exn t.peer_metadata (Peer_metadata.Metadata connection_metadata)
 ;;
 
 let[@inline] handle_query
@@ -800,7 +758,6 @@ let handle_msg
     set_peer_metadata t metadata;
     Continue
   | Heartbeat ->
-    t.sent_heartbeats_without_receiving_any <- 0;
     Array.iter t.heartbeat_callbacks ~f:(fun f -> f ());
     Continue
   | Response_v1 response ->
@@ -906,7 +863,8 @@ let on_message t ~close_connection_monitor =
               { reason =
                   Close_reason.Protocol.create
                     ~kind:Unspecified
-                    ~debug_info:(Info.of_string "Rpc message handling loop stopped")
+                    ~debug_info:
+                      (Info.Portable.of_string "Rpc message handling loop stopped")
                     ()
               ; send_reason_to_peer = false
               }
@@ -919,9 +877,9 @@ let on_message t ~close_connection_monitor =
                 Close_reason.Protocol.create
                   ~kind:Unspecified
                   ~debug_info:
-                    (Info.of_list
+                    (Info.Portable.of_list
                        [ reason_if_no_error |> Private.Close_reason.info_of_t
-                       ; Info.create_s
+                       ; Info.Portable.create_s
                            (Rpc_error.sexp_of_t_with_reason
                               e
                               ~get_connection_close_reason:(fun () ->
@@ -943,7 +901,7 @@ let on_message t ~close_connection_monitor =
 
 let time_ns_to_microsecond_string time =
   Time_ns.round_down_to_us time
-  |> Time_ns.to_string_abs_trimmed ~zone:(Lazy.force Timezone.local)
+  |> Time_ns.to_string_abs_trimmed ~zone:(Portable_lazy.force Timezone.local_portable)
 ;;
 
 let effective_heartbeat_timeout t =
@@ -970,24 +928,27 @@ let heartbeat_now t =
     match t.heartbeat_timeout_style with
     | Heartbeat_timeout_style.Time_between_heartbeats_legacy ->
       let now = Synchronous_time_source.now t.time_source in
-      let since_last_heartbeat = Time_ns.diff now t.last_seen_alive in
+      let since_last_heartbeat = Time_ns.diff now (Atomic.get t.last_seen_alive) in
       let timeout = effective_heartbeat_timeout t in
       (match Time_ns.Span.( > ) since_last_heartbeat timeout with
        | true -> Error (`Timed_out_legacy (now, timeout))
        | false -> Ok `Not_timed_out)
     | Heartbeat_timeout_style.Number_of_heartbeats ->
       (match effective_heartbeat_threshold t with
-       | Some threshold when t.sent_heartbeats_without_receiving_any >= threshold ->
+       | Some threshold when t.sent_heartbeats_without_receiving_any_messages >= threshold
+         ->
          let now = Synchronous_time_source.now t.time_source in
-         Error (`Timed_out_count_based (now, t.sent_heartbeats_without_receiving_any))
+         Error
+           (`Timed_out_count_based
+             (now, t.sent_heartbeats_without_receiving_any_messages))
        | None | Some (_ : int) -> Ok `Not_timed_out)
   in
   match timeout_result with
   | Error timed_out ->
-    let reason () =
+    let reason () ~last_seen_alive =
       match timed_out with
       | `Timed_out_legacy (now, timeout) ->
-        (* Local didn't see heartbeats in time and decided to close.
+        (* Local didn't see any messages in time and decided to close.
 
            However, worth noting that just because we decided to close, it doesn't mean
            that it's definitely the local or remote that missed the heartbeat. This
@@ -995,14 +956,14 @@ let heartbeat_now t =
            busy to process any messages *)
         [%string
           "No heartbeats received for %{timeout#Time_ns.Span}. Last seen at: \
-           %{time_ns_to_microsecond_string t.last_seen_alive}, now: \
+           %{time_ns_to_microsecond_string (Atomic.get last_seen_alive)}, now: \
            %{time_ns_to_microsecond_string now}."]
-      | `Timed_out_count_based (now, sent_heartbeats_without_receiving_any) ->
+      | `Timed_out_count_based (now, sent_heartbeats_without_receiving_any_messages) ->
         [%string
-          "No heartbeats received in the time that we sent \
-           %{sent_heartbeats_without_receiving_any#Int} heartbeats and were about to \
-           send one more. Last seen at: %{time_ns_to_microsecond_string \
-           t.last_seen_alive}, now: %{time_ns_to_microsecond_string now}."]
+          "No messages or heartbeats received in the time that we sent \
+           %{sent_heartbeats_without_receiving_any_messages#Int} heartbeats and were \
+           about to send one more. Last seen at: %{time_ns_to_microsecond_string \
+           (Atomic.get last_seen_alive)}, now: %{time_ns_to_microsecond_string now}."]
     in
     don't_wait_for
       (close
@@ -1012,15 +973,16 @@ let heartbeat_now t =
               { reason =
                   Close_reason.Protocol.create
                     ~kind:Unspecified
-                    ~debug_info:(Info.of_thunk reason)
+                    ~debug_info:
+                      (Info.Portable.of_thunk (reason ~last_seen_alive:t.last_seen_alive))
                     ()
               ; send_reason_to_peer = true
               }))
   | Ok `Not_timed_out ->
     (match Protocol_writer.send_heartbeat t.writer with
      | Sent { result = (); bytes = (_ : int) } ->
-       t.sent_heartbeats_without_receiving_any
-       <- t.sent_heartbeats_without_receiving_any + 1
+       t.sent_heartbeats_without_receiving_any_messages
+       <- t.sent_heartbeats_without_receiving_any_messages + 1
      | Closed -> ()
      | Message_too_big _ as result ->
        let reason = [%globalize: unit Transport.Send_result.t] result in
@@ -1038,7 +1000,8 @@ let default_validate_all_connections ~identification_from_peer:_ =
 ;;
 
 let schedule_heartbeats t =
-  t.last_seen_alive <- Synchronous_time_source.now t.time_source;
+  Atomic.set t.last_seen_alive (Synchronous_time_source.now t.time_source);
+  t.sent_heartbeats_without_receiving_any_messages <- 0;
   let event =
     Synchronous_time_source.Event.create t.time_source (fun () -> heartbeat_now t)
   in
@@ -1087,7 +1050,7 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
             Close_reason.Protocol.create
               ~kind:Unspecified
               ~debug_info:
-                (Info.create_s
+                (Info.Portable.create_s
                    [%message "Uncaught exception in implementation" (exn : Exn.t)])
               ()
         ; send_reason_to_peer = true
@@ -1105,7 +1068,9 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
             Close_reason.Protocol.create
               ~kind:Unspecified
               ~debug_info:
-                (Info.tag (Info.of_exn exn) ~tag:("exn raised in RPC connection " ^ name))
+                (Info.Portable.tag
+                   (Info.to_portable (Info.of_exn exn))
+                   ~tag:("exn raised in RPC connection " ^ name))
               ()
         ; send_reason_to_peer = true
         } )
@@ -1123,7 +1088,8 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
       t.reader
       ~on_message:(Staged.unstage (on_message t ~close_connection_monitor))
       ~on_end_of_batch:(fun () ->
-        t.last_seen_alive <- Synchronous_time_source.now t.time_source)
+        Atomic.set t.last_seen_alive (Synchronous_time_source.now t.time_source);
+        t.sent_heartbeats_without_receiving_any_messages <- 0)
     >>> fun result ->
     Ivar.fill_if_empty has_drained_reader ();
     match result with
@@ -1131,7 +1097,10 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
       (* [on_message] only returns a reason when it gets a [Stop], which always sets the
          reason to be "Rpc message handling loop stopped" - that's not a reason we care
          about sending. *)
-      cleanup t ~reason (Rpc_error.Rpc (Connection_closed, t.description))
+      cleanup
+        t
+        ~reason
+        (Rpc_error.Rpc (Connection_closed, Info.of_portable t.description))
     (* The protocol is such that right now, the only outcome of the other side closing the
        connection normally is that we get an eof. *)
     | Error (`Eof | `Closed) ->
@@ -1144,11 +1113,11 @@ let run_connection t ~implementations ~menu ~connection_state ~writer_monitor_ex
              { reason =
                  Close_reason.Protocol.create
                    ~kind:Unspecified
-                   ~debug_info:(Info.of_string "EOF or connection closed")
+                   ~debug_info:(Info.Portable.of_string "EOF or connection closed")
                    ()
              ; send_reason_to_peer = false
              })
-        (Rpc_error.Rpc (Connection_closed, t.description)))
+        (Rpc_error.Rpc (Connection_closed, Info.of_portable t.description)))
 ;;
 
 let run_after_handshake t ~implementations ~menu ~connection_state ~writer_monitor_exns =
@@ -1196,13 +1165,13 @@ let read_message_before_heartbeating t ~timeout ~reader ~step =
               { reason =
                   Close_reason.Protocol.create
                     ~kind:Unspecified
-                    ~debug_info:(Info.of_thunk reason)
+                    ~debug_info:(Info.Portable.of_thunk reason)
                     ()
               ; send_reason_to_peer = true
               }));
     return (Error Handshake_error.Timeout)
   | `Result (Error exn) ->
-    let reason = Info.of_string "[Reader.read_one_message_bin_prot] raised" in
+    let reason = Info.Portable.of_string "[Reader.read_one_message_bin_prot] raised" in
     don't_wait_for
       (close
          t
@@ -1212,14 +1181,16 @@ let read_message_before_heartbeating t ~timeout ~reader ~step =
               { reason =
                   Close_reason.Protocol.create
                     ~kind:Unspecified
-                    ~debug_info:(Info.of_list [ reason; Info.of_exn exn ])
+                    ~debug_info:
+                      (Info.Portable.of_list
+                         [ reason; Info.of_exn exn |> Info.to_portable ])
                     ()
               ; send_reason_to_peer = true
               }));
     return
       (Error
          (Handshake_error.Reading_message_failed_during_step
-            { step; parse_error = Error.of_exn exn }))
+            { step; parse_error = Error.of_exn exn |> Error.to_portable }))
   | `Result (Ok (Error `Eof)) -> return (Error (Handshake_error.Eof_during_step step))
   | `Result (Ok (Error `Closed)) ->
     return (Error (Handshake_error.Transport_closed_during_step step))
@@ -1231,6 +1202,7 @@ let set_peer_metadata_and_validate t metadata ~validate_connection =
   match%map validate_connection ~identification_from_peer:metadata.identification with
   | Or_not_authorized.Authorized () -> Ok ()
   | Not_authorized error ->
+    let error = Error.portabilize error in
     don't_wait_for
       (close
          t
@@ -1242,11 +1214,14 @@ let set_peer_metadata_and_validate t metadata ~validate_connection =
                     ~kind:Connection_validation_failed
                       (* [Error.to_info] is the identity function, so we are not modifying
                          the user error in any way *)
-                    ~user_reason:(Error.to_info error)
+                    ~user_reason:
+                      (error
+                       |> [%template Error.to_info [@mode portable]]
+                       |> Info.to_portable)
                     ()
               ; send_reason_to_peer = true
               }));
-    Handshake_error.Connection_validation_failed error |> Error
+    Handshake_error.Connection_validation_failed (Error.to_portable error) |> Error
 ;;
 
 let negotiate
@@ -1265,10 +1240,6 @@ let negotiate
     Set_once.set_exn t.peer_metadata Unsupported;
     Ok () |> return
   | true ->
-    let ivar = Ivar.create () in
-    upon (Ivar.read t.close_started) (fun (_ : Close_reason.t) ->
-      Ivar.fill_if_empty ivar (Error `Connection_closed));
-    Set_once.set_exn t.peer_metadata (Expected ivar);
     let%bind.Eager_deferred.Result () =
       Protocol_writer.For_handshake.send_connection_metadata_if_supported
         t.writer
@@ -1307,7 +1278,7 @@ let negotiate
        |> return
      | (received_message : _ Protocol.Message.t) ->
        let reason =
-         Info.t_of_sexp
+         Info.Portable.create_s
            [%message
              "Received unexpected message during handshake, expected connection metadata \
               or close reason message"
@@ -1323,7 +1294,9 @@ let negotiate
                      Close_reason.Protocol.create ~kind:Unspecified ~debug_info:reason ()
                  }));
        Handshake_error.Unexpected_message_during_connection_metadata
-         (Error.of_info reason)
+         (Info.of_portable reason
+          |> [%template Error.of_info [@mode portable]]
+          |> Error.to_portable)
        |> Error
        |> return)
 ;;
@@ -1387,11 +1360,12 @@ let create
   ?(handshake_timeout = default_handshake_timeout)
   ?(heartbeat_config = Heartbeat_config.create ())
   ?(max_metadata_size_per_key = Byte_units.of_kilobytes 1.)
-  ?(description = Info.of_string "<created-directly>")
+  ?(description = Info.Portable.of_string "<created-directly>")
   ?(time_source = Synchronous_time_source.wall_clock ())
   ?identification
   ?(reader_drain_timeout = default_reader_drain_timeout)
   ?(provide_rpc_shapes = false)
+  ?custom_menu
   ?(validate_connection = default_validate_all_connections)
   ?(heartbeat_timeout_style = Heartbeat_timeout_style.Time_between_heartbeats_legacy)
   ({ reader; writer } : Transport.t)
@@ -1412,19 +1386,28 @@ let create
             metadata. *)
       None, implementations
     | None ->
-      (* 2. There is no menu so we are free to send a menu containing all of the
+      (* 2. There is no custom menu rpc so we send a menu containing all of the
          implementations in the metadata. We should also include the menu rpc in the
          implementation so that we can eventually deprecate the custom implementation
          type. Old clients can't complain about the menu rpc being added because they
          don't have a way to figure out the list of available rpcs ;) *)
       let menu =
-        if provide_rpc_shapes
-        then
-          Implementations.descriptions_and_shapes implementations
-          |> Menu.of_supported_rpcs_and_shapes
-        else
-          Implementations.descriptions implementations
-          |> Menu.of_supported_rpcs ~rpc_shapes:`Unknown
+        match custom_menu with
+        | Some f ->
+          (* Custom menu function provided. Note this is not the same as a custom menu rpc
+             since we're able to invoke the function easily (so it's passable along to the
+             peer). The custom menu rpc would need us to forge a connection state to
+             invoke.
+          *)
+          f ()
+        | None ->
+          if provide_rpc_shapes
+          then
+            Implementations.descriptions_and_shapes implementations
+            |> Menu.of_supported_rpcs_and_shapes
+          else
+            Implementations.descriptions implementations
+            |> Menu.of_supported_rpcs ~rpc_shapes:`Unknown
       in
       ( Some menu
       , Implementations.add_exn
@@ -1453,7 +1436,7 @@ let create
     { description
     ; heartbeat_config = Heartbeat_config.to_runtime heartbeat_config
     ; heartbeat_callbacks = [||]
-    ; last_seen_alive = Synchronous_time_source.now time_source
+    ; last_seen_alive = Atomic.make (Synchronous_time_source.now time_source)
     ; max_metadata_size_per_key
     ; reader
     ; writer = Protocol_writer.create_before_negotiation writer ~tracing_events
@@ -1493,7 +1476,7 @@ let create
            both the previous heartbeat timeout and the environment override, then we'll
            use the new value *)
     ; heartbeat_timeout_style
-    ; sent_heartbeats_without_receiving_any = 0
+    ; sent_heartbeats_without_receiving_any_messages = 0
     }
   in
   let writer_monitor_exns = Monitor.detach_and_get_error_stream (Writer.monitor writer) in
@@ -1507,7 +1490,7 @@ let create
              { reason =
                  Close_reason.Protocol.create
                    ~kind:Unspecified
-                   ~debug_info:(Info.of_string "RPC transport stopped")
+                   ~debug_info:(Info.Portable.of_string "RPC transport stopped")
                    ()
              ; send_reason_to_peer = false
              })
@@ -1546,6 +1529,7 @@ let with_close
   ?time_source
   ?identification
   ?provide_rpc_shapes
+  ?custom_menu
   ?heartbeat_timeout_style
   ?validate_connection
   ~connection_state
@@ -1568,6 +1552,7 @@ let with_close
       ?time_source
       ?identification
       ?provide_rpc_shapes
+      ?custom_menu
       ?heartbeat_timeout_style
       ?validate_connection
       ~connection_state
@@ -1591,7 +1576,8 @@ let with_close
                { reason =
                    Close_reason.Protocol.create
                      ~kind:Unspecified
-                     ~debug_info:(Info.of_string "Rpc.Connection.with_close finished")
+                     ~debug_info:
+                       (Info.Portable.of_string "Rpc.Connection.with_close finished")
                      ()
                ; send_reason_to_peer = false
                }))
@@ -1612,6 +1598,7 @@ let server_with_close
   ?time_source
   ?identification
   ?provide_rpc_shapes
+  ?custom_menu
   ?heartbeat_timeout_style
   ?validate_connection
   transport
@@ -1632,6 +1619,7 @@ let server_with_close
     ?time_source
     ?identification
     ?provide_rpc_shapes
+    ?custom_menu
     ?heartbeat_timeout_style
     ?validate_connection
     transport
@@ -1641,7 +1629,9 @@ let server_with_close
     ~dispatch_queries:(fun _ -> Deferred.unit)
 ;;
 
-let default_close_reason_debug_info = lazy (Info.of_string "Rpc.Connection.close")
+let default_close_reason_debug_info =
+  lazy (Info.Portable.of_string "Rpc.Connection.close")
+;;
 
 let close_with_reason
   ?streaming_responses_flush_timeout

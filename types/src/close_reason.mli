@@ -61,13 +61,13 @@ module Protocol : sig
   val t_of_binable : Binable.t -> t
 end
 
-val aux_info : Closer.t -> Protocol.t -> Info.t
+val aux_info : Closer.t -> Protocol.t -> Info.Portable.t
 
 type t =
   { closer : Closer.t
   ; reason : Protocol.t
-  ; connection_description : Info.t
+  ; connection_description : Info.Portable.t
   }
 [@@deriving sexp_of]
 
-val info_of_t : t -> Info.t
+val info_of_t : t -> Info.Portable.t

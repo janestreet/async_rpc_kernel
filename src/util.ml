@@ -1,4 +1,5 @@
 open Core
+open! Import
 
 let dumper_for_deserialization_errors =
   ref (fun (_buf : Bigstring.t) ~pos:(_ : int) -> "")

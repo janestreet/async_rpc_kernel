@@ -105,10 +105,10 @@ let (all_messages : Payload.t Protocol.Message.t list) =
     (* This allocates: bigstring cannot be allocated on the stack *)
   ; Metadata { identification; menu = Some menu }
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
-  ; Close_reason (Info.create_s [%message "my sexp info"])
+  ; Close_reason (Info.Portable.create_s [%message "my sexp info"])
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
   ; Close_reason_duplicated
-      (Info.create_s [%message "my sexp info within Close_reason_duplicated"])
+      (Info.Portable.create_s [%message "my sexp info within Close_reason_duplicated"])
     (* This allocates: bigstrings cannot be allocated on the stack, and mutable arrays
        cannot have their elements allocated on the stack *)
   ; Metadata_v2 { identification; menu = Some (Menu.of_supported_rpcs_and_shapes menu) }
@@ -118,8 +118,8 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       (Async_rpc_kernel.Close_reason.Protocol.binable_of_t
          (Async_rpc_kernel.Close_reason.Protocol.create
             ~kind:Unspecified
-            ~debug_info:(Info.create_s [%message "debug info"])
-            ~user_reason:(Info.create_s [%message "user reason"])
+            ~debug_info:(Info.Portable.create_s [%message "debug info"])
+            ~user_reason:(Info.Portable.create_s [%message "user reason"])
             ()))
   ]
 ;;
