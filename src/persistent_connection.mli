@@ -1,5 +1,6 @@
 open! Core
 open! Async_kernel
+open! Import
 
 include module type of struct
   include Persistent_connection_kernel

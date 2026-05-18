@@ -30,7 +30,7 @@ module Stable : sig
     val bin_read_t__local : t Bin_prot.Read.reader__local
 
     include
-      Stable_comparable.V1
+      Stable_comparable.With_stable_witness.V1
       with type t := t
        and type comparator_witness := comparator_witness
   end

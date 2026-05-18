@@ -175,7 +175,7 @@ module Connection_metadata = struct
       { identification : Stable_bigstring_v1_with_globalize.t option
       ; menu : Menu.Stable.V3.response option
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize, globalize, sexp_of, fields ~getters]
 
     let of_v1 { V1.identification; menu } =
       { identification; menu = Base.Option.map menu ~f:Menu.of_v2_response }
@@ -499,8 +499,8 @@ module Message = struct
       }
     in
     let metadata : Connection_metadata.V2.t = { identification = None; menu = None } in
-    let close_reason = Core.Info.create_s [%message "Close reason"] in
-    let user_close_reason = Core.Info.create_s [%message "User close reason"] in
+    let close_reason = Core.Info.Portable.create_s [%message "Close reason"] in
+    let user_close_reason = Core.Info.Portable.create_s [%message "User close reason"] in
     Variants_of_maybe_needs_length.iter
       ~heartbeat:(print (fun c -> c))
       ~query_v1:(print (fun c -> c (Query.Validated.to_v1 query)))

@@ -1,5 +1,6 @@
 open! Core
 open! Async_kernel
+open! Import
 include Persistent_connection_kernel
 
 module Versioned_rpc_conn = struct

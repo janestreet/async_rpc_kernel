@@ -1,6 +1,9 @@
+@@ portable
+
 open! Core
 
-type t = Protocol_version_header.t [@@deriving bin_io ~localize, globalize, sexp_of]
+type t : immutable_data = Protocol_version_header.t
+[@@deriving bin_io ~localize, globalize, sexp_of]
 
 val bin_read_t__local : t Bin_prot.Read.reader__local
 val latest : t

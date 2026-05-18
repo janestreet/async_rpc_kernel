@@ -1,7 +1,9 @@
+@@ portable
+
 open! Core
 
 module Closer : sig
-  type t =
+  type t : immutable_data =
     | By_unknown
     | By_local
     | By_remote
@@ -11,7 +13,7 @@ end
 module Protocol : sig
   (** The category of reasons due to which a connection was closed. *)
   module Kind : sig
-    type t =
+    type t : immutable_data =
       | Other of Flexible_sexp.Variant.Stable.Other.V1.t
       | Unspecified
       | Connection_limit_reached
@@ -27,7 +29,7 @@ module Protocol : sig
 
       [debug_info] can be arbitrarily set or appended to by the async RPC library, but it
       will never modify the [user_reason]. *)
-  type t =
+  type t : immutable_data with Info_with_local_bin_io.t =
     { kind : Kind.t
     ; debug_info : Info_with_local_bin_io.t option
     ; user_reason : Info_with_local_bin_io.t option
@@ -61,13 +63,13 @@ module Protocol : sig
   val t_of_binable : Binable.t -> t
 end
 
-val aux_info : Closer.t -> Protocol.t -> Info.t
+val aux_info : Closer.t -> Protocol.t -> Info.Portable.t
 
-type t =
+type t : immutable_data with Protocol.t with Info.Portable.t =
   { closer : Closer.t
   ; reason : Protocol.t
-  ; connection_description : Info.t
+  ; connection_description : Info.Portable.t
   }
 [@@deriving sexp_of]
 
-val info_of_t : t -> Info.t
+val info_of_t : t -> Info.Portable.t

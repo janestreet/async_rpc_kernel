@@ -1,24 +1,11 @@
 open! Core
 open! Async_kernel
-
-include module type of struct
-  include Protocol.Rpc_error
-end
-
-val sexp_of_t_with_reason : t -> get_connection_close_reason:(unit -> Sexp.t) -> Sexp.t
-val sexp_of_t : t -> Sexp.t
-
-include Stringable.S with type t := t
-
-exception Rpc of t * Info.t
-
-val raise : t -> Info.t -> 'a
+open! Import
+include module type of Async_rpc_kernel_types.Rpc_error
 
 val to_error
   :  t
   -> rpc_description:Description.t
-  -> connection_description:Info.t
-  -> connection_close_started:Info.t Deferred.t
+  -> connection_description:Info.t @ portable
+  -> connection_close_started:Info.Portable.t Deferred.t
   -> Error.t
-
-val implemented_in_protocol_version : t -> int

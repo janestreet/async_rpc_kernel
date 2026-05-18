@@ -1,4 +1,5 @@
 open Core
+open! Import
 
 (** An ['a t] describes how [Async_rpc] can determine whether an rpc response of type ['a]
     should count as an error. This does not affect serialization of responses. It only
@@ -44,6 +45,8 @@ type _ t =
   | Custom : { is_error : 'a -> bool } -> 'a t
   (** A function to decide if a result is an error. This is the most generic option and
       the most likely to be broken by future changes to the API. *)
+
+val is_error : 'a t -> 'a -> bool
 
 module Private : sig
   val to_error_mode : 'a t -> 'a Implementation_mode.Error_mode.t

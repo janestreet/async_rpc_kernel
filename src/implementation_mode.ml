@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 
 module Error_mode = struct
   type _ t =

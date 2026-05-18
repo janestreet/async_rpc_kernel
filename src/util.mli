@@ -1,4 +1,5 @@
 open Core
+open! Import
 
 val bin_read_from_bigstring
   :  here:[%call_pos]

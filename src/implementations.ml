@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 open Util
 module P = Protocol
 
@@ -81,9 +82,9 @@ module Instance = struct
     ; mutable open_queries : int
     ; mutable stopped : bool
     ; connection_state : 'a
-    ; connection_description : Info.t
+    ; connection_description : Info.Portable.t
     ; connection_close_started : Close_reason.t Deferred.t
-    ; connection_close_started_info : Info.t Deferred.t
+    ; connection_close_started_info : Info.Portable.t Deferred.t
     ; mutable last_dispatched_implementation :
         (Description.t * ('a Implementation.t[@sexp.opaque]) * Protocol.Impl_menu_index.t)
           option
@@ -982,7 +983,7 @@ module Instance = struct
               check_responded ()
               |> Rpc_result.or_error
                    ~rpc_description:rpc
-                   ~connection_description:t.connection_description
+                   ~connection_description:(Info.of_portable t.connection_description)
                    ~connection_close_started:t.connection_close_started_info
               |> ok_exn);
             Ok ())
@@ -1009,7 +1010,7 @@ module Instance = struct
             ok_exn
               (Rpc_result.or_error
                  ~rpc_description:rpc
-                 ~connection_description:t.connection_description
+                 ~connection_description:(Info.of_portable t.connection_description)
                  ~connection_close_started:t.connection_close_started_info
                  result))
        | Some result ->
@@ -1129,7 +1130,7 @@ module Instance = struct
     =
     match on_unknown_rpc with
     | `Continue -> Continue
-    | `Raise -> Rpc_error.raise error t.connection_description
+    | `Raise -> Rpc_error.raise error (Info.of_portable t.connection_description)
     | `Close_connection -> Stop (Ok ())
     | `Call f ->
       (match f t.connection_state ~rpc_tag:name ~version with

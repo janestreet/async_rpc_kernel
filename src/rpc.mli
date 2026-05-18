@@ -45,6 +45,7 @@
 
 open! Core
 open! Async_kernel
+open! Import
 
 module Description : sig
   type t = Description.t =
@@ -66,7 +67,7 @@ module Description : sig
       [@@deriving compare ~localize, equal ~localize, sexp, bin_io, hash, stable_witness]
 
       include
-        Stable_comparable.V1
+        Stable_comparable.With_stable_witness.V1
         with type t := t
          and type comparator_witness := comparator_witness
     end

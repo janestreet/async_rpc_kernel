@@ -1,5 +1,7 @@
 open Core
 open Async_kernel
+open! Import
+include Async_rpc_kernel_types.Transport
 
 module Header = struct
   let length = 8

@@ -1,6 +1,8 @@
-type t = Core.Info.t [@@deriving bin_io ~localize, globalize, sexp_of]
+@@ portable
 
-include Core.Info.S with type t := t
+type t = Core.Info.Portable.t [@@deriving bin_io ~localize, globalize, sexp_of]
+
+include module type of Core.Info.Portable with type t := t
 include Bin_prot.Binable.S with type t := t
 
 val bin_size_t__local : local_ t -> int

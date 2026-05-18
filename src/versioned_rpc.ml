@@ -1,5 +1,6 @@
 open Core
 open Async_kernel
+open! Import
 open Rpc
 
 let pipe_map_batched t ~f =
@@ -667,13 +668,13 @@ module Menu = struct
   ;;
 
   let request conn =
-    match%bind.Eager_deferred.Or_error Connection.peer_menu conn with
+    match Connection.peer_menu conn with
     | Some menu -> return (Ok menu)
     | None -> aux_request Rpc.dispatch conn
   ;;
 
   let request' conn =
-    match%bind.Eager_deferred.Result Connection.peer_menu' conn with
+    match Connection.peer_menu conn with
     | Some menu -> return (Ok menu)
     | None -> aux_request Rpc.dispatch' conn
   ;;
@@ -742,8 +743,7 @@ module Connection_with_menu = struct
   [@@deriving fields ~getters]
 
   let create connection =
-    let open Deferred.Or_error.Let_syntax in
-    let%map menu = Menu.request connection in
+    let%map.Deferred.Or_error menu = Menu.request connection in
     { connection; menu }
   ;;
 

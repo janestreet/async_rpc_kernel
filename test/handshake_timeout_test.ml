@@ -81,17 +81,17 @@ let test ~client_handshake_timeout_s ~server_handshake_timeout_s =
     match client_conn with
     | Error _ -> return ()
     | Ok conn ->
-      let%bind client_menu_from_server = Rpc.Connection.peer_menu conn in
+      let client_menu_from_server = Rpc.Connection.peer_menu conn in
       let%map () = Rpc.Connection.close conn in
-      print_s [%message (client_menu_from_server : _ option Or_error.t)]
+      print_s [%message (client_menu_from_server : _ option)]
   in
   let%bind () =
     match server_conn with
     | Error _ -> return ()
     | Ok conn ->
-      let%bind server_menu_from_client = Rpc.Connection.peer_menu conn in
+      let server_menu_from_client = Rpc.Connection.peer_menu conn in
       let%map () = Rpc.Connection.close conn in
-      print_s [%message (server_menu_from_client : _ option Or_error.t)]
+      print_s [%message (server_menu_from_client : _ option)]
   in
   let%bind () = finished_printing in
   return ()
@@ -146,8 +146,8 @@ let%expect_test "client 60s, server 60s" =
     00                                              descriptions= Array: 0 items
     00                                                   digests= None
     ((client_conn (Ok _)) (server_conn (Ok _)))
-    (client_menu_from_server (Ok (_)))
-    (server_menu_from_client (Ok (_)))
+    (client_menu_from_server (_))
+    (server_menu_from_client (_))
     |}];
   return ()
 ;;

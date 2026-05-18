@@ -1,5 +1,7 @@
 open Core
 open Async_kernel
+open! Import
+include Async_rpc_kernel_types.Transport_intf
 
 type 'a message_handler = Bigstring.t -> pos:int -> len:int -> 'a
 
@@ -30,34 +32,6 @@ module type Reader = sig
     -> on_message:(Bigstring.t -> pos:int -> len:int -> 'a Handler_result.t)
     -> on_end_of_batch:(unit -> unit)
     -> ('a, [ `Eof | `Closed ]) Result.t Deferred.t
-end
-
-module Send_result = struct
-  type message_too_big =
-    { size : int
-    ; max_message_size : int
-    }
-  [@@deriving bin_io ~localize, compare ~localize, globalize, sexp]
-
-  let bin_read_message_too_big__local (buf @ local) ~(pos_ref @ local) =
-    let size = bin_read_int buf ~pos_ref in
-    let max_message_size = bin_read_int buf ~pos_ref in
-    exclave_ { size; max_message_size }
-  ;;
-
-  type 'a t =
-    | Sent of
-        { global_ result : 'a
-        ; bytes : int
-        (** Bytes should equal the size of the bin_prot rpc message and data. The total
-            bytes written on the network in the standard protocol (which has 8-bytes sizes
-            before each frame) will be [sum([8 + x.bytes for each send result x])]. Other
-            framing protocols or encryption (e.g. rpc over kerberos) may write more or
-            less bytes. *)
-        }
-    | Closed
-    | Message_too_big of message_too_big
-  [@@deriving compare ~localize, globalize, sexp_of]
 end
 
 module type Writer = sig

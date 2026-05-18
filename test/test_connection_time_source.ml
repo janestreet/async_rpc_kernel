@@ -124,13 +124,116 @@ module%test [@name "Normal heartbeat timeouts"] _ = struct
       === DIFF HUNK ===
             ("Connection closed by local side:"
       -|     "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
-      +|     "No heartbeats received in the time that we sent 5 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
+      +|     "No messages or heartbeats received in the time that we sent 5 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
             (connection_description server))))
       === DIFF HUNK ===
             ("Connection closed by remote side:"
       -|     "No heartbeats received for 10s. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
-      +|     "No heartbeats received in the time that we sent 5 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
+      +|     "No messages or heartbeats received in the time that we sent 5 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:02-05:00, now: 1969-12-31 19:00:14-05:00.")
             (connection_description client))))
+      |}];
+    return ()
+  ;;
+end
+
+module%test [@name "non-heartbeat messages should keep connection alive"] _ = struct
+  let one_way_rpc =
+    Rpc.One_way.create ~name:"keepalive-ping" ~version:1 ~bin_msg:[%bin_type_class: unit]
+  ;;
+
+  let server_implementations =
+    Rpc.Implementations.create_exn
+      ~implementations:
+        [ Rpc.One_way.implement
+            one_way_rpc
+            (fun () () -> print_s [%message "server received one-way rpc"])
+            ~on_exception:Close_connection
+        ]
+      ~on_unknown_rpc:`Raise
+      ~on_exception:Close_connection
+  ;;
+
+  let%expect_test "BUG: dispatching one-way RPCs keeps the connection alive even without \
+                   heartbeats"
+    =
+    (* This test demonstrates that receiving *any* message (not just heartbeats) resets
+       the state for tracking timeouts. We set up a connection where the client never
+       sends heartbeats (by making it negative), but dispatches one-way RPCs. The server
+       stays alive because those RPC messages count as evidence the peer is alive. *)
+    let server_heartbeat_every = Time_ns.Span.of_int_sec 5 in
+    let heartbeat_timeout = Time_ns.Span.of_int_sec 10 in
+    let client_never_heartbeats = Time_ns.Span.of_int_sec (-1) in
+    let%bind ( `Server (server_time_source, server_conn)
+             , `Client (client_time_source, client_conn) )
+      =
+      Test_helpers.setup_server_and_client_connection
+        ~heartbeat_timeout
+        ~heartbeat_every:client_never_heartbeats
+        ~heartbeat_timeout_style:Number_of_heartbeats
+        ~server_heartbeat_every
+        ~server_implementations
+        ()
+    in
+    let yield_and_print_liveness () =
+      yield_and_print_liveness ~server_conn ~client_conn
+    in
+    print_emphasized "Advancing time by 0 to init";
+    advance_by_alarms_by client_time_source Time_ns.Span.zero;
+    advance_by_alarms_by server_time_source Time_ns.Span.zero;
+    let%bind () = yield_and_print_liveness () in
+    [%expect
+      {|
+      -----Advancing time by 0 to init-----
+      ("received heartbeat"(now"1970-01-01 00:00:00Z")(description client))
+      (server (last_seen_alive "1970-01-01 00:00:00Z"))
+      (client (last_seen_alive "1970-01-01 00:00:00Z"))
+      |}];
+    (* Advance time by [server_heartbeat_every] several times, dispatching a one-way RPC
+       each time.
+
+       Notice that the server sends heartbeats, but the client never sends heartbeats
+       back. The one-way RPCs from the client are non-heartbeat messages that should keep
+       the server alive. *)
+    let%bind () =
+      Deferred.for_ 1 ~to_:4 ~do_:(fun (_ : int) ->
+        Rpc.One_way.dispatch_exn one_way_rpc client_conn ();
+        advance_by_alarms_by server_time_source server_heartbeat_every;
+        advance_by_alarms_by client_time_source server_heartbeat_every;
+        Async_kernel_scheduler.yield_until_no_jobs_remain ())
+    in
+    [%expect
+      {|
+      "server received one-way rpc"
+      ("received heartbeat"(now"1970-01-01 00:00:05Z")(description client))
+      "server received one-way rpc"
+      ("received heartbeat"(now"1970-01-01 00:00:10Z")(description client))
+      "server received one-way rpc"
+      ("received heartbeat"(now"1970-01-01 00:00:15Z")(description client))
+      "server received one-way rpc"
+      ("received heartbeat"(now"1970-01-01 00:00:20Z")(description client))
+      |}];
+    print_emphasized "Server is still alive after 20s (> heartbeat_timeout of 10s)";
+    let%bind () = yield_and_print_liveness () in
+    [%expect
+      {|
+      -----Server is still alive after 20s (> heartbeat_timeout of 10s)-----
+      (server (last_seen_alive "1970-01-01 00:00:20Z"))
+      (client (last_seen_alive "1970-01-01 00:00:20Z"))
+      |}];
+    let%bind () = Connection.close server_conn in
+    let%bind () = Connection.close client_conn in
+    [%expect
+      {|
+      ("connection closed"
+        (now         "1970-01-01 00:00:20Z")
+        (description server)
+        (reason (
+          ("Connection closed by local side:" Rpc.Connection.close)
+          (connection_description server))))
+      ("connection closed"
+        (now         "1970-01-01 00:00:20Z")
+        (description client)
+        (reason ("EOF or connection closed" (connection_description client))))
       |}];
     return ()
   ;;
@@ -141,7 +244,7 @@ module%test [@name "skewed heartbeat timeouts"] _ = struct
    * server has a much longer timeout than
    * the client * client does sychronous work longer than their own timeout
    * synchronous work is shorter than the server timeout
-  *)
+   *)
 
   let client_heartbeat_timeout = Time_ns.Span.of_sec 15.
   let server_heartbeat_timeout = Time_ns.Span.of_sec 60.
@@ -271,14 +374,14 @@ module%test [@name "skewed heartbeat timeouts"] _ = struct
         (description client)
         (reason (
           ("Connection closed by local side:"
-           "No heartbeats received in the time that we sent 4 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:25-05:00, now: 1969-12-31 19:00:44-05:00.")
+           "No messages or heartbeats received in the time that we sent 4 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:25-05:00, now: 1969-12-31 19:00:44-05:00.")
           (connection_description client))))
       ("connection closed"
         (now         "1970-01-01 00:00:25Z")
         (description server)
         (reason (
           ("Connection closed by remote side:"
-           "No heartbeats received in the time that we sent 4 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:25-05:00, now: 1969-12-31 19:00:44-05:00.")
+           "No messages or heartbeats received in the time that we sent 4 heartbeats and were about to send one more. Last seen at: 1969-12-31 19:00:25-05:00, now: 1969-12-31 19:00:44-05:00.")
           (connection_description server))))
       |}];
     return ()

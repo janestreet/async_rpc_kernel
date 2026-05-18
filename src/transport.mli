@@ -8,6 +8,8 @@
 
 open! Core
 open! Async_kernel
+open! Import
+include module type of Async_rpc_kernel_types.Transport
 
 (** Binary headers containing message lengths. All transports should use this to ensure
     binary compatibility. *)
