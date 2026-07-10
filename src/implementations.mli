@@ -16,6 +16,16 @@ type 'connection_state on_unknown_rpc =
     -> rpc_tag:string
     -> version:int
     -> [ `Close_connection | `Continue ]
+  | `Expert of
+    'connection_state
+    -> rpc_tag:string
+    -> version:int
+    -> metadata:Rpc_metadata.V2.t option
+    -> Implementation.Expert.Responder.t
+    -> Bigstring.t
+    -> pos:int
+    -> len:int
+    -> unit Deferred.t
   ]
 
 val create
@@ -86,12 +96,12 @@ module Instance : sig
   (* Stop the instance: drop all responses to pending requests and make all further call
      to [handle_query] or [flush] to fail. *)
   val stop : t -> unit
-  val get_description_from_menu_rank : t -> int -> Description.t global option
+  val get_description_from_menu_rank : t -> int -> Description.t global or_null
 end
 
 val instantiate
   :  'a t
-  -> menu:Menu.t option
+  -> menu:Menu.t or_null
   -> connection_description:Info.Portable.t
   -> connection_close_started:Close_reason.t Deferred.t
   -> connection_state:'a
@@ -100,7 +110,7 @@ val instantiate
   -> on_receive:
        (Description.t
         -> query_id:Query_id.t
-        -> Rpc_metadata.V2.t option
+        -> Rpc_metadata.V2.t or_null
         -> Execution_context.t
         -> Execution_context.t)
   -> no_open_queries_event:(unit, read_write) Bvar.t
@@ -108,16 +118,7 @@ val instantiate
 
 val create_exn
   :  implementations:'connection_state Implementation.t list
-  -> on_unknown_rpc:
-       [ `Raise
-       | `Continue
-       | `Close_connection
-       | `Call of
-         'connection_state
-         -> rpc_tag:string
-         -> version:int
-         -> [ `Close_connection | `Continue ]
-       ]
+  -> on_unknown_rpc:'connection_state on_unknown_rpc
   -> on_exception:On_exception.t
   -> 'connection_state t
 
@@ -170,55 +171,12 @@ module Expert : sig
     val write_bin_prot : t -> 'a Bin_prot.Type_class.writer -> 'a -> unit
     val write_error : t -> Error.t -> unit
   end
-
-  val create_exn
-    :  implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:
-         [ `Raise
-         | `Continue
-         | `Close_connection
-         | `Call of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> [ `Close_connection | `Continue ]
-         | `Expert of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> metadata:Rpc_metadata.V2.t option
-           -> Responder.t
-           -> Bigstring.t
-           -> pos:int
-           -> len:int
-           -> unit Deferred.t
-         ]
-    -> on_exception:On_exception.t
-    -> 'connection_state t
 end
 
 module Private : sig
   val to_implementation_list
     :  'connection_state t
     -> 'connection_state Implementation.t list
-       * [ `Raise
-         | `Continue
-         | `Close_connection
-         | `Call of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> [ `Close_connection | `Continue ]
-         | `Expert of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> metadata:Rpc_metadata.V2.t option
-           -> Expert.Responder.t
-           -> Bigstring.t
-           -> pos:int
-           -> len:int
-           -> unit Deferred.t
-         ]
+       * 'connection_state on_unknown_rpc
        * On_exception.t
 end

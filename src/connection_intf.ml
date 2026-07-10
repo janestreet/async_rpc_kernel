@@ -245,11 +245,15 @@ module type S = sig
   val peer_menu : t -> Menu.t option
 
   val my_menu : t -> Menu.t option
+  val peer_menu_or_null : t -> Menu.t or_null
+  val my_menu_or_null : t -> Menu.t or_null
 
   (** The peer's ID is sent automatically on creation of a connection during the
       handshake, if supported. If the peer is using an older version, the peer ID is
       [None]. *)
   val peer_identification : t -> Bigstring.t option
+
+  val peer_identification_or_null : t -> Bigstring.t or_null
 
   (** [with_close] tries to create a [t] using the given transport. If a handshake error
       is the result, it calls [on_handshake_error], for which the default behavior is to
@@ -323,22 +327,21 @@ module type S_private = sig
     -> Description.t
     -> Query_id.t
     -> dispatch_metadata:Rpc_metadata.V2.t
-    -> Rpc_metadata.V2.t option
+    -> Rpc_metadata.V2.t or_null
 
   module Response_handler_action : sig
     type response_with_determinable_status =
       | Pipe_eof
       | Expert_indeterminate
       | Determinable :
-          ('a Rpc_result.t[@globalized])
-          * ('a Implementation_mode.Error_mode.t[@globalized])
+          'a Rpc_result.t * 'a Implementation_mode.Error_mode.t
           -> response_with_determinable_status
 
     type t =
       | Keep
-      | Wait of (unit Deferred.t[@globalized])
+      | Wait of unit Deferred.t
       | Remove of (response_with_determinable_status, Rpc_error.t Modes.Global.t) result
-      | Expert_remove_and_wait of (unit Deferred.t[@globalized])
+      | Expert_remove_and_wait of unit Deferred.t
   end
 
   module Response_handler : sig
@@ -424,11 +427,11 @@ module type S_private = sig
     :  t
     -> key:Rpc_metadata.V2.Key.t
     -> when_sending:
-         (Description.t -> query_id:Int63.t -> Rpc_metadata.V2.Payload.t option)
+         (Description.t -> query_id:Int63.t -> Rpc_metadata.V2.Payload.t or_null)
     -> on_receive:
          (Description.t
           -> query_id:Int63.t
-          -> Rpc_metadata.V2.Payload.t option
+          -> Rpc_metadata.V2.Payload.t or_null
           -> Execution_context.t
           -> Execution_context.t)
     -> [ `Ok | `Already_set ]

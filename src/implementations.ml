@@ -27,10 +27,6 @@ type 'connection_state on_unknown_rpc =
     -> rpc_tag:string
     -> version:int
     -> [ `Close_connection | `Continue ]
-  ]
-
-type 'connection_state on_unknown_rpc_with_expert =
-  [ 'connection_state on_unknown_rpc
   | `Expert of
     'connection_state
     -> rpc_tag:string
@@ -45,7 +41,7 @@ type 'connection_state on_unknown_rpc_with_expert =
 
 type 'connection_state t =
   { implementations : 'connection_state Implementation.t Description.Table.t
-  ; on_unknown_rpc : 'connection_state on_unknown_rpc_with_expert
+  ; on_unknown_rpc : 'connection_state on_unknown_rpc
   ; on_exception : On_exception.t
   }
 
@@ -74,7 +70,7 @@ module Instance = struct
 
   type 'a unpacked =
     { implementations : ('a implementations[@sexp.opaque])
-    ; menu : Menu.t option
+    ; menu : Menu.t or_null
     ; writer : Protocol_writer.t
     ; tracing_events : (Tracing_event.t -> unit) Bus.Read_write.t
     ; no_open_queries_event : (unit, read_write) Bvar.t
@@ -91,7 +87,7 @@ module Instance = struct
     ; on_receive :
         Description.t
         -> query_id:P.Query_id.t
-        -> Rpc_metadata.V2.t option
+        -> Rpc_metadata.V2.t or_null
         -> Execution_context.t
         -> Execution_context.t
     }
@@ -191,8 +187,8 @@ module Instance = struct
 
   let get_description_from_menu_rank (T t) rank =
     match t.menu with
-    | None -> None
-    | Some menu -> Menu.get menu rank
+    | Null -> Null
+    | This menu -> Menu.get menu rank
   ;;
 
   module Direct_stream_writer = struct
@@ -1130,7 +1126,7 @@ module Instance = struct
     =
     match on_unknown_rpc with
     | `Continue -> Continue
-    | `Raise -> Rpc_error.raise error (Info.of_portable t.connection_description)
+    | `Raise -> Rpc_error.raise error t.connection_description
     | `Close_connection -> Stop (Ok ())
     | `Call f ->
       (match f t.connection_state ~rpc_tag:name ~version with
@@ -1166,11 +1162,11 @@ module Instance = struct
     | None | Some _ ->
       let impl_menu_index =
         match t.menu with
-        | None -> P.Impl_menu_index.none
-        | Some menu ->
+        | Null -> P.Impl_menu_index.none
+        | This menu ->
           (match Menu.index menu description with
-           | None -> P.Impl_menu_index.none
-           | Some index -> P.Impl_menu_index.some (Nat0.of_int_exn index))
+           | Null -> P.Impl_menu_index.none
+           | This index -> P.Impl_menu_index.some (Nat0.of_int_exn index))
       in
       (match Hashtbl.find implementations description with
        | Some implementation ->
@@ -1204,7 +1200,7 @@ module Instance = struct
                 t.connection_state
                 ~rpc_tag
                 ~version
-                ~metadata
+                ~metadata:(Or_null.to_option metadata)
                 responder
                 read_buffer
                 ~pos:!read_buffer_pos_ref
@@ -1287,8 +1283,7 @@ let create ~implementations:i's ~on_unknown_rpc ~on_exception =
     | `Duplicate -> Hash_set.add dups description);
   if not (Hash_set.is_empty dups)
   then Error (`Duplicate_implementations (Hash_set.to_list dups))
-  else
-    Ok { implementations; on_unknown_rpc :> _ on_unknown_rpc_with_expert; on_exception }
+  else Ok { implementations; on_unknown_rpc; on_exception }
 ;;
 
 let instantiate
@@ -1457,8 +1452,6 @@ module Expert = struct
       ()
     ;;
   end
-
-  let create_exn = create_exn
 end
 
 module Private = struct

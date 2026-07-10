@@ -15,7 +15,7 @@ let rpc =
 let custom_metadata_local =
   Type_equal.Id.create
     ~name:"async rpc test metadata"
-    [%sexp_of: string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t option]
+    [%sexp_of: string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t or_null]
 ;;
 
 let implementations =
@@ -27,7 +27,7 @@ let implementations =
         [%message
           (legacy_request : Async_rpc_kernel.Rpc_metadata.V2.Payload.t option)
             (custom_metadata
-             : (string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t option) option)])
+             : (string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t or_null) option)])
   in
   Rpc.Implementations.create_exn
     ~implementations:[ implementation ]
@@ -76,7 +76,7 @@ module%test [@name "single-key tests"] _ = struct
              Async_rpc_kernel.Async_rpc_kernel_private.Connection.set_metadata_hooks
                conn
                ~key:Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
-               ~when_sending:(fun _ ~query_id:_ -> None)
+               ~when_sending:(fun _ ~query_id:_ -> Null)
                ~on_receive:(fun _ ~query_id:_ _ ctx -> ctx)
            with
            | `Ok -> ()
@@ -91,7 +91,7 @@ module%test [@name "single-key tests"] _ = struct
   ;;
 
   let default_when_sending Rpc.Description.{ name; version } ~query_id:_ =
-    Some
+    This
       (name ^ ":" ^ Int.to_string version
        |> Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate)
   ;;
@@ -102,7 +102,7 @@ module%test [@name "single-key tests"] _ = struct
         "on_receive: got metadata"
           ~name
           (version : int)
-          (metadata : Async_rpc_kernel.Rpc_metadata.V2.Payload.t option)];
+          (metadata : Async_rpc_kernel.Rpc_metadata.V2.Payload.t or_null)];
     Async.Execution_context.with_local
       ctx
       custom_metadata_local
@@ -153,7 +153,7 @@ module%test [@name "single-key tests"] _ = struct
             Async_rpc_kernel.Async_rpc_kernel_private.Connection.set_metadata_hooks
               conn
               ~key:Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
-              ~when_sending:(fun _ ~query_id:_ -> None)
+              ~when_sending:(fun _ ~query_id:_ -> Null)
               ~on_receive:default_on_receive
           with
           | `Ok -> ()
@@ -176,7 +176,7 @@ module%test [@name "single-key tests"] _ = struct
 
   let%expect_test "expert unknown rpc handler" =
     let implementations =
-      Rpc.Implementations.Expert.create_exn
+      Rpc.Implementations.create_exn
         ~implementations:[]
         ~on_unknown_rpc:
           (`Expert
@@ -196,7 +196,7 @@ module%test [@name "single-key tests"] _ = struct
                     (metadata : Async_rpc_kernel.Rpc_metadata.V2.t option)
                     ~data_len:(len : int)
                     (Scheduler.find_local custom_metadata_local
-                     : (string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t option)
+                     : (string * int * Async_rpc_kernel.Rpc_metadata.V2.Payload.t or_null)
                          option)];
               Rpc.Rpc.Expert.Responder.write_error
                 responder
@@ -223,7 +223,7 @@ module%test [@name "single-key tests"] _ = struct
             Async_rpc_kernel.Async_rpc_kernel_private.Connection.set_metadata_hooks
               conn
               ~key:Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
-              ~when_sending:(fun _ ~query_id:_ -> None)
+              ~when_sending:(fun _ ~query_id:_ -> Null)
               ~on_receive:default_on_receive
           with
           | `Ok -> ()
@@ -292,7 +292,7 @@ module%test [@name "multi-key tests"] _ = struct
           conn
           ~key
           ~when_sending:(fun (_ : Rpc.Description.t) ~query_id:(_ : Int63.t) ->
-            Some (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate value))
+            This (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate value))
           ~on_receive:(fun _ ~query_id:_ _ ctx -> ctx)
       with
       | `Ok -> ()
@@ -306,9 +306,9 @@ module%test [@name "multi-key tests"] _ = struct
         Async_rpc_kernel.Async_rpc_kernel_private.Connection.set_metadata_hooks
           conn
           ~key
-          ~when_sending:(fun (_ : Rpc.Description.t) ~query_id:(_ : Int63.t) -> None)
+          ~when_sending:(fun (_ : Rpc.Description.t) ~query_id:(_ : Int63.t) -> Null)
           ~on_receive:(fun (_ : Rpc.Description.t) ~query_id:(_ : Int63.t) payload ctx ->
-            Execution_context.with_local ctx context_key payload)
+            Execution_context.with_local ctx context_key (Or_null.to_option payload))
       with
       | `Ok -> ()
       | `Already_set ->

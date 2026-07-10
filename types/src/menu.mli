@@ -30,19 +30,19 @@ val supported_rpcs : t -> Description.t list
     call *)
 val supported_versions : t -> rpc_name:string -> Int.Set.t
 
-val get : t -> int -> Description.t Modes.Global.t option
-val index : t -> Description.t -> int option
-val index__local : t -> tag:string -> version:int -> int option
+val get : t -> int -> Description.t Modes.Global.t or_null
+val index : t -> Description.t -> int or_null
+val index__local : t -> tag:string -> version:int -> int or_null
 
 (** Checks if a given rpc appears in the menu *)
 val mem : t -> Description.t -> bool
 
 val includes_shape_digests : t -> bool
 
-(** Find the shape of the entry in the menu for the given rpc description. Returns None if
-    and only if there is no entry. If the shape is unknown (due to the peer not supporting
-    the latest rpc protocol version), [Some Unknown] is returned. *)
-val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t option
+(** Find the shape of the entry in the menu for the given rpc description. Returns [Null]
+    if and only if there is no entry. If the shape is unknown (due to the peer not
+    supporting the latest rpc protocol version), [This Unknown] is returned. *)
+val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t or_null
 
 (** Similar to [supported_versions] but specific for the usecase of finding an RPC to
     execute. Unlike the roughly equivalent code,
@@ -100,7 +100,7 @@ module Stable : sig
     type response = t [@@deriving bin_io ~localize, globalize, sexp_of]
 
     val bin_read_response__local : response Bin_prot.Read.reader__local
-    val to_v2_response : response -> V2.response option
+    val to_v2_response : response -> V2.response or_null
   end
 end
 

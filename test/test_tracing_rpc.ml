@@ -48,7 +48,7 @@ let write_query ?metadata ?don't_read_yet ?(id = 123) t =
        { tag = Protocol.Rpc_tag.of_string "rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
-       ; metadata
+       ; metadata = Or_null.of_option metadata
        ; data = [%string "example query (id = %{Int.to_string id})"]
        })
 ;;
@@ -166,7 +166,8 @@ let%expect_test "Single rpc implementation raising rpc error" =
   Ivar.fill_exn
     rpc_response
     (Error
-       (Async_rpc_kernel.Rpc_error.Rpc (Unknown (Atom "injected exn"), Info.createf "info")));
+       (Async_rpc_kernel.Rpc_error.Rpc
+          (Unknown (Atom "injected exn"), Info.Portable.createf "info")));
   let%bind () = Scheduler.yield_until_no_jobs_remain () in
   Dynamic.set_root Backtrace.elide false;
   [%expect
@@ -738,7 +739,7 @@ let%expect_test "connection closes before response received" =
 
 let%expect_test "expert unknown rpc handler" =
   let implementations =
-    Rpc.Implementations.Expert.create_exn
+    Rpc.Implementations.create_exn
       ~implementations:[]
       ~on_unknown_rpc:
         (`Expert

@@ -125,7 +125,7 @@ let%expect_test "close with grace period" =
        { tag = Protocol.Rpc_tag.of_string "unit"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn 1
-       ; metadata = None
+       ; metadata = Null
        ; data = ()
        });
   let%bind () = Scheduler.yield_until_no_jobs_remain () in

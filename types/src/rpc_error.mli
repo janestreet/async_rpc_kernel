@@ -9,9 +9,9 @@ val sexp_of_t : t -> Sexp.t
 
 include Stringable.S with type t := t
 
-exception Rpc of t * Info.t
+exception Rpc of t * Info.Portable.t
 
-val raise : t -> Info.t -> 'a
+val raise : t -> Info.Portable.t -> 'a
 val implemented_in_protocol_version : t -> int
 
 val to_error

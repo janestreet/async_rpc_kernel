@@ -123,8 +123,8 @@ let%expect_test "latest version simple RPC dispatches" =
 
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
-        00                             identification= None
-        01                                       menu= Some
+        00                             identification= Null
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -144,7 +144,7 @@ let%expect_test "latest version simple RPC dispatches" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind _response =
         Rpc.Rpc.dispatch_exn Test_helpers.sort_rpc conn (Payload.create ())
@@ -157,7 +157,7 @@ let%expect_test "latest version simple RPC dispatches" =
         01                             specifier= Rank
         00                                        0 (int)
         01                                    id= 1 (int)
-        00                              metadata= None
+        00                              metadata= Null
         0b                                  data= length= 11 (int)
         04                                          body= Array: 4 items
         fe80 01                                           0: 384 (int)
@@ -192,7 +192,7 @@ let%expect_test "latest version simple RPC dispatches" =
         01                             specifier= Rank
         03                                        3 (int)
         02                                    id= 2 (int)
-        00                              metadata= None
+        00                              metadata= Null
         04                                  data= length= 4 (int)
         0366 6f6f                                   body= foo (3 bytes)
 
@@ -216,7 +216,7 @@ let%expect_test "latest version simple RPC dispatches" =
         01                             specifier= Rank
         04                                        4 (int)
         03                                    id= 3 (int)
-        00                              metadata= None
+        00                              metadata= Null
         04                                  data= length= 4 (int)
         0366 6f6f                                   body= foo (3 bytes)
 
@@ -261,8 +261,8 @@ let%expect_test "forced earlier version simple RPC dispatch" =
     0a                             10: 10 (int)
     5000 0000 0000 0000    length= 80 (64-bit LE)
     07                       body= Metadata_v2
-    00                             identification= None
-    01                                       menu= Some
+    00                             identification= Null
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -282,14 +282,14 @@ let%expect_test "forced earlier version simple RPC dispatch" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ======================== payload messages ========================
     1400 0000 0000 0000    length= 20 (64-bit LE)
     09                       body= Query_v3
     0473 6f72 74                        tag= sort (4 bytes)
     01                              version= 1 (int)
     01                                   id= 1 (int)
-    00                             metadata= None
+    00                             metadata= Null
     0a                                 data= length= 10 (int)
     03                                         body= Array: 3 items
     fe66 02                                          0: 614 (int)
@@ -336,8 +336,8 @@ let%expect_test "latest version pipe RPC dispatches" =
 
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
-        00                             identification= None
-        01                                       menu= Some
+        00                             identification= Null
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -357,7 +357,7 @@ let%expect_test "latest version pipe RPC dispatches" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
         Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
@@ -371,7 +371,7 @@ let%expect_test "latest version pipe RPC dispatches" =
         01                             specifier= Rank
         02                                        2 (int)
         04                                    id= 4 (int)
-        00                              metadata= None
+        00                              metadata= Null
         09                                  data= length= 9 (int)
         d1f5 2fe2                                   body= `Query
         04                                          body= length= 4 (int)
@@ -447,8 +447,8 @@ let%expect_test "pipe RPC Response_v1" =
 
         5000 0000 0000 0000    length= 80 (64-bit LE)
         07                       body= Metadata_v2
-        00                             identification= None
-        01                                       menu= Some
+        00                             identification= Null
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -468,7 +468,7 @@ let%expect_test "pipe RPC Response_v1" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind pipe, (_ : Rpc.Pipe_rpc.Metadata.t) =
         Rpc.Pipe_rpc.dispatch_exn Test_helpers.pipe_rpc conn (Bigstring.of_string "foo")
@@ -483,7 +483,7 @@ let%expect_test "pipe RPC Response_v1" =
         7065 2d72 7063                      tag= test-pi... (13 bytes)
         01                              version= 1 (int)
         05                                   id= 5 (int)
-        00                             metadata= None
+        00                             metadata= Null
         09                                 data= length= 9 (int)
         d1f5 2fe2                                  body= `Query
         04                                         body= length= 4 (int)
@@ -720,9 +720,9 @@ let%expect_test "V3 identification string addition" =
 
     0c00 0000 0000 0000    length= 12 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              List: 0 items
     ---   server -> client:   ---
     0900 0000 0000 0000    length= 9 (64-bit LE)
@@ -734,9 +734,9 @@ let%expect_test "V3 identification string addition" =
 
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              List: 6 items
     0473 6f72 74                                    0: 1.    name= sort (4 bytes)
     01                                                    version= 1 (int)
@@ -856,9 +856,9 @@ let%expect_test "V4 close reason addition" =
 
     0c00 0000 0000 0000    length= 12 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              List: 0 items
     ---   server -> client:   ---
     0a00 0000 0000 0000    length= 10 (64-bit LE)
@@ -871,9 +871,9 @@ let%expect_test "V4 close reason addition" =
 
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              List: 6 items
     0473 6f72 74                                    0: 1.    name= sort (4 bytes)
     01                                                    version= 1 (int)
@@ -931,9 +931,9 @@ let%expect_test "V4 close reason addition" =
 
     0c00 0000 0000 0000    length= 12 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              List: 0 items
     ---   server -> client:   ---
     0900 0000 0000 0000    length= 9 (64-bit LE)
@@ -945,9 +945,9 @@ let%expect_test "V4 close reason addition" =
 
     5d00 0000 0000 0000    length= 93 (64-bit LE)
     04                       body= Metadata
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              List: 6 items
     0473 6f72 74                                    0: 1.    name= sort (4 bytes)
     01                                                    version= 1 (int)
@@ -1025,11 +1025,11 @@ let%expect_test "V9 close started addition" =
 
     0d00 0000 0000 0000    length= 13 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   server -> client:   ---
     0f00 0000 0000 0000    length= 15 (64-bit LE)
     0a                       body= List: 10 items
@@ -1046,9 +1046,9 @@ let%expect_test "V9 close started addition" =
 
     5800 0000 0000 0000    length= 88 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -1068,7 +1068,7 @@ let%expect_test "V9 close started addition" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   client -> server:   ---
     0100 0000 0000 0000    length= 1 (64-bit LE)
     0a                       body= Close_started
@@ -1110,11 +1110,11 @@ let%expect_test "V9 close started addition" =
 
     0d00 0000 0000 0000    length= 13 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   server -> client:   ---
     0e00 0000 0000 0000    length= 14 (64-bit LE)
     09                       body= List: 9 items
@@ -1130,9 +1130,9 @@ let%expect_test "V9 close started addition" =
 
     5800 0000 0000 0000    length= 88 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -1152,7 +1152,7 @@ let%expect_test "V9 close started addition" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   client -> server:   ---
     0f00 0000 0000 0000    length= 15 (64-bit LE)
     05                       body= Close_reason
@@ -1192,7 +1192,7 @@ let%expect_test "V2 local rpc" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         06                                   id= 6 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1223,7 +1223,7 @@ let%expect_test "V2 local rpc" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         07                                   id= 7 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1251,7 +1251,7 @@ let%expect_test "V2 local rpc" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         08                                   id= 8 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1504,7 +1504,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         0f                                   id= 15 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1539,7 +1539,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         10                                   id= 16 (int)
-        00                             metadata= None
+        00                             metadata= Null
         01                                 data= length= 1 (int)
         00                                         body= Array: 0 items
         ---   server -> client:   ---
@@ -1560,7 +1560,7 @@ let%expect_test "[V2 -> V2] RPC connection" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         11                                   id= 17 (int)
-        00                             metadata= None
+        00                             metadata= Null
         01                                 data= length= 1 (int)
         00                                         body= Array: 0 items
         ---   server -> client:   ---
@@ -1795,7 +1795,7 @@ let%expect_test "expert v2 dispatch" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         18                                   id= 24 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1826,7 +1826,7 @@ let%expect_test "expert v2 dispatch" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         19                                   id= 25 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -1854,7 +1854,7 @@ let%expect_test "expert v2 dispatch" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         1a                                   id= 26 (int)
-        00                             metadata= None
+        00                             metadata= Null
         0b                                 data= length= 11 (int)
         04                                         body= Array: 4 items
         fe80 01                                          0: 384 (int)
@@ -2120,11 +2120,11 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     0d00 0000 0000 0000    length= 13 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   server -> client:   ---
     1000 0000 0000 0000    length= 16 (64-bit LE)
     0b                       body= List: 11 items
@@ -2142,9 +2142,9 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     5800 0000 0000 0000    length= 88 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -2164,7 +2164,7 @@ let%expect_test "V10 Close_reason_v2 addition" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   client -> server:   ---
     1e00 0000 0000 0000    length= 30 (64-bit LE)
     0b                       body= Close_reason_v2
@@ -2207,11 +2207,11 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     0d00 0000 0000 0000    length= 13 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   server -> client:   ---
     1000 0000 0000 0000    length= 16 (64-bit LE)
     0b                       body= List: 11 items
@@ -2229,9 +2229,9 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     5800 0000 0000 0000    length= 88 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -2251,7 +2251,7 @@ let%expect_test "V10 Close_reason_v2 addition" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   client -> server:   ---
     0f00 0000 0000 0000    length= 15 (64-bit LE)
     05                       body= Close_reason
@@ -2290,11 +2290,11 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     0d00 0000 0000 0000    length= 13 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0763 6c69 6e2d 6964                             clin-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   server -> client:   ---
     0f00 0000 0000 0000    length= 15 (64-bit LE)
     0a                       body= List: 10 items
@@ -2311,9 +2311,9 @@ let%expect_test "V10 Close_reason_v2 addition" =
 
     5800 0000 0000 0000    length= 88 (64-bit LE)
     07                       body= Metadata_v2
-    01                             identification= Some
+    01                             identification= This
     0773 6572 762d 6964                             serv-id (7 bytes)
-    01                                       menu= Some
+    01                                       menu= This
     06                                              descriptions= Array: 6 items
     0473 6f72 74                                                  0:    name= sort (4 bytes)
     01                                                               version= 1 (int)
@@ -2333,7 +2333,7 @@ let%expect_test "V10 Close_reason_v2 addition" =
     0e74 6573 742d 7374    ...
     6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
     01                                                               version= 1 (int)
-    00                                                   digests= None
+    00                                                   digests= Null
     ---   client -> server:   ---
     0f00 0000 0000 0000    length= 15 (64-bit LE)
     05                       body= Close_reason
@@ -2372,11 +2372,11 @@ let%expect_test "[V7 -> V8] Query_v3 compatibility test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         0e00 0000 0000 0000    length= 14 (64-bit LE)
         09                       body= List: 9 items
@@ -2392,9 +2392,9 @@ let%expect_test "[V7 -> V8] Query_v3 compatibility test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2414,7 +2414,7 @@ let%expect_test "[V7 -> V8] Query_v3 compatibility test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -2430,7 +2430,7 @@ let%expect_test "[V7 -> V8] Query_v3 compatibility test" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         1e                                   id= 30 (int)
-        00                             metadata= None
+        00                             metadata= Null
         06                                 data= length= 6 (int)
         05                                         body= Array: 5 items
         05                                               0: 5 (int)
@@ -2486,11 +2486,11 @@ let%expect_test "[V8 -> V7] Query_v3 compatibility test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         08                       body= List: 8 items
@@ -2505,9 +2505,9 @@ let%expect_test "[V8 -> V7] Query_v3 compatibility test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2527,7 +2527,7 @@ let%expect_test "[V8 -> V7] Query_v3 compatibility test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -2543,7 +2543,7 @@ let%expect_test "[V8 -> V7] Query_v3 compatibility test" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         1f                                   id= 31 (int)
-        00                             metadata= None
+        00                             metadata= Null
         06                                 data= length= 6 (int)
         05                                         body= Array: 5 items
         05                                               0: 5 (int)
@@ -2599,11 +2599,11 @@ let%expect_test "[V8 -> V8] Query_v3 same version test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         0e00 0000 0000 0000    length= 14 (64-bit LE)
         09                       body= List: 9 items
@@ -2619,9 +2619,9 @@ let%expect_test "[V8 -> V8] Query_v3 same version test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2641,7 +2641,7 @@ let%expect_test "[V8 -> V8] Query_v3 same version test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -2657,7 +2657,7 @@ let%expect_test "[V8 -> V8] Query_v3 same version test" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         20                                   id= 32 (int)
-        00                             metadata= None
+        00                             metadata= Null
         06                                 data= length= 6 (int)
         05                                         body= Array: 5 items
         05                                               0: 5 (int)
@@ -2715,11 +2715,11 @@ let%expect_test "[V10 -> V11] Query_v4 compatibility test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         1100 0000 0000 0000    length= 17 (64-bit LE)
         0c                       body= List: 12 items
@@ -2738,9 +2738,9 @@ let%expect_test "[V10 -> V11] Query_v4 compatibility test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2760,7 +2760,7 @@ let%expect_test "[V10 -> V11] Query_v4 compatibility test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -2776,7 +2776,7 @@ let%expect_test "[V10 -> V11] Query_v4 compatibility test" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         21                                   id= 33 (int)
-        00                             metadata= None
+        00                             metadata= Null
         06                                 data= length= 6 (int)
         05                                         body= Array: 5 items
         05                                               0: 5 (int)
@@ -2835,11 +2835,11 @@ let%expect_test "[V11 -> V10] Query_v4 compatibility test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         1000 0000 0000 0000    length= 16 (64-bit LE)
         0b                       body= List: 11 items
@@ -2857,9 +2857,9 @@ let%expect_test "[V11 -> V10] Query_v4 compatibility test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2879,7 +2879,7 @@ let%expect_test "[V11 -> V10] Query_v4 compatibility test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -2895,7 +2895,7 @@ let%expect_test "[V11 -> V10] Query_v4 compatibility test" =
         0473 6f72 74                        tag= sort (4 bytes)
         01                              version= 1 (int)
         22                                   id= 34 (int)
-        00                             metadata= None
+        00                             metadata= Null
         06                                 data= length= 6 (int)
         05                                         body= Array: 5 items
         05                                               0: 5 (int)
@@ -2954,11 +2954,11 @@ let%expect_test "[V11 -> V11] Query_v4 same version test" =
 
         0d00 0000 0000 0000    length= 13 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0763 6c69 6e2d 6964                             clin-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         00                                              descriptions= Array: 0 items
-        00                                                   digests= None
+        00                                                   digests= Null
         ---   server -> client:   ---
         1100 0000 0000 0000    length= 17 (64-bit LE)
         0c                       body= List: 12 items
@@ -2977,9 +2977,9 @@ let%expect_test "[V11 -> V11] Query_v4 same version test" =
 
         5800 0000 0000 0000    length= 88 (64-bit LE)
         07                       body= Metadata_v2
-        01                             identification= Some
+        01                             identification= This
         0773 6572 762d 6964                             serv-id (7 bytes)
-        01                                       menu= Some
+        01                                       menu= This
         06                                              descriptions= Array: 6 items
         0473 6f72 74                                                  0:    name= sort (4 bytes)
         01                                                               version= 1 (int)
@@ -2999,7 +2999,7 @@ let%expect_test "[V11 -> V11] Query_v4 same version test" =
         0e74 6573 742d 7374    ...
         6174 652d 7270 63                                             5:    name= test-st... (14 bytes)
         01                                                               version= 1 (int)
-        00                                                   digests= None
+        00                                                   digests= Null
         |}];
       let%bind dispatch_result =
         Rpc.Rpc.dispatch Test_helpers.sort_rpc client [| 5; 4; 3; 2; 1 |]
@@ -3015,7 +3015,7 @@ let%expect_test "[V11 -> V11] Query_v4 same version test" =
         01                             specifier= Rank
         00                                        0 (int)
         23                                    id= 35 (int)
-        00                              metadata= None
+        00                              metadata= Null
         06                                  data= length= 6 (int)
         05                                          body= Array: 5 items
         05                                                0: 5 (int)

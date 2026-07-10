@@ -58,13 +58,13 @@ module For_handshake = struct
            some garabage digest to save computation time while talking to older versions. *)
         let garbage_digest = Rpc_shapes.Just_digests.Unknown in
         let menu =
-          Option.bind menu ~f:(fun menu ->
+          Or_null.bind menu ~f:(fun menu ->
             if Menu.includes_shape_digests menu
             then Menu.Stable.V3.to_v2_response menu
             else
               Menu.supported_rpcs menu
               |> List.map ~f:(fun description -> description, garbage_digest)
-              |> Some)
+              |> This)
         in
         (Transport.Writer.send_bin_prot
            t.writer

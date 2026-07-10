@@ -159,7 +159,7 @@ module Query = struct
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V1.t option
+      ; metadata : Rpc_metadata.V1.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
 
@@ -168,7 +168,7 @@ module Query = struct
       let version = bin_read_int buf ~pos_ref in
       let id = Query_id.bin_read_t__local buf ~pos_ref in
       let metadata =
-        bin_read_option__local Rpc_metadata.V1.bin_read_t__local buf ~pos_ref
+        bin_read_or_null__local Rpc_metadata.V1.bin_read_t__local buf ~pos_ref
       in
       let data = bin_read_el buf ~pos_ref in
       { tag; version; id; metadata; data }
@@ -182,7 +182,7 @@ module Query = struct
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V2.t option
+      ; metadata : Rpc_metadata.V2.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
 
@@ -191,7 +191,7 @@ module Query = struct
       let version = bin_read_int buf ~pos_ref in
       let id = Query_id.bin_read_t__local buf ~pos_ref in
       let metadata =
-        bin_read_option__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
+        bin_read_or_null__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
       in
       let data = bin_read_el buf ~pos_ref in
       { tag; version; id; metadata; data }
@@ -225,7 +225,7 @@ module Query = struct
     type nonrec 'a needs_length = 'a needs_length =
       { specifier : Rpc_specifier.t
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V2.t option
+      ; metadata : Rpc_metadata.V2.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
 
@@ -233,7 +233,7 @@ module Query = struct
       let specifier = Rpc_specifier.bin_read_t__local buf ~pos_ref in
       let id = Query_id.bin_read_t__local buf ~pos_ref in
       let metadata =
-        bin_read_option__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
+        bin_read_or_null__local Rpc_metadata.V2.bin_read_t__local buf ~pos_ref
       in
       let data = bin_read_el buf ~pos_ref in
       { specifier; id; metadata; data }
@@ -284,16 +284,16 @@ module Connection_metadata = struct
     include V1
 
     type nonrec t = t =
-      { identification : Core.Bigstring.Stable.V1.t option
-      ; menu : Menu.Stable.V2.response option
+      { identification : Core.Bigstring.Stable.V1.t Core.Or_null.Stable.V1.t
+      ; menu : Menu.Stable.V2.response Core.Or_null.Stable.V1.t
       }
 
     let bin_read_t__local buf ~pos_ref =
       let identification =
-        bin_read_option__local bin_read_bigstring__local buf ~pos_ref
+        bin_read_or_null__local bin_read_bigstring__local buf ~pos_ref
       in
       let menu =
-        bin_read_option__local Menu.Stable.V2.bin_read_response__local buf ~pos_ref
+        bin_read_or_null__local Menu.Stable.V2.bin_read_response__local buf ~pos_ref
       in
       { identification; menu }
     ;;
@@ -303,16 +303,16 @@ module Connection_metadata = struct
     include V2
 
     type nonrec t = t =
-      { identification : Core.Bigstring.Stable.V1.t option
-      ; menu : Menu.Stable.V3.response option
+      { identification : Core.Bigstring.Stable.V1.t Core.Or_null.Stable.V1.t
+      ; menu : Menu.Stable.V3.response Core.Or_null.Stable.V1.t
       }
 
     let bin_read_t__local buf ~pos_ref =
       let identification =
-        bin_read_option__local bin_read_bigstring__local buf ~pos_ref
+        bin_read_or_null__local bin_read_bigstring__local buf ~pos_ref
       in
       let menu =
-        bin_read_option__local Menu.Stable.V3.bin_read_response__local buf ~pos_ref
+        bin_read_or_null__local Menu.Stable.V3.bin_read_response__local buf ~pos_ref
       in
       { identification; menu }
     ;;
@@ -381,7 +381,7 @@ module Message = struct
         !pos_ref
   ;;
 
-  let bin_read_nat0_t__local = bin_read_t__local Nat0.bin_read_t
+  let bin_read_nat0_t__local buf ~pos_ref = bin_read_t__local Nat0.bin_read_t buf ~pos_ref
 end
 
 module Stream_query = struct
@@ -400,7 +400,9 @@ module Stream_query = struct
         !pos_ref
   ;;
 
-  let bin_read_nat0_t__local = bin_read_needs_length__local Nat0.bin_read_t
+  let bin_read_nat0_t__local buf ~pos_ref =
+    bin_read_needs_length__local Nat0.bin_read_t buf ~pos_ref
+  ;;
 end
 
 module Stream_initial_message = struct
@@ -431,5 +433,7 @@ module Stream_response_data = struct
         !pos_ref
   ;;
 
-  let bin_read_nat0_t__local = bin_read_needs_length__local Nat0.bin_read_t
+  let bin_read_nat0_t__local buf ~pos_ref =
+    bin_read_needs_length__local Nat0.bin_read_t buf ~pos_ref
+  ;;
 end

@@ -23,8 +23,8 @@ module For_handshake : sig
       or if the protocol version doesn't support sending the connection metadata. *)
   val send_connection_metadata_if_supported
     :  t
-    -> Menu.t option
-    -> identification:Bigstring.t option
+    -> Menu.t or_null
+    -> identification:Bigstring.t or_null
     -> (unit, Handshake_error.t) Result.t
 end
 
@@ -54,7 +54,7 @@ module Query : sig
     :  t
     -> 'query Protocol.Query.Validated.t
     -> bin_writer_query:'query Bin_prot.Type_class.writer
-    -> peer_menu:Menu.t option
+    -> peer_menu:Menu.t or_null
     -> unit Transport.Send_result.t
 
   val send_expert
@@ -71,7 +71,7 @@ module Query : sig
           -> pos:int
           -> len:int
           -> 'result Transport.Send_result.t)
-    -> peer_menu:Menu.t option
+    -> peer_menu:Menu.t or_null
     -> 'result Transport.Send_result.t
 end
 

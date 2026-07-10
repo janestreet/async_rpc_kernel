@@ -5,6 +5,8 @@ module Stable = struct
      lot. V1 is the only version supported by the legacy [Versioned_rpc.Menu] rpc. V2 is
      the only version supported in the protocol v3 handshake. *)
 
+  module Or_null = Core.Or_null.Stable
+
   module V1 = struct
     let version = 1
 
@@ -66,7 +68,7 @@ module Stable = struct
 
     type response =
       { descriptions : Description.Stable.V1.t array
-      ; digests : Rpc_shapes.Stable.Just_digests.V1.t array option
+      ; digests : Rpc_shapes.Stable.Just_digests.V1.t array Or_null.V1.t
       }
     [@@deriving bin_io ~localize, globalize, sexp_of]
 
@@ -76,7 +78,7 @@ module Stable = struct
         bin_read_array__local Description.Stable.V1.bin_read_t buf ~pos_ref
       in
       let digests =
-        bin_read_option__local
+        bin_read_or_null__local
           (bin_read_array__local Rpc_shapes.Stable.Just_digests.V1.bin_read_t)
           buf
           ~pos_ref
@@ -86,13 +88,15 @@ module Stable = struct
 
     let%expect_test _ =
       print_endline [%bin_digest: response];
-      [%expect {| 59ecd3468dc49f69d0993360e80aff6d |}]
+      [%expect {| b60375b546f0ed69982e86de633d697d |}]
     ;;
 
     let to_v2_response response =
-      let open Core.Option.Let_syntax in
+      let open Core.Or_null.Let_syntax in
       let%bind digests = response.digests in
-      Core.Array.zip response.descriptions digests >>| Core.Array.to_list
+      Core.Array.zip response.descriptions digests
+      |> Core.Or_null.of_option
+      >>| Core.Array.to_list
     ;;
   end
 end
@@ -115,7 +119,7 @@ type t = Stable.V3.response =
   { descriptions : Description.t array
       (* strictly sorted. One thing we don't do but might want is to make equal names
          phys_equal *)
-  ; digests : Rpc_shapes.Just_digests.t array option
+  ; digests : Rpc_shapes.Just_digests.t array or_null
   (* None means [Unknown] everywhere. Otherwise elements correspond to [descriptions]. *)
   }
 [@@deriving globalize]
@@ -166,8 +170,8 @@ let supported_versions t ~rpc_name =
 
 let get t index =
   if index >= Array.length t.descriptions
-  then None
-  else Some (Modes.Global.wrap t.descriptions.(index))
+  then Null
+  else This (Modes.Global.wrap t.descriptions.(index))
 ;;
 
 let%template index__local t ~tag ~version =
@@ -190,13 +194,13 @@ let%template index__local t ~tag ~version =
         if cmp <= 0 then `Left else `Right)
       `Last_on_left
   with
-  | None -> None
+  | None -> Null
   | Some i ->
     let { Description.name; version } = t.descriptions.(i) in
     if ([%compare.equal: string] [@mode local]) name reference_tag
        && ([%compare.equal: int] [@mode local]) version reference_version
-    then Some i
-    else None
+    then This i
+    else Null
 ;;
 
 (* Even though [description] is annotated local_, the [name] field on [Description.t] is
@@ -208,19 +212,19 @@ let index t description =
 
 let mem t description =
   match index t description with
-  | Some (_ : int) -> true
-  | None -> false
+  | This (_ : int) -> true
+  | Null -> false
 ;;
 
-let includes_shape_digests t = Option.is_some t.digests
+let includes_shape_digests t = Or_null.is_this t.digests
 
 let shape_digests t description =
   match index t description with
-  | None -> None
-  | Some i ->
+  | Null -> Null
+  | This i ->
     (match t.digests with
-     | Some digests -> Some digests.(i)
-     | None -> Some Unknown)
+     | This digests -> This digests.(i)
+     | Null -> This Unknown)
 ;;
 
 (* This function is a bit ugly. We want to (a) avoid allocating, (b) be fast in the case
@@ -290,7 +294,7 @@ let of_supported_rpcs descriptions ~rpc_shapes:`Unknown =
   let descriptions = Array.of_list descriptions in
   Array.sort descriptions ~compare:[%compare: Description.t];
   ensure_no_duplicates descriptions;
-  { descriptions; digests = None }
+  { descriptions; digests = Null }
 ;;
 
 let of_supported_rpcs_and_shapes descriptions_and_shapes =
@@ -302,7 +306,7 @@ let of_supported_rpcs_and_shapes descriptions_and_shapes =
     |> Array.unzip
   in
   ensure_no_duplicates descriptions;
-  { descriptions; digests = Some digests }
+  { descriptions; digests = This digests }
 ;;
 
 let of_v1_response (v1_response : Stable.V1.response) : t =
@@ -312,7 +316,7 @@ let of_v1_response (v1_response : Stable.V1.response) : t =
   in
   Array.sort descriptions ~compare:[%compare: Description.t];
   ensure_no_duplicates descriptions;
-  { descriptions; digests = None }
+  { descriptions; digests = Null }
 ;;
 
 let of_v2_response (v2_response : Stable.V2.response) : t =
@@ -321,13 +325,13 @@ let of_v2_response (v2_response : Stable.V2.response) : t =
     let descriptions = Array.of_list_map v2_response ~f:fst in
     let digests = Array.of_list_map v2_response ~f:snd in
     ensure_no_duplicates descriptions;
-    { descriptions; digests = Some digests })
+    { descriptions; digests = This digests })
   else (
     let items = Array.of_list v2_response in
     Array.sort items ~compare:[%compare: Description.t * _];
     let descriptions, digests = Array.unzip items in
     ensure_no_duplicates descriptions;
-    { descriptions; digests = Some digests })
+    { descriptions; digests = This digests })
 ;;
 
 (* we want a sexp that is useful for debugging. We produce a sexp where the entries look
@@ -336,8 +340,8 @@ let of_v2_response (v2_response : Stable.V2.response) : t =
 let sexp_of_t { descriptions; digests } =
   let with_digest =
     match digests with
-    | Some d -> Array.zip_exn descriptions d |> Array.to_list
-    | None ->
+    | This d -> Array.zip_exn descriptions d |> Array.to_list
+    | Null ->
       Array.to_list descriptions
       |> List.map ~f:(fun desc -> desc, Rpc_shapes.Just_digests.Unknown)
   in
@@ -382,8 +386,8 @@ module With_digests_in_sexp = struct
               let i = lb + i in
               let digest =
                 match t.digests with
-                | Some d -> d.(i)
-                | None -> Unknown
+                | This d -> d.(i)
+                | Null -> Unknown
               in
               let version = t.descriptions.(i).version in
               [%sexp { version : int; digest : Rpc_shapes.Just_digests.t }])
@@ -415,14 +419,14 @@ let highest_shared_version ~rpc_name ~callee_menu ~caller_versions =
 ;;
 
 let check_digests_consistent (t1 : t) (t2 : t) =
-  match Option.both t1.digests t2.digests with
-  | None ->
+  match Or_null.both t1.digests t2.digests with
+  | Null ->
     Or_error.error_s
       [%message
         "Menu missing digests"
-          (t1.digests : Rpc_shapes.Just_digests.t array option)
-          (t2.digests : Rpc_shapes.Just_digests.t array option)]
-  | Some (t1_digests, t2_digests) ->
+          (t1.digests : Rpc_shapes.Just_digests.t array or_null)
+          (t2.digests : Rpc_shapes.Just_digests.t array or_null)]
+  | This (t1_digests, t2_digests) ->
     (* We know that both arrays are sorted which is not verified by the types but is done
        in the constructors. *)
     let rec aux_check_digests_consistent t1_index t2_index =

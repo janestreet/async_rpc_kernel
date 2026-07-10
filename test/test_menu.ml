@@ -95,7 +95,7 @@ module type Menu_intf = sig
   val supported_rpcs : t -> Description.t list
   val supported_versions : t -> rpc_name:string -> Int.Set.t
   val mem : t -> Description.t -> bool
-  val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t option
+  val shape_digests : t -> Description.t -> Rpc_shapes.Just_digests.t or_null
 
   val highest_available_version
     :  t
@@ -139,7 +139,10 @@ module Reference_menu : Menu_intf = struct
   ;;
 
   let shape_digests t desc =
-    List.Assoc.find t ([%globalize: Description.t] desc) ~equal:[%equal: Description.t]
+    List.Assoc.find_or_null
+      t
+      ([%globalize: Description.t] desc)
+      ~equal:[%equal: Description.t]
   ;;
 
   let highest_available_version (t : t) ~rpc_name ~from_sorted_array =
@@ -310,8 +313,8 @@ let%expect_test "mem" =
 
 let%expect_test "shape_digests" =
   do_test
-    [%sexp_of: Rpc_shapes.Just_digests.t option * (string * int)]
-    [%compare: Rpc_shapes.Just_digests.Strict_comparison.t option * _]
+    [%sexp_of: Rpc_shapes.Just_digests.t or_null * (string * int)]
+    [%compare: Rpc_shapes.Just_digests.Strict_comparison.t or_null * _]
     ~seed:8069
     ~f:(fun (module M) x state ->
       let t = M.of_v1_or_v2 x in

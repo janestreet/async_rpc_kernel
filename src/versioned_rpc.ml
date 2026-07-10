@@ -181,7 +181,7 @@ module Callee_converts = struct
           match log_not_previously_seen_version with
           | None -> ignore
           (* prevent calling [f] more than once per version *)
-          | Some f -> Memo.general (f ~name)
+          | Some f -> Memo.general ~hashable:Hashtbl.Hashable.poly (f ~name)
         in
         List.map (Hashtbl.data registry) ~f:(fun (i, _rpc) -> i.implement ~log_version f)
       ;;
@@ -293,7 +293,7 @@ module Callee_converts = struct
           match log_not_previously_seen_version with
           | None -> ignore
           (* prevent calling [f] more than once per version *)
-          | Some f -> Memo.general (f ~name)
+          | Some f -> Memo.general ~hashable:Hashtbl.Hashable.poly (f ~name)
         in
         List.map (Hashtbl.data registry) ~f:(fun (i, _) -> i.implement ~log_version impl)
       ;;
@@ -471,7 +471,7 @@ module Callee_converts = struct
           match log_not_previously_seen_version with
           | None -> ignore
           (* prevent calling [f] more than once per version *)
-          | Some f -> Memo.general (f ~name)
+          | Some f -> Memo.general ~hashable:Hashtbl.Hashable.poly (f ~name)
         in
         List.map (Hashtbl.data registry) ~f:(fun (i, _) -> i.implement ~log_version f)
       ;;
@@ -605,7 +605,7 @@ module Callee_converts = struct
           match log_not_previously_seen_version with
           | None -> ignore
           (* prevent calling [f] more than once per version *)
-          | Some f -> Memo.general (f ~name)
+          | Some f -> Memo.general ~hashable:Hashtbl.Hashable.poly (f ~name)
         in
         List.map (Hashtbl.data registry) ~f:(fun (i, _rpc) -> i.implement ~log_version f)
       ;;
@@ -668,15 +668,15 @@ module Menu = struct
   ;;
 
   let request conn =
-    match Connection.peer_menu conn with
-    | Some menu -> return (Ok menu)
-    | None -> aux_request Rpc.dispatch conn
+    match Connection.peer_menu_or_null conn with
+    | This menu -> return (Ok menu)
+    | Null -> aux_request Rpc.dispatch conn
   ;;
 
   let request' conn =
-    match Connection.peer_menu conn with
-    | Some menu -> return (Ok menu)
-    | None -> aux_request Rpc.dispatch' conn
+    match Connection.peer_menu_or_null conn with
+    | This menu -> return (Ok menu)
+    | Null -> aux_request Rpc.dispatch' conn
   ;;
 
   let implement f = Rpc.implement rpc f

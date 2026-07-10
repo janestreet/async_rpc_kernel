@@ -1,8 +1,8 @@
 (** Metadata is arbitrary information provided by a caller along with the query. It is
     opaque to the Async RPC protocol, and may not be present on all queries. Metadata
     should generally be small, middleware-provided data that does not affect the callee's
-    behavior (e.g. tracing ids). It may be subject to truncation if values provided are
-    too large. See [Connection.create] for more info. *)
+    behavior by default (e.g. tracing ids). It may be subject to truncation if values
+    provided are too large. See [Connection.create] for more info. *)
 
 open! Core
 
@@ -17,7 +17,9 @@ end
 
 module V2 : sig
   module Key : sig
-    type t [@@deriving bin_io, sexp, compare, hash, equal]
+    type t
+    [@@deriving bin_io ~localize, sexp, compare ~localize, hash, equal ~localize]
+    [@@immediate64]
 
     include Comparable.S with type t := t
     include Hashable.S with type t := t
@@ -33,7 +35,7 @@ module V2 : sig
   end
 
   module Payload : sig
-    type t [@@deriving bin_io, sexp, equal]
+    type t [@@deriving bin_io ~localize, globalize, sexp, equal]
 
     val to_string : t -> string
 
@@ -51,16 +53,17 @@ module V2 : sig
   (** [add t ~key ~payload] removes existing entries with the same [key] *)
   val add : t -> key:Key.t -> payload:Payload.t -> t
 
-  val find : t -> key:Key.t -> Payload.t option
+  [%%template:
+  [@@@alloc.default a @ l = (heap_global, stack_local)]
+
+  val find : t -> key:Key.t -> Payload.t or_null
   val singleton : Key.t -> Payload.t -> t
-  val singleton__local : Key.t -> Payload.t -> t
   val to_alist : t -> (Key.t, Payload.t) List.Assoc.t
-  val to_alist__local : t -> (Key.t, Payload.t) List.Assoc.t
+  val to_v1 : t -> V1.t or_null
+  val of_v1 : V1.t -> t]
+
   val of_alist : (Key.t, Payload.t) List.Assoc.t -> t Or_error.t
   val of_table : (Key.t, Payload.t) Hashtbl.t -> t
-  val to_v1 : t -> V1.t option
-  val of_v1 : V1.t -> t
-  val of_v1__local : V1.t -> t
   val truncate_payloads : t -> int -> t
   val bin_read_t__local : t Bin_prot.Read.reader__local
 end
