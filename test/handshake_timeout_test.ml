@@ -134,17 +134,17 @@ let%expect_test "client 60s, server 60s" =
     c_to_s
     0500 0000 0000 0000    length= 5 (64-bit LE)
     07                       body= Metadata_v2
-    00                             identification= None
-    01                                       menu= Some
+    00                             identification= Null
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     s_to_c
     0500 0000 0000 0000    length= 5 (64-bit LE)
     07                       body= Metadata_v2
-    00                             identification= None
-    01                                       menu= Some
+    00                             identification= Null
+    01                                       menu= This
     00                                              descriptions= Array: 0 items
-    00                                                   digests= None
+    00                                                   digests= Null
     ((client_conn (Ok _)) (server_conn (Ok _)))
     (client_menu_from_server (_))
     (server_menu_from_client (_))

@@ -679,7 +679,7 @@ module Streaming_rpc = struct
       { P.Query.Validated.tag = t.tag
       ; version = t.version
       ; id
-      ; metadata = None
+      ; metadata = Null
       ; data = `Abort
       }
     in

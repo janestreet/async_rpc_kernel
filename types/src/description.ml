@@ -6,7 +6,7 @@ module Stable = struct
   module V1 = struct
     module T = struct
       type t =
-        { global_ name : string
+        { name : string @@ global
         ; version : int
         }
       [@@deriving
@@ -30,17 +30,20 @@ module Stable = struct
         [%expect {| 4521f44dbc6098c0afc2770cc84552b1 |}]
       ;;
 
-      include (val Comparator.V1.make ~compare ~sexp_of_t)
+      include
+        (val [%template (Comparator.V1.make [@modality portable]) ~compare ~sexp_of_t])
     end
 
     include T
-    include Comparable.V1.With_stable_witness.Make (T)
+
+    include%template Comparable.V1.With_stable_witness.Make [@modality portable] (T)
   end
 end
 
 include Stable.V1
-include Hashable.Make (Stable.V1)
-include Comparable.Make_using_comparator (Stable.V1)
+
+include%template Hashable.Make [@modality portable] (Stable.V1)
+include%template Comparable.Make_using_comparator [@modality portable] (Stable.V1)
 
 let to_alist ts = List.map ts ~f:(fun { name; version } -> name, version)
 let of_alist list = List.map list ~f:(fun (name, version) -> { name; version })

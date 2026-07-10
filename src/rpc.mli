@@ -49,7 +49,7 @@ open! Import
 
 module Description : sig
   type t = Description.t =
-    { global_ name : string
+    { name : string @@ global
     ; version : int
     }
   [@@deriving compare ~localize, equal ~localize, hash, sexp_of, globalize]
@@ -142,6 +142,11 @@ module Implementations : sig
     -> f:('a Implementation.t list -> 'a Implementation.t list)
     -> ('a t, [ `Duplicate_implementations of Description.t list ]) Result.t
 
+  module Expert : sig
+    (** See [Rpc.Expert.Responder] for how to use this. *)
+    module Responder = Implementations.Expert.Responder
+  end
+
   type 'connection_state on_unknown_rpc =
     [ `Raise
     | `Continue
@@ -152,7 +157,26 @@ module Implementations : sig
       -> version:int
       -> [ `Close_connection | `Continue ]
       (** [rpc_tag] and [version] are the name and version of the unknown rpc *)
+    | `Expert of
+      'connection_state
+      -> rpc_tag:string
+      -> version:int
+      -> metadata:Rpc_metadata.V2.t option
+      -> Expert.Responder.t
+      -> Bigstring.t
+      -> pos:int
+      -> len:int
+      -> unit Deferred.t
+      (** Low-level, untyped access to queries. Regular users should ignore this. The
+          [Deferred.t] the function returns is only used to determine when it is safe to
+          overwrite the supplied [Bigstring.t], so it is *not* necessary to completely
+          finish handling the query before it is filled in. In particular, if you don't
+          intend to read from the [Bigstring.t] after the function returns, you can return
+          [Deferred.unit]. *)
     ]
+    constraint
+      'connection_state on_unknown_rpc =
+      'connection_state Implementations.on_unknown_rpc
 
   (** [create ~implementations ~on_unknown_rpc ~on_exception] creates a server capable of
       responding to the rpcs implemented in the implementation list. Be careful about
@@ -168,16 +192,7 @@ module Implementations : sig
 
   val create_exn
     :  implementations:'connection_state Implementation.t list
-    -> on_unknown_rpc:
-         [ `Raise
-         | `Continue
-         | `Close_connection (** used to be the behavior of [`Ignore] *)
-         | `Call of
-           'connection_state
-           -> rpc_tag:string
-           -> version:int
-           -> [ `Close_connection | `Continue ]
-         ]
+    -> on_unknown_rpc:'connection_state on_unknown_rpc
     -> on_exception:On_exception.t
     -> 'connection_state t
 
@@ -197,45 +212,6 @@ module Implementations : sig
     :  ?exclude_name:string
     -> _ t
     -> (Description.t * Rpc_shapes.Just_digests.t) list
-
-  (** Low-level, untyped access to queries. Regular users should ignore this. *)
-  module Expert : sig
-    (** See [Rpc.Expert.Responder] for how to use this. *)
-    module Responder : sig
-      type t
-    end
-
-    (** Same as [create_exn], except for the additional [`Expert] variant. *)
-    val create_exn
-      :  implementations:'connection_state Implementation.t list
-      -> on_unknown_rpc:
-           [ `Raise
-           | `Continue
-           | `Close_connection (** used to be the behavior of [`Ignore] *)
-           | `Call of
-             'connection_state
-             -> rpc_tag:string
-             -> version:int
-             -> [ `Close_connection | `Continue ]
-           | `Expert of
-             'connection_state
-             -> rpc_tag:string
-             -> version:int
-             -> metadata:Rpc_metadata.V2.t option
-             -> Responder.t
-             -> Bigstring.t
-             -> pos:int
-             -> len:int
-             -> unit Deferred.t
-             (** The [Deferred.t] the function returns is only used to determine when it
-                 is safe to overwrite the supplied [Bigstring.t], so it is *not* necessary
-                 to completely finish handling the query before it is filled in. In
-                 particular, if you don't intend to read from the [Bigstring.t] after the
-                 function returns, you can return [Deferred.unit]. *)
-           ]
-      -> on_exception:On_exception.t
-      -> 'connection_state t
-  end
 
   module Private = Implementations.Private
 end
@@ -373,7 +349,8 @@ module Rpc : sig
 
     (** This just schedules a write, so the [Bigstring.t] should not be overwritten until
         the flushed [Deferred.t] is determined. The return value of [handle_response] has
-        the same meaning as in the function argument of [Implementations.Expert.create].
+        the same meaning as the [Deferred.t] returned from the [`Expert] case of
+        [Implementations.on_unknown_rpc].
 
         [schedule_dispatch] will raise if the length of the RPC message (i.e. [len] plus
         the message header) is longer than the underlying transport's max message size. *)
@@ -391,7 +368,7 @@ module Rpc : sig
     (** [schedule_dispatch_with_metadata] is like [schedule_dispatch] except that instead
         of the rpc metadata coming from metadata hooks added to the connection, it is
         passed directly. This is mostly useful if you are calling this function from an
-        [`Expert] [on_unknown_rpc] handler (see {!Implementations.Expert.create}). *)
+        [`Expert] [on_unknown_rpc] handler (see {!Implementations.create_exn}). *)
     val schedule_dispatch_with_metadata
       :  Connection.t
       -> rpc_tag:string
@@ -770,7 +747,7 @@ module Pipe_rpc : sig
         -> buf:Bigstring.t
         -> pos:int
         -> len:int
-        -> local_ [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ]
+        -> [ `Flushed of unit Deferred.t Modes.Global.t | `Closed ] @ local
     end
 
     (** Group of direct writers. Groups are optimized for sending the same message to

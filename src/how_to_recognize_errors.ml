@@ -21,8 +21,8 @@ module Private = struct
     fun (type r) (errors : r t) : (r -> bool) Staged.t ->
     match errors with
     | Only_on_exn -> stage (fun _ -> false)
-    | Or_error -> stage Result.is_error
-    | Result -> stage Result.is_error
+    | Or_error -> stage (fun r -> Result.is_error r)
+    | Result -> stage (fun r -> Result.is_error r)
     | Or_error_or_error -> as_function Result_result
     | Result_or_error -> as_function Result_result
     | Or_error_result -> as_function Result_result

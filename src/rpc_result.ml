@@ -3,7 +3,7 @@ open Async_kernel
 open! Import
 include Async_rpc_kernel_types.Rpc_result
 
-let try_with ~here (local_ f) ~location ~on_background_exception =
+let try_with ~here (f @ local) ~location ~on_background_exception =
   let result =
     Monitor.try_with_local
       ~here

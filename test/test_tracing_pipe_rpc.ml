@@ -74,7 +74,7 @@ let write_query ?don't_read_yet ?(id = 55) t =
        { tag = Protocol.Rpc_tag.of_string "pipe-rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
-       ; metadata = None
+       ; metadata = Null
        ; data = `Query data
        })
 ;;
@@ -87,7 +87,7 @@ let write_abort ?(id = 55) t =
        { tag = Protocol.Rpc_tag.of_string "pipe-rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
-       ; metadata = None
+       ; metadata = Null
        ; data = `Abort
        })
 ;;
@@ -247,7 +247,7 @@ let%expect_test "Malformed query for pipe-rpc" =
        { tag = Protocol.Rpc_tag.of_string "pipe-rpc"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn 99
-       ; metadata = None
+       ; metadata = Null
        ; data = "malformed"
        });
   [%expect

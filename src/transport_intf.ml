@@ -69,7 +69,7 @@ module type Writer = sig
     :  t
     -> 'a Bin_prot.Type_class.writer
     -> 'a
-    -> local_ unit Send_result.t
+    -> unit Send_result.t @ local
 
   val send_bin_prot_and_bigstring
     :  t
@@ -78,7 +78,7 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> local_ unit Send_result.t
+    -> unit Send_result.t @ local
 
   (** Same as [send_bin_prot_and_bigstring] but the bigstring can't be modified until the
       returned deferred becomes determined. This can be used to avoid copying the
@@ -90,5 +90,5 @@ module type Writer = sig
     -> buf:Bigstring.t
     -> pos:int
     -> len:int
-    -> local_ unit Deferred.t Send_result.t
+    -> unit Deferred.t Send_result.t @ local
 end

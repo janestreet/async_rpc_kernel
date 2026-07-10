@@ -1,9 +1,11 @@
+@@ portable
+
 (** Internal to [Async_rpc_kernel]. See [Rpc.Decscription]. *)
 
 open! Core
 
 type t =
-  { global_ name : string
+  { name : string @@ global
   ; version : int
   }
 [@@deriving bin_io, equal ~localize, compare ~localize, hash, sexp_of, globalize]

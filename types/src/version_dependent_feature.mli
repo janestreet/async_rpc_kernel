@@ -1,3 +1,5 @@
+@@ portable
+
 (** Defines RPC features that are dependent on the protocol version *)
 open! Core
 

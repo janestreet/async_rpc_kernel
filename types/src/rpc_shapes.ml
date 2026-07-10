@@ -18,7 +18,8 @@ module Stable = struct
       end
 
       include T
-      include Binable.Of_sexpable.V2 (T)
+
+      include%template Binable.Of_sexpable.V2 [@modality portable] (T)
     end
   end
 
@@ -47,8 +48,8 @@ module Stable = struct
         let%template[@mode local] equal t1 t2 = ([%compare.equal: t] [@mode local]) t1 t2
         let hash_fold_t s t = Core.Md5.hash_fold_t s (Bin_shape.Digest.to_md5 t)
 
-        include
-          Binable.Of_binable.V2
+        include%template
+          Binable.Of_binable.V2 [@modality portable]
             (Bin_prot.Md5.Stable.V1)
             (struct
               type nonrec t = t
@@ -168,7 +169,7 @@ module Just_digests = struct
     type nonrec t = t [@@deriving compare ~localize]
   end
 
-  let same_kind = Comparable.lift [%equal: int] ~f:Variants.to_rank
+  let same_kind d1 d2 = Comparable.lift [%equal: int] ~f:Variants.to_rank d1 d2
 end
 
 let eval_to_digest (t : t) : Just_digests.t =

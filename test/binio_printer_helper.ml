@@ -291,7 +291,12 @@ let add_base_handlers () =
     let start = !pos in
     let some = Bool.bin_read_t buf ~pos_ref:pos in
     row rows buf ~start ~pos ~level ~prefix (if some then "Some" else "None");
-    if some then parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix:[])
+    if some then parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix:[]);
+  handle1 "or_null" (fun ~env shape rows buf ~pos ~level ~prefix ->
+    let start = !pos in
+    let this = Bool.bin_read_t buf ~pos_ref:pos in
+    row rows buf ~start ~pos ~level ~prefix (if this then "This" else "Null");
+    if this then parse ~env shape rows buf ~pos ~level:(level + 1) ~prefix:[])
 ;;
 
 let () = add_base_handlers ()

@@ -41,7 +41,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
           { msg = Bin_shape.Digest.of_md5 (Md5.digest_string "my-digest") } )
     ]
   in
-  let identification = Some (Bigstring.of_string "my client") in
+  let identification = This (Bigstring.of_string "my client") in
   [ Protocol.Message.Heartbeat
   ; Query_v1 { tag; version = 10; id; data }
   ; Response_v1 { id; data = Ok data }
@@ -62,7 +62,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       { tag
       ; version = 10
       ; id
-      ; metadata = Some (Async_rpc_kernel.Rpc_metadata.V1.of_string "test metadata v1")
+      ; metadata = This (Async_rpc_kernel.Rpc_metadata.V1.of_string "test metadata v1")
       ; data
       }
   ; Query_v3
@@ -70,7 +70,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       ; version = 10
       ; id
       ; metadata =
-          Some
+          This
             (Async_rpc_kernel.Rpc_metadata.V2.singleton
                Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
                (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
@@ -82,7 +82,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       { specifier = Rank 13
       ; id
       ; metadata =
-          Some
+          This
             (Async_rpc_kernel.Rpc_metadata.V2.singleton
                Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
                (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
@@ -94,7 +94,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       { specifier = Tag_and_version (tag, 10)
       ; id
       ; metadata =
-          Some
+          This
             (Async_rpc_kernel.Rpc_metadata.V2.singleton
                Async_rpc_kernel.Rpc_metadata.V2.Key.default_for_legacy
                (Async_rpc_kernel.Rpc_metadata.V2.Payload.of_string_maybe_truncate
@@ -103,7 +103,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       ; data
       }
     (* This allocates: bigstring cannot be allocated on the stack *)
-  ; Metadata { identification; menu = Some menu }
+  ; Metadata { identification; menu = This menu }
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
   ; Close_reason (Info.Portable.create_s [%message "my sexp info"])
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
@@ -111,7 +111,7 @@ let (all_messages : Payload.t Protocol.Message.t list) =
       (Info.Portable.create_s [%message "my sexp info within Close_reason_duplicated"])
     (* This allocates: bigstrings cannot be allocated on the stack, and mutable arrays
        cannot have their elements allocated on the stack *)
-  ; Metadata_v2 { identification; menu = Some (Menu.of_supported_rpcs_and_shapes menu) }
+  ; Metadata_v2 { identification; menu = This (Menu.of_supported_rpcs_and_shapes menu) }
   ; Close_started
     (* This allocates: Info.t is a global ref, and must be allocated globally *)
   ; Close_reason_v2

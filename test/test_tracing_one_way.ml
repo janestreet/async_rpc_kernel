@@ -57,7 +57,7 @@ let write_query ?don't_read_yet ?(id = 100) t =
        { tag = Protocol.Rpc_tag.of_string "one-way"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn id
-       ; metadata = None
+       ; metadata = Null
        ; data = [%string "example message (id = %{Int.to_string id})"]
        })
 ;;
@@ -71,7 +71,7 @@ let write_plain_query t =
        { tag = Protocol.Rpc_tag.of_string "plain"
        ; version = 1
        ; id = Protocol.Query_id.of_int_exn 99
-       ; metadata = None
+       ; metadata = Null
        ; data = -1
        })
 ;;

@@ -15,7 +15,7 @@ module Send_result = struct
 
   type 'a t =
     | Sent of
-        { global_ result : 'a
+        { result : 'a @@ global
         ; bytes : int
         (** Bytes should equal the size of the bin_prot rpc message and data. The total
             bytes written on the network in the standard protocol (which has 8-bytes sizes

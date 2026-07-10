@@ -12,12 +12,15 @@ end
 module V2 = struct
   module Key = struct
     module T = struct
-      type t = int [@@deriving bin_io ~localize, globalize, sexp, compare, hash, equal]
+      type t = int
+      [@@deriving
+        bin_io ~localize, globalize, sexp, compare ~localize, hash, equal ~localize]
     end
 
     include T
-    include Comparable.Make (T)
-    include Hashable.Make (T)
+
+    include%template Comparable.Make [@modality portable] (T)
+    include%template Hashable.Make [@modality portable] (T)
 
     let of_int i = i
     let default_for_legacy = 0
@@ -34,14 +37,8 @@ module V2 = struct
   [@@deriving bin_io ~localize, globalize, sexp_of, equal]
 
   let empty = []
-  let add t ~key ~payload = List.Assoc.add t ~equal:Key.equal key payload
-  let find t ~key = List.Assoc.find t ~equal:Key.equal key
-  let singleton key payload = [ key, payload ]
-  let singleton__local key payload = exclave_ [ key, payload ]
   let of_map map = Map.to_alist map ~key_order:`Increasing
   let of_table = Hashtbl.to_alist
-  let to_alist t = t
-  let to_alist__local t = t
 
   let of_alist alist =
     match Key.Map.of_alist alist with
@@ -49,18 +46,38 @@ module V2 = struct
     | `Duplicate_key key -> Or_error.error_s [%message "Duplicate key" (key : Key.t)]
   ;;
 
-  let to_v1 v2 = find v2 ~key:Key.default_for_legacy
-  let of_v1 v1 = singleton Key.default_for_legacy v1
-  let of_v1__local v1 = exclave_ singleton__local Key.default_for_legacy v1
+  let add t ~key ~payload = List.Assoc.add t ~equal:Key.equal key payload
+
+  [%%template
+  [@@@alloc.default a @ l = (heap_global, stack_local)]
+
+  let find t ~key =
+    (List.Assoc.find_or_null [@mode l])
+      t
+      ~equal:(Key.equal [@mode l])
+      key [@exclave_if_stack a]
+  ;;
+
+  let singleton key payload = [ key, payload ] [@exclave_if_stack a]
+  let to_alist t = t [@exclave_if_stack a]
+  let to_v1 v2 = (find [@alloc a]) v2 ~key:Key.default_for_legacy [@exclave_if_stack a]
+  let of_v1 v1 = (singleton [@alloc a]) Key.default_for_legacy v1 [@exclave_if_stack a]]
 
   let truncate_payloads t max_length =
     List.map t ~f:(fun (key, value) -> key, String.prefix value max_length)
   ;;
 
   let bin_read_t__local =
-    Bin_prot.Read.bin_read_list__local
-      (Bin_prot.Read.bin_read_pair__local
-         Bin_prot.Read.bin_read_int__local
-         Bin_prot.Read.bin_read_string__local)
+    (* This top-level declaration is necessary to avoid allocating this as a closure at
+       the [bin_read_list__local] callsite *)
+    let bin_read_int_string_pair__local buf ~pos_ref = exclave_
+      Bin_prot.Read.bin_read_pair__local
+        Bin_prot.Read.bin_read_int__local
+        Bin_prot.Read.bin_read_string__local
+        buf
+        ~pos_ref
+    in
+    fun buf ~pos_ref -> exclave_
+      Bin_prot.Read.bin_read_list__local bin_read_int_string_pair__local buf ~pos_ref
   ;;
 end

@@ -1,3 +1,5 @@
+@@ portable
+
 open Core
 
 (*_ Menu lives outside of versioned RPC to avoid ciruclar dependencies *)
@@ -5,7 +7,7 @@ open Core
 (** A [Menu.t] represents the RPCs implemented by a peer. In v3 of the async-rpc protocol,
     menus are sent between peers as part of the handshake, and these menus also include
     {!Rpc_shapes.Just_digests.t} of the rpcs. *)
-type t [@@deriving globalize, sexp_of]
+type t : mutable_data [@@deriving globalize, sexp_of]
 
 (** Construct a menu from a list of rpcs. But note this menu won’t know about anything
     about the digests/types of the rpcs. *)
@@ -30,19 +32,19 @@ val supported_rpcs : t -> Description.t list
     call *)
 val supported_versions : t -> rpc_name:string -> Int.Set.t
 
-val get : t -> int -> local_ Description.t Modes.Global.t option
-val index : t -> local_ Description.t -> local_ int option
-val index__local : t -> tag:local_ string -> version:local_ int -> local_ int option
+val get : t -> int -> Description.t Modes.Global.t or_null @ local
+val index : t -> Description.t @ local -> int or_null @ local
+val index__local : t -> tag:string @ local -> version:int @ local -> int or_null @ local
 
 (** Checks if a given rpc appears in the menu *)
-val mem : t -> local_ Description.t -> bool
+val mem : t -> Description.t @ local -> bool
 
 val includes_shape_digests : t -> bool
 
-(** Find the shape of the entry in the menu for the given rpc description. Returns None if
-    and only if there is no entry. If the shape is unknown (due to the peer not supporting
-    the latest rpc protocol version), [Some Unknown] is returned. *)
-val shape_digests : t -> local_ Description.t -> Rpc_shapes.Just_digests.t option
+(** Find the shape of the entry in the menu for the given rpc description. Returns [Null]
+    if and only if there is no entry. If the shape is unknown (due to the peer not
+    supporting the latest rpc protocol version), [This Unknown] is returned. *)
+val shape_digests : t -> Description.t @ local -> Rpc_shapes.Just_digests.t or_null
 
 (** Similar to [supported_versions] but specific for the usecase of finding an RPC to
     execute. Unlike the roughly equivalent code,
@@ -53,7 +55,7 @@ val highest_available_version
   :  t
   -> rpc_name:string
   -> from_sorted_array:int array
-  -> local_ (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t
+  -> (int, [ `Some_versions_but_none_match | `No_rpcs_with_this_name ]) Result.t @ local
 [@@zero_alloc]
 
 (** Helper function for both-convert rpcs. Gives nice error messages. *)
@@ -100,7 +102,7 @@ module Stable : sig
     type response = t [@@deriving bin_io ~localize, globalize, sexp_of]
 
     val bin_read_response__local : response Bin_prot.Read.reader__local
-    val to_v2_response : response -> V2.response option
+    val to_v2_response : response -> V2.response or_null
   end
 end
 

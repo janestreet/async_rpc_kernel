@@ -5,7 +5,7 @@ include module type of Async_rpc_kernel_types.Rpc_result
 
 val try_with
   :  here:Source_code_position.t
-  -> local_ (unit -> 'a t Deferred.t)
+  -> (unit -> 'a t Deferred.t) @ local
   -> location:string
   -> on_background_exception:On_exception.Background_monitor_rest.t option
   -> 'a t Deferred.t

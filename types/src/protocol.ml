@@ -16,11 +16,13 @@ include struct
 end
 
 module Rpc_tag : sig
-  include%template Core.Identifiable [@mode local]
+  type t : immutable_data
 
-  val globalize : local_ t -> t
-  val of_string_local : local_ string -> local_ t
-  val to_string_local : local_ t -> local_ string
+  include%template Core.Identifiable [@mode local] [@modality portable] with type t := t
+
+  val globalize : t @ local -> t
+  val of_string_local : string @ local -> t @ local
+  val to_string_local : t @ local -> string @ local
 end = struct
   include Core.String
 
@@ -29,15 +31,41 @@ end = struct
 end
 
 module Query_id = struct
-  include Core.Unique_id.Int63 ()
+  include Core.Unique_id.Atomic.Int63 ()
 
-  let globalize (local_ t) : t = t
-  let bin_size_t__local (local_ t) = bin_size_t (globalize t)
-  let bin_write_t__local (local_ buf) ~pos (local_ t) = bin_write_t buf ~pos (globalize t)
+  let globalize (t @ local) : t = t
+  let bin_size_t__local (t @ local) = bin_size_t (globalize t)
+
+  let bin_write_t__local (buf @ local) ~pos (t @ local) =
+    bin_write_t buf ~pos (globalize t)
+  ;;
+
+  let%expect_test "[Core.Unique_id.Atomic.Int63] and [Core.Unique_id.Int63] serialize \
+                   identically on the wire"
+    =
+    let module Unique_atomic_int63 = Core_for_testing.Unique_id.Atomic.Int63 () in
+    let module Unique_int63 = Core_for_testing.Unique_id.Int63 () in
+    Core_for_testing.Quickcheck.test
+      Core_for_testing.Int.quickcheck_generator
+      ~sexp_of:Core_for_testing.Int.sexp_of_t
+      ~examples:[ 0; 1; -1; 10; Int.min_int; Int.max_int ]
+      ~f:(fun n ->
+        let atomic_serialized =
+          Core_for_testing.Bin_prot.Writer.to_string
+            Unique_atomic_int63.bin_writer_t
+            (Unique_atomic_int63.of_int_exn n)
+        in
+        let regular_serialized =
+          Core_for_testing.Bin_prot.Writer.to_string
+            Unique_int63.bin_writer_t
+            (Unique_int63.of_int_exn n)
+        in
+        assert (Core_for_testing.String.equal atomic_serialized regular_serialized))
+  ;;
 end
 
 module Unused_query_id : sig
-  type t [@@deriving bin_io ~localize, sexp_of]
+  type t : immutable_data [@@deriving bin_io ~localize, sexp_of]
 
   val singleton : t
 end = struct
@@ -51,10 +79,10 @@ end = struct
   let singleton = Query_id.create ()
 end
 
-module Rpc_error : sig
+module Rpc_error : sig @@ portable
   open Core
 
-  type t =
+  type t : immutable_data =
     | Bin_io_exn of Sexp.t
     | Connection_closed
     | Write_error of Sexp.t
@@ -67,7 +95,7 @@ module Rpc_error : sig
     | Lift_error of Sexp.t
   [@@deriving bin_io ~localize, compare ~localize, globalize, sexp, variants]
 
-  include Comparable.S with type t := t
+  include%template Comparable.S [@modality portable] with type t := t
 end = struct
   module T = struct
     type t =
@@ -142,7 +170,8 @@ end = struct
   ;;
 
   include T
-  include Core.Comparable.Make (T)
+
+  include%template Core.Comparable.Make [@modality portable] (T)
 end
 
 module Rpc_result = struct
@@ -163,27 +192,27 @@ module Connection_metadata = struct
   end
 
   module V1 = struct
-    type t =
-      { identification : Stable_bigstring_v1_with_globalize.t option
-      ; menu : Menu.Stable.V2.response option
+    type t : mutable_data =
+      { identification : Stable_bigstring_v1_with_globalize.t Core.Or_null.Stable.V1.t
+      ; menu : Menu.Stable.V2.response Core.Or_null.Stable.V1.t
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of]
   end
 
   module V2 = struct
-    type t =
-      { identification : Stable_bigstring_v1_with_globalize.t option
-      ; menu : Menu.Stable.V3.response option
+    type t : mutable_data =
+      { identification : Stable_bigstring_v1_with_globalize.t Core.Or_null.Stable.V1.t
+      ; menu : Menu.Stable.V3.response Core.Or_null.Stable.V1.t
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of, fields ~getters]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of, fields ~getters]
 
     let of_v1 { V1.identification; menu } =
-      { identification; menu = Base.Option.map menu ~f:Menu.of_v2_response }
+      { identification; menu = Base.Or_null.map menu ~f:Menu.of_v2_response }
     ;;
 
     let to_v1 t : V1.t =
       { identification = t.identification
-      ; menu = Base.Option.bind t.menu ~f:Menu.Stable.V3.to_v2_response
+      ; menu = Base.Or_null.bind t.menu ~f:Menu.Stable.V3.to_v2_response
       }
     ;;
   end
@@ -193,7 +222,7 @@ module Header = Protocol_version_header
 
 module Query = struct
   module V1 = struct
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
@@ -210,36 +239,36 @@ module Query = struct
   end
 
   module V2 = struct
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V1.t option
+      ; metadata : Rpc_metadata.V1.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of]
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
-      [%expect {| ef70ea2dd0bb812a601d28810e6637d4 |}]
+      [%expect {| d1381ec5617446af76aad2ccba151f14 |}]
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
   end
 
   module V3 = struct
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V2.t option
+      ; metadata : Rpc_metadata.V2.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of]
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
-      [%expect {| 353c0fbd857bef60bcc518055e464468 |}]
+      [%expect {| 5fc7456e3029830c7b230ff883aa3e11 |}]
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
@@ -247,23 +276,23 @@ module Query = struct
 
   module V4 = struct
     module Rpc_specifier = struct
-      type t =
+      type t : immutable_data =
         | Tag_and_version of Rpc_tag.t * int
         | Rank of int
       [@@deriving bin_io ~localize, globalize, sexp_of]
     end
 
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { specifier : Rpc_specifier.t
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V2.t option
+      ; metadata : Rpc_metadata.V2.t Core.Or_null.Stable.V1.t
       ; data : 'a
       }
     [@@deriving bin_io ~localize, globalize, sexp_of]
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
-      [%expect {| 779fa3aaff407a16d3e4444349604e54 |}]
+      [%expect {| b9962a5fd8f44c370fb45b6574f839df |}]
     ;;
 
     type 'a t = 'a needs_length [@@deriving bin_read]
@@ -275,11 +304,11 @@ module Query = struct
        index of the RPC + version in the callee menu), so this Validated type encodes that
        we've received such a message and have appropriately translated it into a known RPC
        tag and version. *)
-    type 'a t =
+    type 'a t : immutable_data with 'a =
       { tag : Rpc_tag.t
       ; version : int
       ; id : Query_id.t
-      ; metadata : Rpc_metadata.V2.t option
+      ; metadata : Rpc_metadata.V2.t Core.Or_null.t
       ; data : 'a
       }
     [@@deriving globalize, sexp_of]
@@ -293,24 +322,24 @@ module Query = struct
       { tag = Rpc_tag.of_string name; version; id; metadata; data }
     ;;
 
-    let of_v4__local (local_ (v4_query : 'a V4.t)) ~(local_ tag) ~version : 'a t
+    let of_v4__local (v4_query : 'a V4.t @ local) ~(tag @ local) ~version : 'a t
       = exclave_
       let { V4.specifier = _; id; metadata; data } = v4_query in
       { tag; version; id; metadata; data }
     ;;
 
-    let to_v4 (t : 'a t @ m) ~(callee_menu : Menu.t option) : 'a V4.t @ m =
+    let to_v4 (t : 'a t @ m) ~(callee_menu : Menu.t Core.Or_null.t) : 'a V4.t @ m =
       (let { tag; version; id; metadata; data } = t in
        let rank =
          match callee_menu with
-         | None -> None
-         | Some callee_menu ->
+         | Base.Null -> Base.Null
+         | Base.This callee_menu ->
            Menu.index__local callee_menu ~tag:(Rpc_tag.to_string_local tag) ~version
        in
        let specifier =
          match rank with
-         | None -> V4.Rpc_specifier.Tag_and_version (tag, version)
-         | Some rank -> V4.Rpc_specifier.Rank rank
+         | Base.Null -> V4.Rpc_specifier.Tag_and_version (tag, version)
+         | Base.This rank -> V4.Rpc_specifier.Rank rank
        in
        { specifier; id; metadata; data })
       [@exclave_if_stack a]
@@ -329,25 +358,27 @@ module Query = struct
     let of_v2 (v2_query : 'a V2.t @ m) : 'a t @ m =
       (let { V2.tag; version; id; metadata; data } = v2_query in
        let metadata =
-         (Base.Option.map [@mode m]) metadata ~f:(Rpc_metadata.V2.of_v1 [@mode m])
+         (Core.Or_null.map [@mode m]) metadata ~f:(Rpc_metadata.V2.of_v1 [@alloc a])
        in
        { tag; version; id; metadata; data })
       [@exclave_if_stack a]
-    ;;]
-
-    let to_v2 (t : 'a t) : 'a V2.t =
-      let { tag; version; id; metadata; data } = t in
-      { tag
-      ; version
-      ; id
-      ; metadata = Base.Option.bind metadata ~f:Rpc_metadata.V2.to_v1
-      ; data
-      }
     ;;
+
+    let to_v2 (t : 'a t @ m) : 'a V2.t @ m =
+      (let { tag; version; id; metadata; data } = t in
+       { tag
+       ; version
+       ; id
+       ; metadata =
+           (Core.Or_null.bind [@mode m]) metadata ~f:(Rpc_metadata.V2.to_v1 [@alloc a])
+       ; data
+       })
+      [@exclave_if_stack a]
+    ;;]
 
     let of_v1 (v1_query : 'a V1.t) : 'a t =
       let { V1.tag; version; id; data } = v1_query in
-      { tag; version; id; metadata = None; data }
+      { tag; version; id; metadata = Base.Null; data }
     ;;
 
     let to_v1 (t : 'a t) : 'a V1.t =
@@ -361,7 +392,7 @@ module Impl_menu_index = Nat0.Option
 
 module Response = struct
   module V1 = struct
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { id : Query_id.t
       ; data : 'a Rpc_result.t
       }
@@ -376,12 +407,12 @@ module Response = struct
   end
 
   module V2 = struct
-    type 'a needs_length =
+    type 'a needs_length : immutable_data with 'a =
       { id : Query_id.t
       ; impl_menu_index : Impl_menu_index.t
       ; data : 'a Rpc_result.t
       }
-    [@@deriving bin_io ~localize, globalize, sexp_of]
+    [@@deriving bin_io ~localize ~portable, globalize, sexp_of]
 
     let%expect_test _ =
       print_endline [%bin_digest: unit needs_length];
@@ -393,7 +424,7 @@ module Response = struct
 end
 
 module Stream_query = struct
-  type 'a needs_length =
+  type 'a needs_length : immutable_data with 'a =
     [ `Query of 'a
     | `Abort
     ]
@@ -408,7 +439,7 @@ module Stream_query = struct
 end
 
 module Stream_initial_message = struct
-  type ('response, 'error) t =
+  type ('response, 'error) t : immutable_data with 'response with 'error =
     { unused_query_id : Unused_query_id.t
     ; initial : ('response, 'error) Core.Result.t
     }
@@ -421,7 +452,7 @@ module Stream_initial_message = struct
 end
 
 module Stream_response_data = struct
-  type 'a needs_length =
+  type 'a needs_length : immutable_data with 'a =
     [ `Ok of 'a
     | `Eof
     ]
@@ -442,7 +473,7 @@ module Message = struct
      [Close_reason]), so clients could send [Close_reason] in either index. Luckily,
      [Metadata_v2] wasn't enabled so old clients can't send that message with the
      incorrect index. *)
-  type 'a maybe_needs_length =
+  type 'a maybe_needs_length : mutable_data with Info_with_local_bin_io.t with 'a =
     | Heartbeat
     | Query_v1 of 'a Query.V1.needs_length
     | Response_v1 of 'a Response.V1.needs_length
@@ -456,18 +487,20 @@ module Message = struct
     | Close_started
     | Close_reason_v2 of Close_reason.Protocol.Binable.t
     | Query_v4 of 'a Query.V4.needs_length
-  [@@deriving bin_io ~localize, globalize, sexp_of, variants]
+  [@@deriving bin_io ~localize ~portable, globalize, sexp_of, variants]
 
   let%expect_test "Stable unless we purposefully add a new variant" =
     print_endline [%bin_digest: unit maybe_needs_length];
-    [%expect {| e8e9e042f02e523140204a2b26159669 |}]
+    [%expect {| 0c52c2d4463055e34701c04c0fe6066f |}]
   ;;
 
-  type 'a t = 'a maybe_needs_length [@@deriving bin_read, sexp_of]
-  type nat0_t = Nat0.t maybe_needs_length [@@deriving bin_read, bin_write]
+  type 'a t = 'a maybe_needs_length [@@deriving bin_read ~portable, sexp_of]
 
-  let globalize_nat0_t =
-    globalize_maybe_needs_length (fun (local_ (nat0 : Nat0.t)) -> nat0)
+  type nat0_t = Nat0.t maybe_needs_length
+  [@@deriving bin_read ~portable, bin_write ~portable]
+
+  let (globalize_nat0_t @ portable) (nat0_t @ local) =
+    globalize_maybe_needs_length (fun (nat0 : Nat0.t @ local) -> nat0) nat0_t
   ;;
 
   let%expect_test "Existing serialization of [Message] is stable" =
@@ -490,7 +523,7 @@ module Message = struct
       ; version = 0
       ; id = Query_id.of_int_exn 1
       ; metadata =
-          Some
+          This
             (Rpc_metadata.V2.singleton
                Rpc_metadata.V2.Key.default_for_legacy
                (Rpc_metadata.V2.Payload.of_string_maybe_truncate "metadata")
@@ -498,7 +531,7 @@ module Message = struct
       ; data = ()
       }
     in
-    let metadata : Connection_metadata.V2.t = { identification = None; menu = None } in
+    let metadata : Connection_metadata.V2.t = { identification = Null; menu = Null } in
     let close_reason = Core.Info.Portable.create_s [%message "Close reason"] in
     let user_close_reason = Core.Info.Portable.create_s [%message "User close reason"] in
     Variants_of_maybe_needs_length.iter
@@ -510,14 +543,14 @@ module Message = struct
       ~query_v2:(print (fun c -> c (Query.Validated.to_v2 query)))
       ~query_v3:(print (fun c -> c (Query.Validated.to_v3 query)))
       ~query_v4:(fun variant ->
-        print (fun c -> c (Query.Validated.to_v4 query ~callee_menu:None)) variant;
+        print (fun c -> c (Query.Validated.to_v4 query ~callee_menu:Null)) variant;
         print
           (fun c ->
             c
               (Query.Validated.to_v4
                  query
                  ~callee_menu:
-                   (Some
+                   (This
                       (Menu.of_supported_rpcs
                          ~rpc_shapes:`Unknown
                          [ { Description.name = "not_the_intended_rpc"; version = 0 }

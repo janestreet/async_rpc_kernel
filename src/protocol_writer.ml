@@ -4,11 +4,11 @@ open! Import
 type t =
   { negotiated_protocol_version : int Set_once.t
   ; writer : Transport.Writer.t
-  ; tracing_events : (local_ Tracing_event.t -> unit) Bus.Read_write.t
+  ; tracing_events : (Tracing_event.t @ local -> unit) Bus.Read_write.t
   }
 [@@deriving sexp_of]
 
-let write_tracing_event t (local_ event) =
+let write_tracing_event t (event @ local) =
   if not (Bus.is_closed t.tracing_events) then Bus.write_local t.tracing_events event
 ;;
 
@@ -23,7 +23,7 @@ let set_negotiated_protocol_version t negotiated_protocol_version =
 ;;
 
 module For_handshake = struct
-  let handle_handshake_result ~step : local_ _ Transport.Send_result.t -> _ = function
+  let handle_handshake_result ~step : _ Transport.Send_result.t @ local -> _ = function
     | Sent { result = (); bytes = (_ : int) } -> Ok ()
     | Closed -> Error (Handshake_error.Transport_closed_during_step step)
     | Message_too_big error ->
@@ -58,13 +58,13 @@ module For_handshake = struct
            some garabage digest to save computation time while talking to older versions. *)
         let garbage_digest = Rpc_shapes.Just_digests.Unknown in
         let menu =
-          Option.bind menu ~f:(fun menu ->
+          Or_null.bind menu ~f:(fun menu ->
             if Menu.includes_shape_digests menu
             then Menu.Stable.V3.to_v2_response menu
             else
               Menu.supported_rpcs menu
               |> List.map ~f:(fun description -> description, garbage_digest)
-              |> Some)
+              |> This)
         in
         (Transport.Writer.send_bin_prot
            t.writer
@@ -229,11 +229,11 @@ module Response = struct
 
   let handle_send_result
     t
-    (local_ qid)
-    (local_ impl_menu_index)
-    (local_ rpc)
-    (local_ kind)
-    (local_ (result : _ Transport.Send_result.t))
+    (qid @ local)
+    (impl_menu_index @ local)
+    (rpc @ local)
+    (kind @ local)
+    (result : _ Transport.Send_result.t @ local)
     =
     let id = (qid : Protocol.Query_id.t :> Int63.t) in
     (match result with

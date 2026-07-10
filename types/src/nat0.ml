@@ -43,15 +43,17 @@ module Option = struct
   module Bin_format = struct
     type t = nat0 option [@@deriving bin_io ~localize]
 
-    let bin_read_t__local =
-      Bin_prot.Read.bin_read_option__local Bin_prot.Read.bin_read_nat0__local
+    let bin_read_t__local buf ~pos_ref = exclave_
+      Bin_prot.Read.bin_read_option__local Bin_prot.Read.bin_read_nat0__local buf ~pos_ref
     ;;
   end
 
-  include (
-    Immediate_kernel.Of_intable.Option.Make (T) : Immediate_option.S with type value := t)
+  include%template (
+    Immediate_kernel.Of_intable.Option.Make [@modality portable]
+      (T) :
+        Immediate_option.S with type value := t)
 
-  let[@zero_alloc opt] of_option__local (local_ o) =
+  let[@zero_alloc opt] of_option__local (o @ local) =
     match o with
     | None -> none
     | Some v -> some v

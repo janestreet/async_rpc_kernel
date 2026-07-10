@@ -389,7 +389,7 @@ let write_handshake ?don't_read_yet t handshake =
     ?don't_read_yet
     t
     [%bin_writer: Protocol.Message.nat0_t]
-    (Metadata { identification = None; menu = None })
+    (Metadata { identification = Null; menu = Null })
 ;;
 
 let write_message ?don't_read_yet t writer (message : _ Protocol.Message.t) =

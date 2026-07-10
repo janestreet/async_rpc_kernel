@@ -23,7 +23,7 @@ module%test [@name "Proxy Server"] _ = struct
   ;;
 
   let proxy_implementations =
-    Rpc.Implementations.Expert.create_exn
+    Rpc.Implementations.create_exn
       ~implementations:[]
       ~on_exception:(Raise_to_monitor Monitor.main)
       ~on_unknown_rpc:

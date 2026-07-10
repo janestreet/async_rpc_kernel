@@ -18,7 +18,7 @@ module Received_response_kind = struct
     | One_way_so_no_response
     | Partial_response
     | Response_finished_ok
-    | Response_finished_rpc_error_or_exn of global_ Rpc_error.t
+    | Response_finished_rpc_error_or_exn of Rpc_error.t @@ global
     | Response_finished_user_defined_error
     | Response_finished_expert_uninterpreted
   [@@deriving sexp, globalize]
@@ -52,7 +52,7 @@ end
 type t =
   { event : Event.t
   ; rpc : Description.t
-  ; global_ id : Int63.t (* Protocol.Query_id.t is not exposed. *)
+  ; id : Int63.t (* Protocol.Query_id.t is not exposed. *) @@ global
   ; payload_bytes : int
   }
 [@@deriving sexp_of, globalize]

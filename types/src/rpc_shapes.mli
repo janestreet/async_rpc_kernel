@@ -1,3 +1,5 @@
+@@ portable
+
 (** A serializable representation of the bin_shape(s) of an RPC. For a regular RPC, this
     is a simple query/response pair. *)
 

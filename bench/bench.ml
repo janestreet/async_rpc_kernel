@@ -331,7 +331,7 @@ module%bench [@name "query metadata"] _ = struct
     { tag = Protocol.Rpc_tag.of_string "tag"
     ; version = 0
     ; id = Protocol.Query_id.of_int_exn 1
-    ; metadata = None
+    ; metadata = Null
     ; data = ()
     }
   ;;
@@ -389,9 +389,9 @@ module%bench [@name "query metadata"] _ = struct
     in
     let metadata =
       if payload_sizes_bytes = 0
-      then None
+      then Null
       else
-        Some
+        This
           (match metadata_type with
            | `V1 | `V2_single ->
              Rpc.Rpc_metadata.V2.of_alist

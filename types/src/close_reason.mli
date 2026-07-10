@@ -56,7 +56,8 @@ module Protocol : sig
      type is exposed so that [dotnet_bin_prot] can see it and generate the correct F#
      type. *)
   module Binable : sig
-    type t [@@deriving bin_io ~localize, globalize, sexp_of]
+    type t : immutable_data with Info_with_local_bin_io.t
+    [@@deriving bin_io ~localize, globalize, sexp_of]
   end
 
   val binable_of_t : t -> Binable.t

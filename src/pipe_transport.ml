@@ -200,7 +200,7 @@ module Pipe_writer (Data : DATA) = struct
   let ready_to_write = flushed
   let sent_result x ~bytes : _ Send_result.t = exclave_ Sent { result = x; bytes }
 
-  let check_closed (t : t) (local_ f) = exclave_
+  let check_closed (t : t) (f @ local) = exclave_
     if not (Pipe.is_closed t.pipe) then f () else Send_result.Closed
   ;;
 

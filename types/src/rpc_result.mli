@@ -1,3 +1,5 @@
+@@ portable
+
 open! Core
 
 type 'a t = 'a Protocol.Rpc_result.t [@@deriving globalize, sexp_of]

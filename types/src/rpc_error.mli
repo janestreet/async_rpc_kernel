@@ -1,3 +1,5 @@
+@@ portable
+
 open! Core
 
 include module type of struct
@@ -9,9 +11,9 @@ val sexp_of_t : t -> Sexp.t
 
 include Stringable.S with type t := t
 
-exception Rpc of t * Info.t
+exception Rpc of t * Info.Portable.t
 
-val raise : t -> Info.t -> 'a
+val raise : t -> Info.Portable.t -> 'a
 val implemented_in_protocol_version : t -> int
 
 val to_error
@@ -20,4 +22,4 @@ val to_error
   -> connection_description:Info.t @ portable
   -> peek_connection_close_started_callback:(unit -> Info.Portable.t or_null @ local)
      @ local
-  -> Error.t
+  -> Error.t @ portable

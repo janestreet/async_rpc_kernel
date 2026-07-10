@@ -8,4 +8,4 @@ val to_error
   -> rpc_description:Description.t
   -> connection_description:Info.t @ portable
   -> connection_close_started:Info.Portable.t Deferred.t
-  -> Error.t
+  -> Error.t @ portable
